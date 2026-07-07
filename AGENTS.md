@@ -5,7 +5,7 @@ Node.js demo app for Deepgram Transcription.
 ## Architecture
 
 - **Backend:** Node.js (JavaScript) on port 8081
-- **Frontend:** Vite + vanilla JS on port 8080 (git submodule: `transcription-html`)
+- **Frontend:** React + Vite on port 8080 (`frontend/`)
 - **API type:** REST — `POST /api/transcription`
 - **Deepgram API:** Pre-recorded Speech-to-Text (`/v1/listen`)
 - **Auth:** JWT session tokens via `/api/session` (WebSocket auth uses `access_token.<jwt>` subprotocol)
@@ -18,8 +18,10 @@ Node.js demo app for Deepgram Transcription.
 | `deepgram.toml` | Metadata, lifecycle commands, tags |
 | `Makefile` | Standardized build/run targets |
 | `sample.env` | Environment variable template |
-| `frontend/main.js` | Frontend logic — UI controls, API calls, result rendering |
-| `frontend/index.html` | HTML structure and UI layout |
+| `frontend/src/main.jsx` | React root render |
+| `frontend/src/App.jsx` | App shell — Router, NavBar, Outlet, Footer |
+| `frontend/src/router.jsx` | Route definitions with React.lazy pages |
+| `frontend/vite.config.js` | Vite + React plugin, /api proxy |
 | `deploy/Dockerfile` | Production container (Caddy + backend) |
 | `deploy/Caddyfile` | Reverse proxy, rate limiting, static serving |
 

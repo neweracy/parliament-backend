@@ -46,7 +46,12 @@ test-results/
 
 # Temporary files
 *.tmp
+tmp_*
 .cache/
+
+# Generated transcripts and local audio samples
+transcripts/
+test_audio/
 
 # Local Deepgram working directory
 .deepgram/

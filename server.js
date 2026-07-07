@@ -13,7 +13,7 @@
  * - Pure API server (frontend served separately)
  */
 
-require("dotenv").config();
+require("dotenv").config({ override: true });
 
 const { createClient } = require("@deepgram/sdk");
 const cors = require("cors");
@@ -23,6 +23,7 @@ const fs = require("fs");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const path = require("path");
+const swaggerUi = require("swagger-ui-express");
 
 // ============================================================================
 // CONFIGURATION - Customize these values for your needs
@@ -148,6 +149,34 @@ const app = express();
 
 // Enable CORS (wildcard is safe -- same-origin via Vite proxy / Caddy in production)
 app.use(cors());
+
+// ============================================================================
+// API DOCS - Swagger UI serving the OpenAPI spec
+// ============================================================================
+
+/**
+ * Load and serve the OpenAPI spec via Swagger UI at /docs
+ */
+function loadOpenApiSpec() {
+  const specPath = path.join(__dirname, "contracts", "interfaces", "transcription", "openapi.yml");
+  if (!fs.existsSync(specPath)) return null;
+
+  const yaml = fs.readFileSync(specPath, "utf-8");
+  // Simple YAML-to-JSON for OpenAPI (handles the subset we use)
+  const lines = yaml.split("\n");
+  // Use a basic approach: just serve the raw YAML via swagger-ui's yamlStr option
+  return yaml;
+}
+
+const openApiYaml = loadOpenApiSpec();
+if (openApiYaml) {
+  app.use("/docs", swaggerUi.serve, swaggerUi.setup(null, {
+    swaggerOptions: { url: "/api/openapi.yml" },
+  }));
+  app.get("/api/openapi.yml", (req, res) => {
+    res.type("text/yaml").send(openApiYaml);
+  });
+}
 
 // ============================================================================
 // HELPER FUNCTIONS - Modular logic for easier understanding and testing
@@ -362,6 +391,15 @@ app.get("/api/metadata", (req, res) => {
  */
 
 // ============================================================================
+// KHAYA AI (GhanaNLP) ASR v3 - African Language Transcription
+// ============================================================================
+
+const khayaRoutes = require("./routes/khaya");
+const khayaProvider = require("./providers/khaya");
+
+app.use("/api/khaya", khayaRoutes(requireSession, upload));
+
+// ============================================================================
 // SERVER START
 // ============================================================================
 
@@ -369,7 +407,15 @@ app.listen(CONFIG.port, CONFIG.host, () => {
   console.log("\n" + "=".repeat(70));
   console.log(`🚀 Backend API running at http://localhost:${CONFIG.port}`);
   console.log(`📡 GET  /api/session`);
-  console.log(`📡 POST /api/transcription (auth required)`);
+  console.log(`📡 POST /api/transcription (auth required) [Deepgram]`);
+  console.log(`📡 POST /api/khaya/transcription (auth required) [Khaya AI]`);
+  console.log(`📡 GET  /api/khaya/languages`);
   console.log(`📡 GET  /api/metadata`);
+  if (openApiYaml) {
+    console.log(`📖 API Docs at http://localhost:${CONFIG.port}/docs`);
+  }
+  if (!khayaProvider.getApiKey()) {
+    console.log(`⚠️  KHAYA_API_KEY not set — Khaya AI endpoints will return 500`);
+  }
   console.log("=".repeat(70) + "\n");
 });
