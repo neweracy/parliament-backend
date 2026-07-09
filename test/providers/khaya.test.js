@@ -182,6 +182,40 @@ describe("providers/khaya - transcribe error branches", () => {
     );
   });
 
+  it("throws statusCode 403 / QUOTA_EXCEEDED / RateLimitError on a 403 quota response", async () => {
+    const { fn } = createFetchMock({
+      ok: false,
+      status: 403,
+      textBody: '{ "statusCode": 403, "message": "Out of call volume quota. Quota will be replenished in 9.00:54:23." }',
+    });
+    global.fetch = fn;
+
+    await assert.rejects(
+      () => khaya.transcribe(audio.mp3.buffer, audio.mp3.mimetype, "tw"),
+      (err) => {
+        assert.equal(err.statusCode, 403);
+        assert.equal(err.code, "QUOTA_EXCEEDED");
+        assert.equal(err.type, "RateLimitError");
+        return true;
+      }
+    );
+  });
+
+  it("throws TRANSCRIPTION_FAILED / TranscriptionError on a non-quota 403 response", async () => {
+    const { fn } = createFetchMock({ ok: false, status: 403, textBody: "Forbidden" });
+    global.fetch = fn;
+
+    await assert.rejects(
+      () => khaya.transcribe(audio.mp3.buffer, audio.mp3.mimetype, "tw"),
+      (err) => {
+        assert.equal(err.statusCode, 403);
+        assert.equal(err.code, "TRANSCRIPTION_FAILED");
+        assert.equal(err.type, "TranscriptionError");
+        return true;
+      }
+    );
+  });
+
   it("throws TRANSCRIPTION_FAILED / TranscriptionError with matching statusCode on generic 5xx", async () => {
     const { fn } = createFetchMock({
       ok: false,

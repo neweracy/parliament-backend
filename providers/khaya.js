@@ -56,16 +56,20 @@ async function transcribe(buffer, mimetype, language) {
   if (!response.ok) {
     const errorText = await response.text();
     const status = response.status;
+    // Khaya signals quota exhaustion with either 429 or a 403 whose body
+    // says "Out of call volume quota".
+    const isQuota =
+      status === 429 || (status === 403 && /quota/i.test(errorText));
     const error = new Error(
       status === 401
         ? "Invalid Khaya API key. Check Ocp-Apim-Subscription-Key."
-        : status === 429
-        ? "Monthly quota exceeded. Upgrade your Khaya AI plan."
+        : isQuota
+        ? "Khaya AI call volume quota exceeded. Upgrade your plan or wait for replenishment."
         : `Khaya AI returned status ${status}: ${errorText}`
     );
     error.statusCode = status;
-    error.code = status === 401 ? "INVALID_API_KEY" : status === 429 ? "QUOTA_EXCEEDED" : "TRANSCRIPTION_FAILED";
-    error.type = status === 401 ? "AuthenticationError" : status === 429 ? "RateLimitError" : "TranscriptionError";
+    error.code = status === 401 ? "INVALID_API_KEY" : isQuota ? "QUOTA_EXCEEDED" : "TRANSCRIPTION_FAILED";
+    error.type = status === 401 ? "AuthenticationError" : isQuota ? "RateLimitError" : "TranscriptionError";
     throw error;
   }
 

@@ -226,6 +226,26 @@ async function transcribeAudio(dgRequest, model = DEFAULT_MODEL) {
 }
 
 /**
+ * Primary transcription wrapper for the hybrid confidence pipeline.
+ *
+ * Unlike the generic transcribeAudio helper, this always requests punctuated
+ * output so the Unified_Transcript reads naturally. Deepgram returns per-word
+ * `confidence`, `start`, and `end` in its default word output, which the hybrid
+ * pipeline relies on via extractWords. Returns the raw SDK response (has a
+ * `.result` property).
+ *
+ * @param {{ buffer: Buffer, mimetype: string }} req - Audio buffer + MIME type
+ * @returns {Promise<Object>} - Raw Deepgram API response
+ */
+async function transcribePrimaryForHybrid({ buffer, mimetype }) {
+  return await deepgram.listen.prerecorded.transcribeFile(buffer, {
+    model: DEFAULT_MODEL,
+    mimetype,
+    punctuate: true,
+  });
+}
+
+/**
  * Formats Deepgram's response into a simplified, consistent structure
  * This is where you'd customize the response format for your application
  *
@@ -400,6 +420,22 @@ const khayaProvider = require("./providers/khaya");
 app.use("/api/khaya", khayaRoutes(requireSession, upload));
 
 // ============================================================================
+// HYBRID CONFIDENCE TRANSCRIPTION - Deepgram + Khaya AI correction pipeline
+// ============================================================================
+
+const { sliceAndConcatAudio } = require("./lib/hybrid/audio-slicer");
+const hybridRoutes = require("./routes/hybrid");
+
+const hybridDeps = {
+  transcribePrimary: transcribePrimaryForHybrid,
+  khayaTranscribe: (buf, mime, lang) => khayaProvider.transcribe(buf, mime, lang),
+  sliceAndConcatAudio: (buf, ranges) => sliceAndConcatAudio(buf, ranges),
+  khayaConfigured: () => Boolean(khayaProvider.getApiKey()),
+};
+
+app.use("/api/transcription/hybrid", hybridRoutes(requireSession, upload, hybridDeps));
+
+// ============================================================================
 // SERVER START
 // ============================================================================
 
@@ -408,6 +444,7 @@ app.listen(CONFIG.port, CONFIG.host, () => {
   console.log(`🚀 Backend API running at http://localhost:${CONFIG.port}`);
   console.log(`📡 GET  /api/session`);
   console.log(`📡 POST /api/transcription (auth required) [Deepgram]`);
+  console.log(`📡 POST /api/transcription/hybrid (auth required) [Hybrid: Deepgram + Khaya]`);
   console.log(`📡 POST /api/khaya/transcription (auth required) [Khaya AI]`);
   console.log(`📡 GET  /api/khaya/languages`);
   console.log(`📡 GET  /api/metadata`);

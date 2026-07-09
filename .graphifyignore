@@ -1,0 +1,35 @@
+# Scope graphify to code only (local tree-sitter AST, no LLM/API key needed).
+# Doc/media/PDF extraction requires an LLM backend — exclude to keep it local & free.
+
+# Dependencies & build output
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+graphify-out/
+
+# Specs, steering, docs, and markdown (would require an LLM semantic pass)
+.kiro/
+docs/
+*.md
+*.mdx
+*.pdf
+*.txt
+
+# Assets & media
+frontend/src/assets/
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.gif
+*.mp3
+*.wav
+*.mp4
+
+# Vendored submodule / generated contracts
+contracts/
+
+# Env & secrets
+.env
+*.env

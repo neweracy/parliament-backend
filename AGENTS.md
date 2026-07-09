@@ -1,29 +1,36 @@
 # node-transcription
 
-Node.js demo app for Deepgram Transcription.
+Node.js transcription app with two AI engines: Deepgram (Speech-to-Text) and Khaya AI (Ghanaian languages).
 
 ## Architecture
 
-- **Backend:** Node.js (JavaScript) on port 8081
-- **Frontend:** React + Vite on port 8080 (`frontend/`)
-- **API type:** REST — `POST /api/transcription`
-- **Deepgram API:** Pre-recorded Speech-to-Text (`/v1/listen`)
-- **Auth:** JWT session tokens via `/api/session` (WebSocket auth uses `access_token.<jwt>` subprotocol)
+- **Backend:** Node.js / Express on port 8081 (`server.js`, CommonJS)
+- **Frontend:** React + Vite + TypeScript on port 8080 (`frontend/`, ES modules + JSX/TSX)
+- **API type:** REST
+- **Deepgram API:** Pre-recorded Speech-to-Text (`/v1/listen`) via `@deepgram/sdk`
+- **Khaya AI:** GhanaNLP ASR v3 for African languages (Twi, Ewe, Ga, and more)
+- **Auth:** JWT session tokens via `/api/session`, enforced by `requireSession` middleware
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `server.js` | Main backend — API endpoints and request handlers |
+| `server.js` | Main backend — Deepgram routes, session auth, metadata, helpers |
+| `providers/khaya.js` | Khaya AI ASR provider (transcribe + getLanguages) |
+| `routes/khaya.js` | Express router for Khaya endpoints, mounted at `/api/khaya` |
 | `deepgram.toml` | Metadata, lifecycle commands, tags |
 | `Makefile` | Standardized build/run targets |
 | `sample.env` | Environment variable template |
-| `frontend/src/main.jsx` | React root render |
-| `frontend/src/App.jsx` | App shell — Router, NavBar, Outlet, Footer |
-| `frontend/src/router.jsx` | Route definitions with React.lazy pages |
-| `frontend/vite.config.js` | Vite + React plugin, /api proxy |
+| `frontend/src/main.tsx` | React root render |
+| `frontend/src/App.tsx` | App shell — NavBar, Outlet, Footer, ThemeProvider |
+| `frontend/src/router.tsx` | Route definitions with React.lazy pages |
+| `frontend/src/pages/` | Landing, Transcribe, Projects, History, About |
+| `frontend/src/services/` | Pure-JS/TS service layer (transcription, history-repo, project-repo, export) |
+| `frontend/vite.config.ts` | Vite + React plugin, `/api` proxy to backend |
 | `deploy/Dockerfile` | Production container (Caddy + backend) |
 | `deploy/Caddyfile` | Reverse proxy, rate limiting, static serving |
+
+See `frontend/AGENTS.md` for frontend-specific conventions.
 
 ## Quick Start
 
@@ -32,7 +39,7 @@ Node.js demo app for Deepgram Transcription.
 make init
 
 # Set up environment
-test -f .env || cp sample.env .env  # then set DEEPGRAM_API_KEY
+test -f .env || cp sample.env .env  # then set DEEPGRAM_API_KEY (and KHAYA_API_KEY)
 
 # Start both servers
 make start
@@ -42,10 +49,7 @@ make start
 
 ## Start / Stop
 
-**Start (recommended):**
-```bash
-make start
-```
+**Start (recommended):** `make start`
 
 **Start separately:**
 ```bash
@@ -56,10 +60,7 @@ node server.js
 cd frontend && corepack pnpm run dev -- --port 8080 --no-open
 ```
 
-**Stop all:**
-```bash
-lsof -ti:8080,8081 | xargs kill -9 2>/dev/null
-```
+**Stop all:** `lsof -ti:8080,8081 | xargs kill -9 2>/dev/null`
 
 **Clean rebuild:**
 ```bash
@@ -69,104 +70,78 @@ make init
 
 ## Dependencies
 
-- **Backend:** `package.json` — Uses `corepack pnpm` — Node's built-in package manager version pinning.
-- **Frontend:** `frontend/package.json` — Vite dev server
-- **Submodules:** `frontend/` (transcription-html), `contracts/` (starter-contracts)
+- **Backend:** root `package.json` — managed with `corepack pnpm` (pinned to v10.0.0). Pin exact versions (no `^`/`~`).
+- **Frontend:** `frontend/package.json` — Vite dev server, React, React Router, Framer Motion, daisyUI.
+- **Submodules:** `frontend/` and `contracts/` (conformance tests).
 
-Install: `corepack pnpm install`
-Frontend: `cd frontend && corepack pnpm install`
+Install: `corepack pnpm install` — Frontend: `cd frontend && corepack pnpm install`
 
 ## API Endpoints
 
 | Endpoint | Method | Auth | Purpose |
 |----------|--------|------|---------|
 | `/api/session` | GET | None | Issue JWT session token |
-| `/api/metadata` | GET | None | Return app metadata (useCase, framework, language) |
-| `/api/transcription` | POST | JWT | Transcribes audio files or URLs using Deepgram's pre-recorded API. |
+| `/api/metadata` | GET | None | App metadata (useCase, framework, language) |
+| `/api/transcription` | POST | JWT | Transcribe audio file/URL via Deepgram pre-recorded API |
+| `/api/khaya/transcription` | POST | JWT | Transcribe audio via Khaya AI (requires `language` code) |
+| `/api/khaya/languages` | GET | None | List Khaya-supported languages |
 
-## Customization Guide
+## Backend Conventions
 
-### Changing the Default Model
-In the backend, find the `DEFAULT_MODEL` or `model` variable (typically near the top of the file or in the transcription handler). Change it to any supported model:
-- `nova-3` (default, best accuracy)
-- `nova-2` (previous generation)
-- `base` (fastest, lower accuracy)
+- CommonJS (`require`/`module.exports`), Express 5.x, `cors`, Multer memory storage.
+- All protected routes use the `requireSession` JWT middleware.
+- Error responses follow a consistent shape: `{ error: { type, code, message } }`.
+- Add new endpoints after existing routes, before `app.listen`, and log them in the startup banner.
 
-The frontend also has a model dropdown — update `frontend/main.js` if you want to change the default selection there.
+### Khaya AI Notes
 
-### Adding Deepgram Features
-The transcription API accepts many options. Add them to the options object passed to the SDK or API call:
-
-| Feature | Parameter | Example Value | Effect |
-|---------|-----------|---------------|--------|
-| Language | `language` | `"es"`, `"fr"` | Transcribe non-English audio |
-| Diarization | `diarize` | `true` | Identify different speakers |
-| Punctuation | `punctuate` | `true` | Add punctuation to transcript |
-| Smart Format | `smart_format` | `true` | Format numbers, dates, etc. |
-| Paragraphs | `paragraphs` | `true` | Add paragraph breaks |
-| Utterances | `utterances` | `true` | Split by speaker turns |
-| Keywords | `keywords` | `["deepgram"]` | Boost specific terms |
-| Redaction | `redact` | `["pci", "ssn"]` | Redact sensitive data |
-| Summarize | `summarize` | `"v2"` | Add a summary |
-| Topics | `topics` | `true` | Detect topics |
-| Sentiment | `detect_topics` | `true` | Detect sentiment |
-
-**Backend change:** Add parameters to the SDK call options object or API query string.
-
-**Frontend change (optional):** Add UI controls (checkboxes, dropdowns) in `frontend/main.js` and pass them as form data or query parameters.
-
-### Changing Input Modes
-The app supports two input modes:
-1. **File upload** — User uploads an audio file
-2. **URL** — User provides a URL to an audio file
-
-To add a new pre-defined URL, edit `frontend/index.html` and add a radio button option.
-
-### Modifying the Response Format
-The `formatTranscriptionResponse()` function in the backend shapes what the frontend receives. You can include extra fields from Deepgram's response (words with timestamps, confidence scores, speaker labels, etc.).
-
-## Frontend Changes
-
-The frontend is a git submodule from `deepgram-starters/transcription-html`. To modify:
-
-1. **Edit files in `frontend/`** — this is the working copy
-2. **Test locally** — changes reflect immediately via Vite HMR
-3. **Commit in the submodule:** `cd frontend && git add . && git commit -m "feat: description"`
-4. **Push the frontend repo:** `cd frontend && git push origin main`
-5. **Update the submodule ref:** `cd .. && git add frontend && git commit -m "chore(deps): update frontend submodule"`
-
-**IMPORTANT:** Always edit `frontend/` inside THIS starter directory. The standalone `transcription-html/` directory at the monorepo root is a separate checkout.
-
-### Adding a UI Control for a New Feature
-1. Add the HTML element in `frontend/index.html` (input, checkbox, dropdown, etc.)
-2. Read the value in `frontend/main.js` when making the API call or opening the WebSocket
-3. Pass it as a query parameter or request body field
-4. Handle it in the backend `server.js` — read the param and pass it to the Deepgram API
+- Khaya requires an explicit `language` code per request and does **not** auto-detect language.
+- Supported codes include Twi (`tw`), Ewe (`ee`), Ga (`gaa`), Dagbani (`dag`).
+- Configured via `KHAYA_API_KEY`; endpoints return 500 if unset.
 
 ## Environment Variables
 
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
 | `DEEPGRAM_API_KEY` | Yes | — | Deepgram API key |
+| `KHAYA_API_KEY` | For Khaya | — | Khaya AI (GhanaNLP) subscription key |
+| `KHAYA_ASR_VERSION` | No | `v3` | Khaya ASR version |
 | `PORT` | No | `8081` | Backend server port |
 | `HOST` | No | `0.0.0.0` | Backend bind address |
 | `SESSION_SECRET` | No | — | JWT signing secret (production) |
 
+## Specs
+
+Feature specs live in `.kiro/specs/`. Each has `requirements.md`, `design.md`, and `tasks.md`.
+Consult the relevant spec before implementing a feature it covers (e.g. `hybrid-confidence-transcription`).
+
+## Knowledge Graph (graphify)
+
+A local knowledge graph lives in `graphify-out/`. For codebase, architecture, or dependency
+questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or
+`graphify explain "<concept>"` over grepping. Rebuild after code changes with
+`graphify update . --no-cluster` (local AST, no API key needed).
+
 ## Conventional Commits
 
-All commits must follow conventional commits format. Never include `Co-Authored-By` lines for Claude.
+All commits must follow conventional commits format. Never include `Co-Authored-By` lines.
 
 ```
 feat(node-transcription): add diarization support
-fix(node-transcription): resolve WebSocket close handling
+fix(node-transcription): resolve session handling
 refactor(node-transcription): simplify session endpoint
 chore(deps): update frontend submodule
 ```
 
+Scope is typically `node-transcription` or `deps`.
+
 ## Testing
 
 ```bash
-# Run conformance tests (requires app to be running)
+# Backend unit tests
+corepack pnpm test
+
+# Conformance tests (requires app running)
 make test
 
 # Manual endpoint check

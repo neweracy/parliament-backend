@@ -36,12 +36,14 @@
     "cors": "2.8.5",
     "dotenv": "17.2.3",
     "express": "5.2.1",
+    "ffmpeg-static": "5.3.0",
     "jsonwebtoken": "9.0.2",
     "multer": "2.0.2",
     "swagger-ui-express": "5.0.1",
     "toml": "3.0.0"
   },
   "devDependencies": {
+    "fast-check": "4.8.0",
     "nodemon": "3.1.10",
     "supertest": "7.2.2"
   },
