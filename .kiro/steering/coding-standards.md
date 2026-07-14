@@ -6,13 +6,13 @@ inclusion: always
 
 ## JavaScript Style
 
-- Backend uses CommonJS (`require`/`module.exports`)
-- Frontend uses ES modules with JSX (`import`/`export`, `.jsx` extension for React components)
-- No TypeScript — plain JavaScript with JSX
-- Use JSDoc comments for function documentation where helpful
+- Backend uses CommonJS (`require`/`module.exports`) — plain JavaScript, no TypeScript
+- Frontend uses TypeScript with JSX (`.tsx` for components, `.ts` for services/utils/hooks)
+- Use JSDoc comments for function documentation where helpful (required for exported backend functions)
 - Prefer `const` over `let`; avoid `var`
 - Use async/await over raw Promises
 - Error responses follow a consistent structure: `{ error: { type, code, message } }`
+- Any function returning a Promise (e.g. `async function`) must be `await`ed at every call site — an un-awaited async call passed to `res.json()` silently serializes as an empty object with no thrown error
 
 ## Frontend Conventions
 
@@ -34,6 +34,8 @@ inclusion: always
 - Configuration via environment variables (dotenv)
 - Structured error responses with type, code, and message fields
 - TOML metadata file (`deepgram.toml`) for app info
+- Post-processing datasets (`lib/location-correction/*-dataset.js`) are the single source of truth for Ghana entities — both the rule-based engine and the Bedrock prompt read from them, so add new entities once
+- Bedrock/AWS SDK calls must fail non-fatally — catch and log, fall back to the rule-based result, never throw past the route handler
 
 ## Dependencies
 

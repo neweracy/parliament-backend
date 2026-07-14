@@ -38,6 +38,9 @@ Multi-stage build:
 |----------|----------|-------|
 | `DEEPGRAM_API_KEY` | Yes | Set via `fly secrets set` |
 | `SESSION_SECRET` | Yes | Set a strong random value in prod |
+| `KHAYA_API_KEY` | No | Enables Khaya AI transcription + hybrid pipeline |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | No | Enables Bedrock LLM post-processing; requires a valid AWS Marketplace payment method or model calls fail (non-fatally) |
+| `AWS_REGION` / `BEDROCK_MODEL_ID` | No | Bedrock region + model override; defaults to `us-east-1` and Claude Haiku 4.5 |
 | `PORT` | No | Defaults to 8081 |
 | `HOST` | No | Defaults to 0.0.0.0 |
 
