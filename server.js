@@ -26,6 +26,7 @@ const path = require("path");
 const swaggerUi = require("swagger-ui-express");
 const { correctLocations, getPartyAbbr, isTitle } = require("./lib/location-correction");
 const { postProcessWithBedrock, isBedrockConfigured } = require("./lib/location-correction/bedrock-postprocess");
+const { correctYears, correctYearsInText } = require("./lib/location-correction/year-correction");
 
 // ============================================================================
 // CONFIGURATION - Customize these values for your needs
@@ -263,6 +264,10 @@ async function formatTranscriptionResponse(transcriptionResponse, modelName) {
     throw new Error("No transcription results returned from Deepgram");
   }
 
+  // Preserve raw (unprocessed) transcript and words before any corrections
+  const rawTranscript = result.transcript || "";
+  const rawWordsOriginal = (result.words || []).map(w => ({ ...w }));
+
   // Run location correction on transcript text (handles multi-word joins)
   const correctedTranscript = correctLocations(result.transcript || "");
 
@@ -274,7 +279,9 @@ async function formatTranscriptionResponse(transcriptionResponse, modelName) {
     'his','her','their','our','my','your','as','so','if','not','through','has','had','have',
     'constituency','traditional','area','alongside','among','these','those','region',
     'district','municipal','metropolitan','assembly','parliament','bill','motion',
-    'committee','minister','speaker','members','distinguished']);
+    'committee','minister','speaker','members','distinguished',
+    'general','attorney','justice','deputy','leader','majority','minority',
+    'page','paper','order','number','same']);
 
   for (let i = 0; i < rawWords.length; i++) {
     const w = rawWords[i];
@@ -327,6 +334,55 @@ async function formatTranscriptionResponse(transcriptionResponse, modelName) {
       continue;
     }
 
+    // Try 3-word join first (e.g. "ninggu pram pram" → "Ningo-Prampram")
+    if (i + 2 < rawWords.length) {
+      const w2 = rawWords[i + 1];
+      const w3 = rawWords[i + 2];
+      if (!wordStopwords.has(w2.word?.toLowerCase()) && !wordStopwords.has(w3.word?.toLowerCase()) && w2.word && w3.word) {
+        const triple = w.word + ' ' + w2.word + ' ' + w3.word;
+        const tripleResult = correctLocations(triple);
+        if (tripleResult.corrections.length > 0 && tripleResult.corrections[0].confidence >= 0.90) {
+          const corr = tripleResult.corrections[0];
+          if (corr.original.toLowerCase() === triple.toLowerCase()) {
+            words.push({
+              ...w,
+              word: tripleResult.text,
+              end: w3.end,
+              locationCorrected: true,
+              entityKind: corr.entityKind,
+              entityType: corr.entityType,
+            });
+            i += 2; // skip next 2 words
+            continue;
+          }
+        }
+      }
+    }
+
+    // Try 2-word join (only if next word isn't a stopword)
+    if (i + 1 < rawWords.length) {
+      const next = rawWords[i + 1];
+      if (!wordStopwords.has(next.word?.toLowerCase()) && next.word) {
+        const pair = w.word + ' ' + next.word;
+        const pairResult = correctLocations(pair);
+        if (pairResult.corrections.length > 0 && pairResult.corrections[0].confidence >= 0.90) {
+          const corr = pairResult.corrections[0];
+          if (corr.original.toLowerCase() === pair.toLowerCase()) {
+            words.push({
+              ...w,
+              word: pairResult.text,
+              end: next.end,
+              locationCorrected: true,
+              entityKind: corr.entityKind,
+              entityType: corr.entityType,
+            });
+            i++; // skip next word
+            continue;
+          }
+        }
+      }
+    }
+
     // Try single-word correction. Short abbreviations (e.g. "NDC", "NPP")
     // are allowed through at length >= 3 since party abbreviations are
     // exactly 3-4 letters; everything else requires length >= 4 to avoid
@@ -364,48 +420,28 @@ async function formatTranscriptionResponse(transcriptionResponse, modelName) {
       }
     }
 
-    // Try 2-word join (only if next word isn't a stopword)
-    if (i + 1 < rawWords.length) {
-      const next = rawWords[i + 1];
-      if (!wordStopwords.has(next.word?.toLowerCase()) && next.word) {
-        const pair = w.word + ' ' + next.word;
-        const pairResult = correctLocations(pair);
-        if (pairResult.corrections.length > 0 && pairResult.corrections[0].confidence >= 0.90) {
-          const corr = pairResult.corrections[0];
-          // Only accept this as a merged pair-replacement if the correction
-          // actually spans the WHOLE pair (e.g. "pram pram" -> "Prampram").
-          // If it only matched a sub-span (e.g. "congress ndc" -> corrects
-          // just "ndc"), fall through so each word is handled individually
-          // instead of duplicating the untouched word.
-          if (corr.original.toLowerCase() === pair.toLowerCase()) {
-            words.push({
-              ...w,
-              word: pairResult.text,
-              end: next.end,
-              locationCorrected: true,
-              entityKind: corr.entityKind,
-              entityType: corr.entityType,
-            });
-            i++; // skip next word
-            continue;
-          }
-        }
-      }
-    }
-
     words.push(w);
   }
 
+  // === Year/Date Correction (rule-based, runs on words array) ===
+  const yearResult = correctYears(words);
+  const yearCorrectedWords = yearResult.words;
+  const yearTextResult = correctYearsInText(correctedTranscript.text);
+
   // Build response object
   const response = {
-    transcript: correctedTranscript.text,
-    words,
+    transcript: yearTextResult.text,
+    words: yearCorrectedWords,
     metadata: {
       model_uuid: transcription.metadata?.model_uuid,
       request_id: transcription.metadata?.request_id,
       model_name: modelName,
     },
   };
+
+  if (yearResult.corrections.length > 0) {
+    response.metadata.year_corrections = yearResult.corrections.length;
+  }
 
   // Record how many misspellings were actually fixed
   if (correctedTranscript.corrections.length > 0) {
@@ -455,6 +491,12 @@ async function formatTranscriptionResponse(transcriptionResponse, modelName) {
       console.error('Bedrock post-processing error (non-fatal):', err.message);
     }
   }
+
+  // Include raw (unprocessed) transcript for comparison view
+  response.raw = {
+    transcript: rawTranscript,
+    words: rawWordsOriginal,
+  };
 
   return response;
 }
@@ -613,6 +655,43 @@ const hybridDeps = {
 };
 
 app.use("/api/transcription/hybrid", hybridRoutes(requireSession, upload, hybridDeps));
+
+// ============================================================================
+// AUDIO PROXY — allows the frontend WaveformPlayer to load remote audio
+// that would otherwise be blocked by CORS (e.g. Deepgram static examples).
+// ============================================================================
+
+app.get("/api/audio-proxy", async (req, res) => {
+  const audioUrl = req.query.url;
+  if (!audioUrl) {
+    return res.status(400).json(formatErrorResponse(new Error("Missing url query parameter"), 400));
+  }
+
+  try {
+    const upstream = await fetch(audioUrl);
+    if (!upstream.ok) {
+      return res.status(upstream.status).json(
+        formatErrorResponse(new Error(`Upstream returned ${upstream.status}`), upstream.status)
+      );
+    }
+
+    // Forward content-type and stream the body
+    const contentType = upstream.headers.get("content-type") || "audio/mpeg";
+    const contentLength = upstream.headers.get("content-length");
+    res.setHeader("Content-Type", contentType);
+    if (contentLength) res.setHeader("Content-Length", contentLength);
+    res.setHeader("Cache-Control", "public, max-age=3600");
+
+    // Use Node.js Readable stream from the fetch body
+    const { Readable } = require("stream");
+    const readable = Readable.fromWeb(upstream.body);
+    readable.pipe(res);
+  } catch (err) {
+    if (!res.headersSent) {
+      res.status(502).json(formatErrorResponse(err, 502));
+    }
+  }
+});
 
 // ============================================================================
 // SERVER START
