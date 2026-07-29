@@ -1,0 +1,7 @@
+{
+  "_redirect": "This corpus has been retired. The authoritative source is fixtures/golden-corpus/corpus.json at the repository root.",
+  "_reason": "Requirement 2.1 — single source of truth for test fixtures. See .kiro/specs/code-cleanup-optimization/design.md.",
+  "_migrated_to": "fixtures/golden-corpus/corpus.json",
+  "version": "RETIRED",
+  "cases": []
+}
