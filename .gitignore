@@ -63,5 +63,10 @@ graphify-out/cache/
 graphify-out/cost.json
 graphify-out/memory/
 
-# kiro
-.kiro/
+# Hypothesis property-testing database
+.hypothesis/
+
+# kiro — settings and steering are local, but specs are tracked
+.kiro/settings/
+.kiro/steering/
+.kiro/skills/
