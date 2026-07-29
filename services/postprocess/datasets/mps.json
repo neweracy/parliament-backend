@@ -1,0 +1,797 @@
+[
+  {
+    "canonical": "Alban Sumana Kingsford Bagbin",
+    "constituency": "Nadowli/Kaleo",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Bagbin",
+      "Speaker Bagbin",
+      "Rt Hon Bagbin",
+      "Alban Bagbin"
+    ]
+  },
+  {
+    "canonical": "Alexander Kwamena Afenyo-Markin",
+    "constituency": "Effutu",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Afenyo-Markin",
+      "Afenyo Markin"
+    ]
+  },
+  {
+    "canonical": "Cassiel Ato Forson",
+    "constituency": "Ajumako-Enyan-Essiam",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Ato Forson",
+      "Dr Ato Forson",
+      "Cassiel Ato"
+    ]
+  },
+  {
+    "canonical": "Haruna Iddrisu",
+    "constituency": "Tamale South",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Haruna",
+      "Haruna Iddrissu",
+      "Haruna Idrissu"
+    ]
+  },
+  {
+    "canonical": "Abdul Rauf Tongym Tubazu",
+    "constituency": "Ayawaso Central",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Tubazu"
+    ]
+  },
+  {
+    "canonical": "Abdul Aziz Fatahiya",
+    "constituency": "Savelugu",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Fatahiya"
+    ]
+  },
+  {
+    "canonical": "Abdul Kabiru Tiah Mahama",
+    "constituency": "Walewale",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Tiah Mahama"
+    ]
+  },
+  {
+    "canonical": "Abdul-Fatawu Alhassan",
+    "constituency": "Yendi",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Abdul-Fatawu"
+    ]
+  },
+  {
+    "canonical": "Abdul-Khaliq Mohammed Sherif",
+    "constituency": "Nanton",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Sherif",
+      "Abdul-Khaliq"
+    ]
+  },
+  {
+    "canonical": "Abdul-Rashid Hassan Pelpuo",
+    "constituency": "Wa Central",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Pelpuo",
+      "Dr Pelpuo"
+    ]
+  },
+  {
+    "canonical": "Abdul-Salam Adams",
+    "constituency": "New Edubiase",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Abdul-Salam"
+    ]
+  },
+  {
+    "canonical": "Abed-Nego Lamangin Bandim",
+    "constituency": "Bunkpurugu",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Bandim"
+    ]
+  },
+  {
+    "canonical": "Abena Osei-Asare",
+    "constituency": "Atiwa East",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Osei-Asare",
+      "Abena Osei Asare"
+    ]
+  },
+  {
+    "canonical": "Abla Dzifa Gomashie",
+    "constituency": "Ketu South",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Dzifa Gomashie",
+      "Gomashie"
+    ]
+  },
+  {
+    "canonical": "Adama Sulemana",
+    "constituency": "Tain",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Adama"
+    ]
+  },
+  {
+    "canonical": "Adelaide Ntim",
+    "constituency": "Nsuta/Kwaman Beposo",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Adelaide"
+    ]
+  },
+  {
+    "canonical": "Agnes Naa Momo Lartey",
+    "constituency": "Krowor",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Naa Momo",
+      "Agnes Lartey"
+    ]
+  },
+  {
+    "canonical": "Ahmed Ibrahim",
+    "constituency": "Banda",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Ahmed Ibrahim"
+    ]
+  },
+  {
+    "canonical": "Akwasi Konadu",
+    "constituency": "Manhyia North",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Konadu"
+    ]
+  },
+  {
+    "canonical": "Albert Tetteh Nyakotey",
+    "constituency": "Yilo Krobo",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Nyakotey"
+    ]
+  },
+  {
+    "canonical": "Alexander Roosevelt Hottordze",
+    "constituency": "Central Tongu",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Hottordze"
+    ]
+  },
+  {
+    "canonical": "Alexander Akwasi Acquah",
+    "constituency": "Akim Oda",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Acquah"
+    ]
+  },
+  {
+    "canonical": "Alfred Okoe Vanderpuije",
+    "constituency": "Ablekuma South",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Vanderpuije",
+      "Okoe Vanderpuye"
+    ]
+  },
+  {
+    "canonical": "Andrew Asiamah Amoako",
+    "constituency": "Fomena",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Asiamah Amoako"
+    ]
+  },
+  {
+    "canonical": "Ayariga Mahama",
+    "constituency": "Bawku Central",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Ayariga"
+    ]
+  },
+  {
+    "canonical": "Samuel Okudzeto Ablakwa",
+    "constituency": "North Tongu",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Ablakwa",
+      "Okudzeto Ablakwa",
+      "Okudzeto"
+    ]
+  },
+  {
+    "canonical": "Samuel Nartey George",
+    "constituency": "Ningo-Prampram",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Sam George",
+      "Nartey George",
+      "Sam Nartey George"
+    ]
+  },
+  {
+    "canonical": "John Abdulai Jinapor",
+    "constituency": "Damongo",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Jinapor",
+      "John Jinapor"
+    ]
+  },
+  {
+    "canonical": "Ibrahim Murtala Mohammed",
+    "constituency": "Tamale Central",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Murtala Mohammed",
+      "Ibrahim Murtala"
+    ]
+  },
+  {
+    "canonical": "Kwabena Minta Akandoh",
+    "constituency": "Juaboso",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Akandoh",
+      "Minta Akandoh"
+    ]
+  },
+  {
+    "canonical": "Mohammed Mubarak Muntaka",
+    "constituency": "Asawase",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Muntaka",
+      "Mubarak Muntaka"
+    ]
+  },
+  {
+    "canonical": "Dominic Ayine",
+    "constituency": "Bolgatanga East",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Dr Ayine",
+      "Dominic Akuritinga Ayine"
+    ]
+  },
+  {
+    "canonical": "Emmanuel Armah-Kofi Buah",
+    "constituency": "Ellembele",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Armah-Kofi Buah",
+      "Emmanuel Buah"
+    ]
+  },
+  {
+    "canonical": "Governs Kwame Agbodza",
+    "constituency": "Adaklu",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Agbodza",
+      "Governs Agbodza"
+    ]
+  },
+  {
+    "canonical": "Eric Opoku",
+    "constituency": "Asunafo South",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Eric Opoku"
+    ]
+  },
+  {
+    "canonical": "Elizabeth Ofosu Agyare",
+    "constituency": "Akwatia",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Ofosu Agyare"
+    ]
+  },
+  {
+    "canonical": "Kojo Oppong Nkrumah",
+    "constituency": "Ofoase Ayirebi",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Oppong Nkrumah",
+      "Kojo Oppong"
+    ]
+  },
+  {
+    "canonical": "Ursula Owusu-Ekuful",
+    "constituency": "Ablekuma West",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Ursula Owusu",
+      "Owusu-Ekuful"
+    ]
+  },
+  {
+    "canonical": "Matthew Opoku Prempeh",
+    "constituency": "Manhyia South",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "NAPO",
+      "Opoku Prempeh"
+    ]
+  },
+  {
+    "canonical": "Osei Kyei-Mensah-Bonsu",
+    "constituency": "Suame",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Kyei-Mensah-Bonsu"
+    ]
+  },
+  {
+    "canonical": "Dan Botwe",
+    "constituency": "Okere",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Dan Botwe",
+      "Dan Kwaku Botwe"
+    ]
+  },
+  {
+    "canonical": "Ken Ofori-Atta",
+    "constituency": "Abuakwa South",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Ofori-Atta",
+      "Ken Ofori Atta"
+    ]
+  },
+  {
+    "canonical": "Godfred Yeboah Dame",
+    "constituency": "Abuakwa North",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Godfred Dame"
+    ]
+  },
+  {
+    "canonical": "Francis Asenso-Boakye",
+    "constituency": "Bantama",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Asenso-Boakye"
+    ]
+  },
+  {
+    "canonical": "Joseph Osei-Owusu",
+    "constituency": "Bekwai",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Osei-Owusu",
+      "Joe Wise"
+    ]
+  },
+  {
+    "canonical": "Kwaku Agyeman-Manu",
+    "constituency": "Dormaa Central",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Agyeman-Manu"
+    ]
+  },
+  {
+    "canonical": "Dominic Nitiwul",
+    "constituency": "Bimbilla",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Nitiwul"
+    ]
+  },
+  {
+    "canonical": "Alan Kyerematen",
+    "constituency": "",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Kyerematen",
+      "Alan Cash",
+      "Alan Kyeremanteng"
+    ]
+  },
+  {
+    "canonical": "Ignatius Baffuor Awuah",
+    "constituency": "Sunyani West",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Baffuor Awuah"
+    ]
+  },
+  {
+    "canonical": "Kwasi Amoako-Atta",
+    "constituency": "Atiwa West",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Amoako-Atta",
+      "Amoako Attah"
+    ]
+  },
+  {
+    "canonical": "Samuel Abu Jinapor",
+    "constituency": "Damongo",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Abu Jinapor"
+    ]
+  },
+  {
+    "canonical": "Ambrose Dery",
+    "constituency": "Nandom",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Dery",
+      "Ambrose Derry"
+    ]
+  },
+  {
+    "canonical": "Bede Anwataazumo Ziedeng",
+    "constituency": "Lawra",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Ziedeng"
+    ]
+  },
+  {
+    "canonical": "Benjamin Narteh Ayiku",
+    "constituency": "Ledzokuku",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Ayiku"
+    ]
+  },
+  {
+    "canonical": "Alhassan Tampuli Sulemana",
+    "constituency": "Gushegu",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Tampuli"
+    ]
+  },
+  {
+    "canonical": "Andrew Dari Chiwitey",
+    "constituency": "Sawla/Tuna/Kalba",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Chiwitey"
+    ]
+  },
+  {
+    "canonical": "Bawah Muhammad Braimah",
+    "constituency": "Ejura Sekyeredumase",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Braimah"
+    ]
+  },
+  {
+    "canonical": "Anthony Mwinkaara Sumah",
+    "constituency": "Nadowli/Kaleo",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Sumah"
+    ]
+  },
+  {
+    "canonical": "Patrick Yaw Boamah",
+    "constituency": "Okaikwei Central",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Boamah"
+    ]
+  },
+  {
+    "canonical": "Bryan Acheampong",
+    "constituency": "Abetifi",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Bryan Acheampong"
+    ]
+  },
+  {
+    "canonical": "Lydia Seyram Alhassan",
+    "constituency": "Ayawaso West Wuogon",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Lydia Alhassan"
+    ]
+  },
+  {
+    "canonical": "Mavis Hawa Koomson",
+    "constituency": "Awutu Senya East",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Hawa Koomson"
+    ]
+  },
+  {
+    "canonical": "Sarah Adwoa Safo",
+    "constituency": "Dome Kwabenya",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Adwoa Safo"
+    ]
+  },
+  {
+    "canonical": "Henry Quartey",
+    "constituency": "Ayawaso Central",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Quartey"
+    ]
+  },
+  {
+    "canonical": "Kwame Anyimadu-Antwi",
+    "constituency": "Asante Akim Central",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Anyimadu-Antwi"
+    ]
+  },
+  {
+    "canonical": "Mark Assibey-Yeboah",
+    "constituency": "New Juaben South",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Assibey-Yeboah"
+    ]
+  },
+  {
+    "canonical": "Ebenezer Kojo Kum",
+    "constituency": "Ahanta West",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Kojo Kum"
+    ]
+  },
+  {
+    "canonical": "Kwabena Mintah Akandoh",
+    "constituency": "Juaboso",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Akandoh"
+    ]
+  },
+  {
+    "canonical": "Yaw Buaben Asamoa",
+    "constituency": "Adentan",
+    "party": "NPP",
+    "role": "",
+    "aliases": [
+      "Buaben Asamoa"
+    ]
+  },
+  {
+    "canonical": "Emmanuel Kwasi Bedzrah",
+    "constituency": "Ho West",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Bedzrah"
+    ]
+  },
+  {
+    "canonical": "Nii Lante Vanderpuije",
+    "constituency": "Odododiodio",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Nii Lante"
+    ]
+  },
+  {
+    "canonical": "Rockson-Nelson Dafeamekpor",
+    "constituency": "South Dayi",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Dafeamekpor"
+    ]
+  },
+  {
+    "canonical": "Mahama Ayariga",
+    "constituency": "Bawku Central",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Ayariga"
+    ]
+  },
+  {
+    "canonical": "Clement Apaak",
+    "constituency": "Builsa South",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Apaak",
+      "Dr Apaak"
+    ]
+  },
+  {
+    "canonical": "Isaac Adongo",
+    "constituency": "Bolgatanga Central",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Adongo"
+    ]
+  },
+  {
+    "canonical": "Kofi Adams",
+    "constituency": "Buem",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Kofi Adams"
+    ]
+  },
+  {
+    "canonical": "James Klutse Avedzi",
+    "constituency": "Ketu North",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Avedzi"
+    ]
+  },
+  {
+    "canonical": "Ras Mubarak",
+    "constituency": "Kumbungu",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Ras Mubarak"
+    ]
+  },
+  {
+    "canonical": "Inusah Fuseini",
+    "constituency": "Tamale Central",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Inusah Fuseini",
+      "Fusheini"
+    ]
+  },
+  {
+    "canonical": "Alhassan Suhuyini",
+    "constituency": "Tamale North",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Suhuyini"
+    ]
+  },
+  {
+    "canonical": "Peter Nortsu-Kotoe",
+    "constituency": "Akatsi North",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Nortsu-Kotoe"
+    ]
+  },
+  {
+    "canonical": "Zanetor Agyeman-Rawlings",
+    "constituency": "Klottey Korle",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Zanetor",
+      "Agyeman-Rawlings"
+    ]
+  },
+  {
+    "canonical": "Kwame Agbodza",
+    "constituency": "Adaklu",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Agbodza"
+    ]
+  },
+  {
+    "canonical": "Fiifi Kwetey",
+    "constituency": "Keta",
+    "party": "NDC",
+    "role": "",
+    "aliases": [
+      "Fiifi Kwetey",
+      "Kwetey"
+    ]
+  }
+]

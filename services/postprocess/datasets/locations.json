@@ -1,0 +1,2629 @@
+[
+  {
+    "canonical": "Greater Accra",
+    "entity_type": "region",
+    "region": "",
+    "aliases": [],
+    "source": "regions"
+  },
+  {
+    "canonical": "Ashanti",
+    "entity_type": "region",
+    "region": "",
+    "aliases": [],
+    "source": "regions"
+  },
+  {
+    "canonical": "Western",
+    "entity_type": "region",
+    "region": "",
+    "aliases": [],
+    "source": "regions"
+  },
+  {
+    "canonical": "Western North",
+    "entity_type": "region",
+    "region": "",
+    "aliases": [],
+    "source": "regions"
+  },
+  {
+    "canonical": "Central",
+    "entity_type": "region",
+    "region": "",
+    "aliases": [],
+    "source": "regions"
+  },
+  {
+    "canonical": "Eastern",
+    "entity_type": "region",
+    "region": "",
+    "aliases": [],
+    "source": "regions"
+  },
+  {
+    "canonical": "Volta",
+    "entity_type": "region",
+    "region": "",
+    "aliases": [],
+    "source": "regions"
+  },
+  {
+    "canonical": "Oti",
+    "entity_type": "region",
+    "region": "",
+    "aliases": [],
+    "source": "regions"
+  },
+  {
+    "canonical": "Northern",
+    "entity_type": "region",
+    "region": "",
+    "aliases": [],
+    "source": "regions"
+  },
+  {
+    "canonical": "Savannah",
+    "entity_type": "region",
+    "region": "",
+    "aliases": [],
+    "source": "regions"
+  },
+  {
+    "canonical": "North East",
+    "entity_type": "region",
+    "region": "",
+    "aliases": [],
+    "source": "regions"
+  },
+  {
+    "canonical": "Upper East",
+    "entity_type": "region",
+    "region": "",
+    "aliases": [],
+    "source": "regions"
+  },
+  {
+    "canonical": "Upper West",
+    "entity_type": "region",
+    "region": "",
+    "aliases": [],
+    "source": "regions"
+  },
+  {
+    "canonical": "Bono",
+    "entity_type": "region",
+    "region": "",
+    "aliases": [],
+    "source": "regions"
+  },
+  {
+    "canonical": "Bono East",
+    "entity_type": "region",
+    "region": "",
+    "aliases": [],
+    "source": "regions"
+  },
+  {
+    "canonical": "Ahafo",
+    "entity_type": "region",
+    "region": "",
+    "aliases": [],
+    "source": "regions"
+  },
+  {
+    "canonical": "Abeka",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Ablekuma North",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Abokobi",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Accra",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Accra New Town",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Ada Foah",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Adenta",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Amasaman",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Ashiaman",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Dansoman",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Dodowa",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Dzorwulu",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kokomlemle",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kpone",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "La",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Latebiokorshie",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Madina",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Ngleshie Amanfrom",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nima",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nungua",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Ofankor",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Osu",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Prampram",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Sege",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Sowutuom",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Tema",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Tema Community 2",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Teshie",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Weija",
+    "entity_type": "city",
+    "region": "Greater Accra",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Adugyama",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Agogo",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Agona",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Akomadan",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Akrofuom",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Asiwa",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Asokore",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Asokwa",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Barekese",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Bekwai",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Boaman",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Drobonso",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Edubia",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Effiduase",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Ejisu",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Ejura",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Foase",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Fomena",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Jacobu",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Juaben",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Juaso",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kodie",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Konongo-Odumase",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kumasi",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kumawu",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kuntenase",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kwadaso",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Mampong",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Mamponteng",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Mankranso",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Manso Nkwanta",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "New Edubiase",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nkawie",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nsuta",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nyinahin",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Obuasi",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Offinso",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Oforikrom",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Old Tafo",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Suame",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Tepa",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Tutuka",
+    "entity_type": "city",
+    "region": "Ashanti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Agona Nkwanta",
+    "entity_type": "city",
+    "region": "Western",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Asankragu",
+    "entity_type": "city",
+    "region": "Western",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Axim",
+    "entity_type": "city",
+    "region": "Western",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Bogoso",
+    "entity_type": "city",
+    "region": "Western",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Daboase",
+    "entity_type": "city",
+    "region": "Western",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Dixcove",
+    "entity_type": "city",
+    "region": "Western",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Elubo",
+    "entity_type": "city",
+    "region": "Western",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Half Assini",
+    "entity_type": "city",
+    "region": "Western",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kwesimintsim",
+    "entity_type": "city",
+    "region": "Western",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Mpohor",
+    "entity_type": "city",
+    "region": "Western",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nkroful",
+    "entity_type": "city",
+    "region": "Western",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Prestea",
+    "entity_type": "city",
+    "region": "Western",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Sekondi-Takoradi",
+    "entity_type": "city",
+    "region": "Western",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Shama",
+    "entity_type": "city",
+    "region": "Western",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Tarkwa",
+    "entity_type": "city",
+    "region": "Western",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Wassa Akropong",
+    "entity_type": "city",
+    "region": "Western",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Adabokrom",
+    "entity_type": "city",
+    "region": "Western North",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Akontombra",
+    "entity_type": "city",
+    "region": "Western North",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Bibiani",
+    "entity_type": "city",
+    "region": "Western North",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Bodi",
+    "entity_type": "city",
+    "region": "Western North",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Dadieso",
+    "entity_type": "city",
+    "region": "Western North",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Enchi",
+    "entity_type": "city",
+    "region": "Western North",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Essam",
+    "entity_type": "city",
+    "region": "Western North",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Juaboso",
+    "entity_type": "city",
+    "region": "Western North",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Sefwi Wiawso",
+    "entity_type": "city",
+    "region": "Western North",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Abura Dunkwa",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Afransi",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Agona Swedru",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Ajumako",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Apam",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Assin Bereku",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Assin Fosu",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Awutu Beraku",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Breman Asikuma",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Cape Coast",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Diaso",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Dunkwa-on-Offin",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Elmina",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Essarkyir",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Hemang",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kasoa",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kyekyewere",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Mankessim",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nsaba",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Potsin",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Saltpond",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Twifo Praso",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Winneba",
+    "entity_type": "city",
+    "region": "Central",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Abetifi",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Aburi",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Achiase",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Adeiso",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Adukrom",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Akim Oda",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Akim Swedru",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Akropong",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Akwatia",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Anyinam",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Asamankese",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Asesewa",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Atimpoku",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Begoro",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Coaltar",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Donkorkrom",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kade",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kibi",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Koforidua",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kukurantumi",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kwabeng",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Mpraeso",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "New Abirem",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nkawkaw",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nsawam",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Odumase Krobo",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Ofoase",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Osino",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Somanya",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Suhum",
+    "entity_type": "city",
+    "region": "Eastern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Adaklu Waya",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Adidome",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Aflao",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Agortime Kpetoe",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Akatsi",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Anfoega",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Anloga",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Ave-Dakpa",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Battor Dugame",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Denu",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Dzodze",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Dzolokpuita",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Ho",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Hohoe",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Keta",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kpando",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kpeve",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Sogakope",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Ve Golokwati",
+    "entity_type": "city",
+    "region": "Volta",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Chinderi",
+    "entity_type": "city",
+    "region": "Oti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Dambai",
+    "entity_type": "city",
+    "region": "Oti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Jasikan",
+    "entity_type": "city",
+    "region": "Oti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kadjebi",
+    "entity_type": "city",
+    "region": "Oti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kete Krachi",
+    "entity_type": "city",
+    "region": "Oti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kpassa",
+    "entity_type": "city",
+    "region": "Oti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Likpe Mate",
+    "entity_type": "city",
+    "region": "Oti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nkonya Ahenkro",
+    "entity_type": "city",
+    "region": "Oti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nkwanta",
+    "entity_type": "city",
+    "region": "Oti",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Bimbilla",
+    "entity_type": "city",
+    "region": "Northern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Gushegu",
+    "entity_type": "city",
+    "region": "Northern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Karaga",
+    "entity_type": "city",
+    "region": "Northern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kpandai",
+    "entity_type": "city",
+    "region": "Northern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kumbungu",
+    "entity_type": "city",
+    "region": "Northern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nanton",
+    "entity_type": "city",
+    "region": "Northern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Saboba",
+    "entity_type": "city",
+    "region": "Northern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Sagnarigu",
+    "entity_type": "city",
+    "region": "Northern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Sang",
+    "entity_type": "city",
+    "region": "Northern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Savelugu",
+    "entity_type": "city",
+    "region": "Northern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Tamale",
+    "entity_type": "city",
+    "region": "Northern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Tatale",
+    "entity_type": "city",
+    "region": "Northern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Tolon",
+    "entity_type": "city",
+    "region": "Northern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Wulensi",
+    "entity_type": "city",
+    "region": "Northern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Yendi",
+    "entity_type": "city",
+    "region": "Northern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Zabzugu",
+    "entity_type": "city",
+    "region": "Northern",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Bole",
+    "entity_type": "city",
+    "region": "Savannah",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Buipe",
+    "entity_type": "city",
+    "region": "Savannah",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Daboya",
+    "entity_type": "city",
+    "region": "Savannah",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Damongo",
+    "entity_type": "city",
+    "region": "Savannah",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kpalbe",
+    "entity_type": "city",
+    "region": "Savannah",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Salaga",
+    "entity_type": "city",
+    "region": "Savannah",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Sawla",
+    "entity_type": "city",
+    "region": "Savannah",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Bunkpurugu",
+    "entity_type": "city",
+    "region": "North East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Chereponi",
+    "entity_type": "city",
+    "region": "North East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Gambaga",
+    "entity_type": "city",
+    "region": "North East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nalerigu",
+    "entity_type": "city",
+    "region": "North East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Walewale",
+    "entity_type": "city",
+    "region": "North East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Yagaba",
+    "entity_type": "city",
+    "region": "North East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Yunyoo",
+    "entity_type": "city",
+    "region": "North East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Bawku",
+    "entity_type": "city",
+    "region": "Upper East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Binduri",
+    "entity_type": "city",
+    "region": "Upper East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Bolgatanga",
+    "entity_type": "city",
+    "region": "Upper East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Bongo",
+    "entity_type": "city",
+    "region": "Upper East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Fumbisi",
+    "entity_type": "city",
+    "region": "Upper East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Garu",
+    "entity_type": "city",
+    "region": "Upper East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nangodi",
+    "entity_type": "city",
+    "region": "Upper East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Navrongo",
+    "entity_type": "city",
+    "region": "Upper East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Paga",
+    "entity_type": "city",
+    "region": "Upper East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Pusiga",
+    "entity_type": "city",
+    "region": "Upper East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Sandema",
+    "entity_type": "city",
+    "region": "Upper East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Tempane",
+    "entity_type": "city",
+    "region": "Upper East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Tongo",
+    "entity_type": "city",
+    "region": "Upper East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Zebilla",
+    "entity_type": "city",
+    "region": "Upper East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Zuarungu",
+    "entity_type": "city",
+    "region": "Upper East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Funsi",
+    "entity_type": "city",
+    "region": "Upper West",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Gwollu",
+    "entity_type": "city",
+    "region": "Upper West",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Issa",
+    "entity_type": "city",
+    "region": "Upper West",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Jirapa",
+    "entity_type": "city",
+    "region": "Upper West",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Lambussie",
+    "entity_type": "city",
+    "region": "Upper West",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Lawra",
+    "entity_type": "city",
+    "region": "Upper West",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nadowli",
+    "entity_type": "city",
+    "region": "Upper West",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nandom",
+    "entity_type": "city",
+    "region": "Upper West",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Tumu",
+    "entity_type": "city",
+    "region": "Upper West",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Wa",
+    "entity_type": "city",
+    "region": "Upper West",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Wechiau",
+    "entity_type": "city",
+    "region": "Upper West",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Banda Ahenkro",
+    "entity_type": "city",
+    "region": "Bono",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Berekum",
+    "entity_type": "city",
+    "region": "Bono",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Dormaa Ahenkro",
+    "entity_type": "city",
+    "region": "Bono",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Drobo",
+    "entity_type": "city",
+    "region": "Bono",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nsawkaw",
+    "entity_type": "city",
+    "region": "Bono",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Odumase",
+    "entity_type": "city",
+    "region": "Bono",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Sampa",
+    "entity_type": "city",
+    "region": "Bono",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Sunyani",
+    "entity_type": "city",
+    "region": "Bono",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Wamfie",
+    "entity_type": "city",
+    "region": "Bono",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Wenchi",
+    "entity_type": "city",
+    "region": "Bono",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Atebubu",
+    "entity_type": "city",
+    "region": "Bono East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Busunya",
+    "entity_type": "city",
+    "region": "Bono East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Jema",
+    "entity_type": "city",
+    "region": "Bono East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kajaji",
+    "entity_type": "city",
+    "region": "Bono East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kintampo",
+    "entity_type": "city",
+    "region": "Bono East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kwame Danso",
+    "entity_type": "city",
+    "region": "Bono East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Nkoranza",
+    "entity_type": "city",
+    "region": "Bono East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Prang",
+    "entity_type": "city",
+    "region": "Bono East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Techiman",
+    "entity_type": "city",
+    "region": "Bono East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Tuobodom",
+    "entity_type": "city",
+    "region": "Bono East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Yeji",
+    "entity_type": "city",
+    "region": "Bono East",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Bechem",
+    "entity_type": "city",
+    "region": "Ahafo",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Duayaw Nkwanta",
+    "entity_type": "city",
+    "region": "Ahafo",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Goaso",
+    "entity_type": "city",
+    "region": "Ahafo",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Hwidiem",
+    "entity_type": "city",
+    "region": "Ahafo",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kenyasi",
+    "entity_type": "city",
+    "region": "Ahafo",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Kukuom",
+    "entity_type": "city",
+    "region": "Ahafo",
+    "aliases": [],
+    "source": "cities"
+  },
+  {
+    "canonical": "Ghana",
+    "entity_type": "supplementary",
+    "region": "",
+    "aliases": [
+      "Gana",
+      "Ghanna",
+      "Ghanah"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Ningo-Prampram",
+    "entity_type": "supplementary",
+    "region": "Greater Accra",
+    "aliases": [
+      "Ningo Prampram",
+      "Ningoprampram",
+      "Nyungoprampram",
+      "Ningo Pram Pram",
+      "Ninggu Pram Pram"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Ningo",
+    "entity_type": "supplementary",
+    "region": "Greater Accra",
+    "aliases": [
+      "New Ningo",
+      "Old Ningo",
+      "Ninggu",
+      "Ningu"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Tema",
+    "entity_type": "supplementary",
+    "region": "Greater Accra",
+    "aliases": [
+      "Tema New Town",
+      "Tema Manhean"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Teshie",
+    "entity_type": "supplementary",
+    "region": "Greater Accra",
+    "aliases": [
+      "Teshie Nungua"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Ashaiman",
+    "entity_type": "supplementary",
+    "region": "Greater Accra",
+    "aliases": [
+      "Ashiaman",
+      "Ashaiman Municipal"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Weija-Gbawe",
+    "entity_type": "supplementary",
+    "region": "Greater Accra",
+    "aliases": [
+      "Weija",
+      "Gbawe"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Ledzokuku",
+    "entity_type": "supplementary",
+    "region": "Greater Accra",
+    "aliases": [
+      "Ledzokuku-Krowor"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Okaikwei",
+    "entity_type": "supplementary",
+    "region": "Greater Accra",
+    "aliases": [
+      "Okaikoi",
+      "Okaikwei North"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Ayawaso",
+    "entity_type": "supplementary",
+    "region": "Greater Accra",
+    "aliases": [
+      "Ayawaso West",
+      "Ayawaso East",
+      "Ayawaso Central",
+      "Ayawaso North"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Ablekuma",
+    "entity_type": "supplementary",
+    "region": "Greater Accra",
+    "aliases": [
+      "Ablekuma West",
+      "Ablekuma Central",
+      "Ablekuma North"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Korle Klottey",
+    "entity_type": "supplementary",
+    "region": "Greater Accra",
+    "aliases": [
+      "Korle-Klottey"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Kpone Katamanso",
+    "entity_type": "supplementary",
+    "region": "Greater Accra",
+    "aliases": [
+      "Kpone-Katamanso",
+      "Katamanso"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Ada",
+    "entity_type": "supplementary",
+    "region": "Greater Accra",
+    "aliases": [
+      "Ada West",
+      "Ada East",
+      "Big Ada",
+      "Ada Foah"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Shai Osudoku",
+    "entity_type": "supplementary",
+    "region": "Greater Accra",
+    "aliases": [
+      "Shai-Osudoku",
+      "Dodowa"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Obuasi",
+    "entity_type": "supplementary",
+    "region": "Ashanti",
+    "aliases": [
+      "Obuase"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Ejisu",
+    "entity_type": "supplementary",
+    "region": "Ashanti",
+    "aliases": [
+      "Ejisu-Juaben",
+      "Juaben"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Bekwai",
+    "entity_type": "supplementary",
+    "region": "Ashanti",
+    "aliases": [
+      "Bekwai Municipal"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Atwima Nwabiagya",
+    "entity_type": "supplementary",
+    "region": "Ashanti",
+    "aliases": [
+      "Atwima-Nwabiagya",
+      "Nwabiagya"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Asante Akim",
+    "entity_type": "supplementary",
+    "region": "Ashanti",
+    "aliases": [
+      "Asante Akyem",
+      "Asante Akim Central",
+      "Asante Akim North",
+      "Asante Akim South"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Mampong",
+    "entity_type": "supplementary",
+    "region": "Ashanti",
+    "aliases": [
+      "Mampong Municipal",
+      "Asante Mampong"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Offinso",
+    "entity_type": "supplementary",
+    "region": "Ashanti",
+    "aliases": [
+      "Offinso Municipal",
+      "Offinso North",
+      "Offinso South"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Ahafo Ano",
+    "entity_type": "supplementary",
+    "region": "Ashanti",
+    "aliases": [
+      "Ahafo Ano North",
+      "Ahafo Ano South"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Bosomtwe",
+    "entity_type": "supplementary",
+    "region": "Ashanti",
+    "aliases": [
+      "Bosomtwi"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Cape Coast",
+    "entity_type": "supplementary",
+    "region": "Central",
+    "aliases": [
+      "Cabo Corso"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Mankessim",
+    "entity_type": "supplementary",
+    "region": "Central",
+    "aliases": [
+      "Manksessim"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Elmina",
+    "entity_type": "supplementary",
+    "region": "Central",
+    "aliases": [
+      "Edina"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Winneba",
+    "entity_type": "supplementary",
+    "region": "Central",
+    "aliases": [
+      "Simpa"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Kasoa",
+    "entity_type": "supplementary",
+    "region": "Central",
+    "aliases": [
+      "Cassoa",
+      "Kasoa-Ofaakor"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Agona",
+    "entity_type": "supplementary",
+    "region": "Central",
+    "aliases": [
+      "Agona West",
+      "Agona East",
+      "Agona Swedru"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Awutu Senya",
+    "entity_type": "supplementary",
+    "region": "Central",
+    "aliases": [
+      "Awutu-Senya",
+      "Awutu Senya East",
+      "Awutu Senya West"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Koforidua",
+    "entity_type": "supplementary",
+    "region": "Eastern",
+    "aliases": [
+      "Koforidua Municipal"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Nsawam",
+    "entity_type": "supplementary",
+    "region": "Eastern",
+    "aliases": [
+      "Nsawam-Adoagyiri",
+      "Nsawam Adoagyiri"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Akim Oda",
+    "entity_type": "supplementary",
+    "region": "Eastern",
+    "aliases": [
+      "Akim-Oda",
+      "Oda"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Nkawkaw",
+    "entity_type": "supplementary",
+    "region": "Eastern",
+    "aliases": [
+      "Nkawkaw Municipal"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Akuapem",
+    "entity_type": "supplementary",
+    "region": "Eastern",
+    "aliases": [
+      "Akuapem North",
+      "Akuapem South",
+      "Akwapim"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Suhum",
+    "entity_type": "supplementary",
+    "region": "Eastern",
+    "aliases": [
+      "Suhum Municipal"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Abuakwa",
+    "entity_type": "supplementary",
+    "region": "Eastern",
+    "aliases": [
+      "Abuakwa North",
+      "Abuakwa South"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Sekondi-Takoradi",
+    "entity_type": "supplementary",
+    "region": "Western",
+    "aliases": [
+      "Sekondi Takoradi",
+      "Sekondi",
+      "Takoradi"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Tarkwa",
+    "entity_type": "supplementary",
+    "region": "Western",
+    "aliases": [
+      "Tarkwa Nsuaem",
+      "Tarkwa-Nsuaem"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Axim",
+    "entity_type": "supplementary",
+    "region": "Western",
+    "aliases": [
+      "Axim Municipal"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Prestea",
+    "entity_type": "supplementary",
+    "region": "Western",
+    "aliases": [
+      "Prestea Huni-Valley",
+      "Prestea Huni Valley"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Tamale",
+    "entity_type": "supplementary",
+    "region": "Northern",
+    "aliases": [
+      "Tamale Metropolitan",
+      "Tamale Metro"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Yendi",
+    "entity_type": "supplementary",
+    "region": "Northern",
+    "aliases": [
+      "Yendi Municipal"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Tolon",
+    "entity_type": "supplementary",
+    "region": "Northern",
+    "aliases": [
+      "Tolon-Kumbungu"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Savelugu",
+    "entity_type": "supplementary",
+    "region": "Northern",
+    "aliases": [
+      "Savelugu Municipal",
+      "Savelugu-Nanton"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Sagnarigu",
+    "entity_type": "supplementary",
+    "region": "Northern",
+    "aliases": [
+      "Sagnerigu"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Ho",
+    "entity_type": "supplementary",
+    "region": "Volta",
+    "aliases": [
+      "Ho Municipal",
+      "Ho West"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Keta",
+    "entity_type": "supplementary",
+    "region": "Volta",
+    "aliases": [
+      "Keta Municipal"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Hohoe",
+    "entity_type": "supplementary",
+    "region": "Volta",
+    "aliases": [
+      "Hohoe Municipal"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Kpando",
+    "entity_type": "supplementary",
+    "region": "Volta",
+    "aliases": [
+      "Kpando Municipal"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Bolgatanga",
+    "entity_type": "supplementary",
+    "region": "Upper East",
+    "aliases": [
+      "Bolga",
+      "Bolgatanga Municipal"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Bawku",
+    "entity_type": "supplementary",
+    "region": "Upper East",
+    "aliases": [
+      "Bawku Municipal",
+      "Bawku West"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Navrongo",
+    "entity_type": "supplementary",
+    "region": "Upper East",
+    "aliases": [
+      "Navrongo Municipal",
+      "Kassena Nankana"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Wa",
+    "entity_type": "supplementary",
+    "region": "Upper West",
+    "aliases": [
+      "Wa Municipal",
+      "Wa West",
+      "Wa East"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Lawra",
+    "entity_type": "supplementary",
+    "region": "Upper West",
+    "aliases": [
+      "Lawra Municipal"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Jirapa",
+    "entity_type": "supplementary",
+    "region": "Upper West",
+    "aliases": [
+      "Jirapa Municipal"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Sunyani",
+    "entity_type": "supplementary",
+    "region": "Bono",
+    "aliases": [
+      "Sunyani Municipal",
+      "Sunyani West"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Berekum",
+    "entity_type": "supplementary",
+    "region": "Bono",
+    "aliases": [
+      "Berekum Municipal",
+      "Berekum East"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Dormaa",
+    "entity_type": "supplementary",
+    "region": "Bono",
+    "aliases": [
+      "Dormaa Ahenkro",
+      "Dormaa Central",
+      "Dormaa East",
+      "Dormaa West"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Techiman",
+    "entity_type": "supplementary",
+    "region": "Bono East",
+    "aliases": [
+      "Techiman Municipal",
+      "Techiman North",
+      "Techiman South"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Kintampo",
+    "entity_type": "supplementary",
+    "region": "Bono East",
+    "aliases": [
+      "Kintampo Municipal",
+      "Kintampo North",
+      "Kintampo South"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Damongo",
+    "entity_type": "supplementary",
+    "region": "Savannah",
+    "aliases": [
+      "Damongo District"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Bole",
+    "entity_type": "supplementary",
+    "region": "Savannah",
+    "aliases": [
+      "Bole District",
+      "Bole Bamboi"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Nalerigu",
+    "entity_type": "supplementary",
+    "region": "North East",
+    "aliases": [
+      "Nalerigu-Gambaga"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Walewale",
+    "entity_type": "supplementary",
+    "region": "North East",
+    "aliases": [
+      "Walewale Municipal"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Dambai",
+    "entity_type": "supplementary",
+    "region": "Oti",
+    "aliases": [
+      "Dambai Municipal"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Nkwanta",
+    "entity_type": "supplementary",
+    "region": "Oti",
+    "aliases": [
+      "Nkwanta South",
+      "Nkwanta North"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Goaso",
+    "entity_type": "supplementary",
+    "region": "Ahafo",
+    "aliases": [
+      "Goaso Municipal"
+    ],
+    "source": "supplementary"
+  },
+  {
+    "canonical": "Bechem",
+    "entity_type": "supplementary",
+    "region": "Ahafo",
+    "aliases": [
+      "Bechem Municipal"
+    ],
+    "source": "supplementary"
+  }
+]

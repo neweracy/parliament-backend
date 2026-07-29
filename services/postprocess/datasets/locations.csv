@@ -1,0 +1,347 @@
+canonical,entity_type,region,alias_count,source
+Greater Accra,region,,0,regions
+Ashanti,region,,0,regions
+Western,region,,0,regions
+Western North,region,,0,regions
+Central,region,,0,regions
+Eastern,region,,0,regions
+Volta,region,,0,regions
+Oti,region,,0,regions
+Northern,region,,0,regions
+Savannah,region,,0,regions
+North East,region,,0,regions
+Upper East,region,,0,regions
+Upper West,region,,0,regions
+Bono,region,,0,regions
+Bono East,region,,0,regions
+Ahafo,region,,0,regions
+Abeka,city,Greater Accra,0,cities
+Ablekuma North,city,Greater Accra,0,cities
+Abokobi,city,Greater Accra,0,cities
+Accra,city,Greater Accra,0,cities
+Accra New Town,city,Greater Accra,0,cities
+Ada Foah,city,Greater Accra,0,cities
+Adenta,city,Greater Accra,0,cities
+Amasaman,city,Greater Accra,0,cities
+Ashiaman,city,Greater Accra,0,cities
+Dansoman,city,Greater Accra,0,cities
+Dodowa,city,Greater Accra,0,cities
+Dzorwulu,city,Greater Accra,0,cities
+Kokomlemle,city,Greater Accra,0,cities
+Kpone,city,Greater Accra,0,cities
+La,city,Greater Accra,0,cities
+Latebiokorshie,city,Greater Accra,0,cities
+Madina,city,Greater Accra,0,cities
+Ngleshie Amanfrom,city,Greater Accra,0,cities
+Nima,city,Greater Accra,0,cities
+Nungua,city,Greater Accra,0,cities
+Ofankor,city,Greater Accra,0,cities
+Osu,city,Greater Accra,0,cities
+Prampram,city,Greater Accra,0,cities
+Sege,city,Greater Accra,0,cities
+Sowutuom,city,Greater Accra,0,cities
+Tema,city,Greater Accra,0,cities
+Tema Community 2,city,Greater Accra,0,cities
+Teshie,city,Greater Accra,0,cities
+Weija,city,Greater Accra,0,cities
+Adugyama,city,Ashanti,0,cities
+Agogo,city,Ashanti,0,cities
+Agona,city,Ashanti,0,cities
+Akomadan,city,Ashanti,0,cities
+Akrofuom,city,Ashanti,0,cities
+Asiwa,city,Ashanti,0,cities
+Asokore,city,Ashanti,0,cities
+Asokwa,city,Ashanti,0,cities
+Barekese,city,Ashanti,0,cities
+Bekwai,city,Ashanti,0,cities
+Boaman,city,Ashanti,0,cities
+Drobonso,city,Ashanti,0,cities
+Edubia,city,Ashanti,0,cities
+Effiduase,city,Ashanti,0,cities
+Ejisu,city,Ashanti,0,cities
+Ejura,city,Ashanti,0,cities
+Foase,city,Ashanti,0,cities
+Fomena,city,Ashanti,0,cities
+Jacobu,city,Ashanti,0,cities
+Juaben,city,Ashanti,0,cities
+Juaso,city,Ashanti,0,cities
+Kodie,city,Ashanti,0,cities
+Konongo-Odumase,city,Ashanti,0,cities
+Kumasi,city,Ashanti,0,cities
+Kumawu,city,Ashanti,0,cities
+Kuntenase,city,Ashanti,0,cities
+Kwadaso,city,Ashanti,0,cities
+Mampong,city,Ashanti,0,cities
+Mamponteng,city,Ashanti,0,cities
+Mankranso,city,Ashanti,0,cities
+Manso Nkwanta,city,Ashanti,0,cities
+New Edubiase,city,Ashanti,0,cities
+Nkawie,city,Ashanti,0,cities
+Nsuta,city,Ashanti,0,cities
+Nyinahin,city,Ashanti,0,cities
+Obuasi,city,Ashanti,0,cities
+Offinso,city,Ashanti,0,cities
+Oforikrom,city,Ashanti,0,cities
+Old Tafo,city,Ashanti,0,cities
+Suame,city,Ashanti,0,cities
+Tepa,city,Ashanti,0,cities
+Tutuka,city,Ashanti,0,cities
+Agona Nkwanta,city,Western,0,cities
+Asankragu,city,Western,0,cities
+Axim,city,Western,0,cities
+Bogoso,city,Western,0,cities
+Daboase,city,Western,0,cities
+Dixcove,city,Western,0,cities
+Elubo,city,Western,0,cities
+Half Assini,city,Western,0,cities
+Kwesimintsim,city,Western,0,cities
+Mpohor,city,Western,0,cities
+Nkroful,city,Western,0,cities
+Prestea,city,Western,0,cities
+Sekondi-Takoradi,city,Western,0,cities
+Shama,city,Western,0,cities
+Tarkwa,city,Western,0,cities
+Wassa Akropong,city,Western,0,cities
+Adabokrom,city,Western North,0,cities
+Akontombra,city,Western North,0,cities
+Bibiani,city,Western North,0,cities
+Bodi,city,Western North,0,cities
+Dadieso,city,Western North,0,cities
+Enchi,city,Western North,0,cities
+Essam,city,Western North,0,cities
+Juaboso,city,Western North,0,cities
+Sefwi Wiawso,city,Western North,0,cities
+Abura Dunkwa,city,Central,0,cities
+Afransi,city,Central,0,cities
+Agona Swedru,city,Central,0,cities
+Ajumako,city,Central,0,cities
+Apam,city,Central,0,cities
+Assin Bereku,city,Central,0,cities
+Assin Fosu,city,Central,0,cities
+Awutu Beraku,city,Central,0,cities
+Breman Asikuma,city,Central,0,cities
+Cape Coast,city,Central,0,cities
+Diaso,city,Central,0,cities
+Dunkwa-on-Offin,city,Central,0,cities
+Elmina,city,Central,0,cities
+Essarkyir,city,Central,0,cities
+Hemang,city,Central,0,cities
+Kasoa,city,Central,0,cities
+Kyekyewere,city,Central,0,cities
+Mankessim,city,Central,0,cities
+Nsaba,city,Central,0,cities
+Potsin,city,Central,0,cities
+Saltpond,city,Central,0,cities
+Twifo Praso,city,Central,0,cities
+Winneba,city,Central,0,cities
+Abetifi,city,Eastern,0,cities
+Aburi,city,Eastern,0,cities
+Achiase,city,Eastern,0,cities
+Adeiso,city,Eastern,0,cities
+Adukrom,city,Eastern,0,cities
+Akim Oda,city,Eastern,0,cities
+Akim Swedru,city,Eastern,0,cities
+Akropong,city,Eastern,0,cities
+Akwatia,city,Eastern,0,cities
+Anyinam,city,Eastern,0,cities
+Asamankese,city,Eastern,0,cities
+Asesewa,city,Eastern,0,cities
+Atimpoku,city,Eastern,0,cities
+Begoro,city,Eastern,0,cities
+Coaltar,city,Eastern,0,cities
+Donkorkrom,city,Eastern,0,cities
+Kade,city,Eastern,0,cities
+Kibi,city,Eastern,0,cities
+Koforidua,city,Eastern,0,cities
+Kukurantumi,city,Eastern,0,cities
+Kwabeng,city,Eastern,0,cities
+Mpraeso,city,Eastern,0,cities
+New Abirem,city,Eastern,0,cities
+Nkawkaw,city,Eastern,0,cities
+Nsawam,city,Eastern,0,cities
+Odumase Krobo,city,Eastern,0,cities
+Ofoase,city,Eastern,0,cities
+Osino,city,Eastern,0,cities
+Somanya,city,Eastern,0,cities
+Suhum,city,Eastern,0,cities
+Adaklu Waya,city,Volta,0,cities
+Adidome,city,Volta,0,cities
+Aflao,city,Volta,0,cities
+Agortime Kpetoe,city,Volta,0,cities
+Akatsi,city,Volta,0,cities
+Anfoega,city,Volta,0,cities
+Anloga,city,Volta,0,cities
+Ave-Dakpa,city,Volta,0,cities
+Battor Dugame,city,Volta,0,cities
+Denu,city,Volta,0,cities
+Dzodze,city,Volta,0,cities
+Dzolokpuita,city,Volta,0,cities
+Ho,city,Volta,0,cities
+Hohoe,city,Volta,0,cities
+Keta,city,Volta,0,cities
+Kpando,city,Volta,0,cities
+Kpeve,city,Volta,0,cities
+Sogakope,city,Volta,0,cities
+Ve Golokwati,city,Volta,0,cities
+Chinderi,city,Oti,0,cities
+Dambai,city,Oti,0,cities
+Jasikan,city,Oti,0,cities
+Kadjebi,city,Oti,0,cities
+Kete Krachi,city,Oti,0,cities
+Kpassa,city,Oti,0,cities
+Likpe Mate,city,Oti,0,cities
+Nkonya Ahenkro,city,Oti,0,cities
+Nkwanta,city,Oti,0,cities
+Bimbilla,city,Northern,0,cities
+Gushegu,city,Northern,0,cities
+Karaga,city,Northern,0,cities
+Kpandai,city,Northern,0,cities
+Kumbungu,city,Northern,0,cities
+Nanton,city,Northern,0,cities
+Saboba,city,Northern,0,cities
+Sagnarigu,city,Northern,0,cities
+Sang,city,Northern,0,cities
+Savelugu,city,Northern,0,cities
+Tamale,city,Northern,0,cities
+Tatale,city,Northern,0,cities
+Tolon,city,Northern,0,cities
+Wulensi,city,Northern,0,cities
+Yendi,city,Northern,0,cities
+Zabzugu,city,Northern,0,cities
+Bole,city,Savannah,0,cities
+Buipe,city,Savannah,0,cities
+Daboya,city,Savannah,0,cities
+Damongo,city,Savannah,0,cities
+Kpalbe,city,Savannah,0,cities
+Salaga,city,Savannah,0,cities
+Sawla,city,Savannah,0,cities
+Bunkpurugu,city,North East,0,cities
+Chereponi,city,North East,0,cities
+Gambaga,city,North East,0,cities
+Nalerigu,city,North East,0,cities
+Walewale,city,North East,0,cities
+Yagaba,city,North East,0,cities
+Yunyoo,city,North East,0,cities
+Bawku,city,Upper East,0,cities
+Binduri,city,Upper East,0,cities
+Bolgatanga,city,Upper East,0,cities
+Bongo,city,Upper East,0,cities
+Fumbisi,city,Upper East,0,cities
+Garu,city,Upper East,0,cities
+Nangodi,city,Upper East,0,cities
+Navrongo,city,Upper East,0,cities
+Paga,city,Upper East,0,cities
+Pusiga,city,Upper East,0,cities
+Sandema,city,Upper East,0,cities
+Tempane,city,Upper East,0,cities
+Tongo,city,Upper East,0,cities
+Zebilla,city,Upper East,0,cities
+Zuarungu,city,Upper East,0,cities
+Funsi,city,Upper West,0,cities
+Gwollu,city,Upper West,0,cities
+Issa,city,Upper West,0,cities
+Jirapa,city,Upper West,0,cities
+Lambussie,city,Upper West,0,cities
+Lawra,city,Upper West,0,cities
+Nadowli,city,Upper West,0,cities
+Nandom,city,Upper West,0,cities
+Tumu,city,Upper West,0,cities
+Wa,city,Upper West,0,cities
+Wechiau,city,Upper West,0,cities
+Banda Ahenkro,city,Bono,0,cities
+Berekum,city,Bono,0,cities
+Dormaa Ahenkro,city,Bono,0,cities
+Drobo,city,Bono,0,cities
+Nsawkaw,city,Bono,0,cities
+Odumase,city,Bono,0,cities
+Sampa,city,Bono,0,cities
+Sunyani,city,Bono,0,cities
+Wamfie,city,Bono,0,cities
+Wenchi,city,Bono,0,cities
+Atebubu,city,Bono East,0,cities
+Busunya,city,Bono East,0,cities
+Jema,city,Bono East,0,cities
+Kajaji,city,Bono East,0,cities
+Kintampo,city,Bono East,0,cities
+Kwame Danso,city,Bono East,0,cities
+Nkoranza,city,Bono East,0,cities
+Prang,city,Bono East,0,cities
+Techiman,city,Bono East,0,cities
+Tuobodom,city,Bono East,0,cities
+Yeji,city,Bono East,0,cities
+Bechem,city,Ahafo,0,cities
+Duayaw Nkwanta,city,Ahafo,0,cities
+Goaso,city,Ahafo,0,cities
+Hwidiem,city,Ahafo,0,cities
+Kenyasi,city,Ahafo,0,cities
+Kukuom,city,Ahafo,0,cities
+Ghana,supplementary,,3,supplementary
+Ningo-Prampram,supplementary,Greater Accra,5,supplementary
+Ningo,supplementary,Greater Accra,4,supplementary
+Tema,supplementary,Greater Accra,2,supplementary
+Teshie,supplementary,Greater Accra,1,supplementary
+Ashaiman,supplementary,Greater Accra,2,supplementary
+Weija-Gbawe,supplementary,Greater Accra,2,supplementary
+Ledzokuku,supplementary,Greater Accra,1,supplementary
+Okaikwei,supplementary,Greater Accra,2,supplementary
+Ayawaso,supplementary,Greater Accra,4,supplementary
+Ablekuma,supplementary,Greater Accra,3,supplementary
+Korle Klottey,supplementary,Greater Accra,1,supplementary
+Kpone Katamanso,supplementary,Greater Accra,2,supplementary
+Ada,supplementary,Greater Accra,4,supplementary
+Shai Osudoku,supplementary,Greater Accra,2,supplementary
+Obuasi,supplementary,Ashanti,1,supplementary
+Ejisu,supplementary,Ashanti,2,supplementary
+Bekwai,supplementary,Ashanti,1,supplementary
+Atwima Nwabiagya,supplementary,Ashanti,2,supplementary
+Asante Akim,supplementary,Ashanti,4,supplementary
+Mampong,supplementary,Ashanti,2,supplementary
+Offinso,supplementary,Ashanti,3,supplementary
+Ahafo Ano,supplementary,Ashanti,2,supplementary
+Bosomtwe,supplementary,Ashanti,1,supplementary
+Cape Coast,supplementary,Central,1,supplementary
+Mankessim,supplementary,Central,1,supplementary
+Elmina,supplementary,Central,1,supplementary
+Winneba,supplementary,Central,1,supplementary
+Kasoa,supplementary,Central,2,supplementary
+Agona,supplementary,Central,3,supplementary
+Awutu Senya,supplementary,Central,3,supplementary
+Koforidua,supplementary,Eastern,1,supplementary
+Nsawam,supplementary,Eastern,2,supplementary
+Akim Oda,supplementary,Eastern,2,supplementary
+Nkawkaw,supplementary,Eastern,1,supplementary
+Akuapem,supplementary,Eastern,3,supplementary
+Suhum,supplementary,Eastern,1,supplementary
+Abuakwa,supplementary,Eastern,2,supplementary
+Sekondi-Takoradi,supplementary,Western,3,supplementary
+Tarkwa,supplementary,Western,2,supplementary
+Axim,supplementary,Western,1,supplementary
+Prestea,supplementary,Western,2,supplementary
+Tamale,supplementary,Northern,2,supplementary
+Yendi,supplementary,Northern,1,supplementary
+Tolon,supplementary,Northern,1,supplementary
+Savelugu,supplementary,Northern,2,supplementary
+Sagnarigu,supplementary,Northern,1,supplementary
+Ho,supplementary,Volta,2,supplementary
+Keta,supplementary,Volta,1,supplementary
+Hohoe,supplementary,Volta,1,supplementary
+Kpando,supplementary,Volta,1,supplementary
+Bolgatanga,supplementary,Upper East,2,supplementary
+Bawku,supplementary,Upper East,2,supplementary
+Navrongo,supplementary,Upper East,2,supplementary
+Wa,supplementary,Upper West,3,supplementary
+Lawra,supplementary,Upper West,1,supplementary
+Jirapa,supplementary,Upper West,1,supplementary
+Sunyani,supplementary,Bono,2,supplementary
+Berekum,supplementary,Bono,2,supplementary
+Dormaa,supplementary,Bono,4,supplementary
+Techiman,supplementary,Bono East,3,supplementary
+Kintampo,supplementary,Bono East,3,supplementary
+Damongo,supplementary,Savannah,1,supplementary
+Bole,supplementary,Savannah,2,supplementary
+Nalerigu,supplementary,North East,1,supplementary
+Walewale,supplementary,North East,1,supplementary
+Dambai,supplementary,Oti,1,supplementary
+Nkwanta,supplementary,Oti,2,supplementary
+Goaso,supplementary,Ahafo,1,supplementary
+Bechem,supplementary,Ahafo,1,supplementary

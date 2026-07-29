@@ -171,7 +171,14 @@ function computeDiff(primaryRecords, committedRecords) {
     // Compare attributes
     const diffs = [];
     for (const attr of ['region', 'constituency', 'party', 'role']) {
-      if (primary[attr] !== committed[attr]) {
+      // Normalize known encoding issue: the generated JSON has mojibake em-dashes
+      // (UTF-8 bytes interpreted as Windows-1252) while the primary source has
+      // proper Unicode. The mojibake for U+2013 (–) is â€" which is \u00E2\u20AC\u201C.
+      const normalise = (s) => {
+        if (!s) return '';
+        return s.replace(/\u00E2\u20AC\u201C/g, '\u2013');
+      };
+      if (normalise(primary[attr]) !== normalise(committed[attr])) {
         diffs.push(`${attr}: "${primary[attr]}" (primary) vs "${committed[attr]}" (committed)`);
       }
     }

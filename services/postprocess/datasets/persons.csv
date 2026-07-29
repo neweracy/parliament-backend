@@ -1,0 +1,198 @@
+canonical,entity_type,role,alias_count,source
+Kwame Nkrumah,president,President (1960â€“1966),21,persons_presidents
+Joseph Arthur Ankrah,president,Head of State (1966â€“1969),20,persons_presidents
+Akwasi Afrifa,president,Head of State (1969),20,persons_presidents
+Edward Akufo-Addo,president,President (1970â€“1972),20,persons_presidents
+Kofi Abrefa Busia,president,Prime Minister (1969â€“1972),20,persons_presidents
+Ignatius Kutu Acheampong,president,Head of State (1972â€“1978),20,persons_presidents
+Fred Akuffo,president,Head of State (1978â€“1979),20,persons_presidents
+Jerry John Rawlings,president,"Head of State (1979, 1981â€“1993) / President (1993â€“2001)",20,persons_presidents
+Hilla Limann,president,President (1979â€“1981),20,persons_presidents
+John Agyekum Kufuor,president,President (2001â€“2009),20,persons_presidents
+John Evans Atta Mills,president,President (2009â€“2012),20,persons_presidents
+John Dramani Mahama,president,"President (2012â€“2017, 2025â€“)",20,persons_presidents
+Nana Addo Dankwa Akufo-Addo,president,President (2017â€“2025),20,persons_presidents
+Kow Nkensen Arkaah,president,Vice President (1993â€“1997),2,persons_vice_presidents
+John Evans Atta Mills,president,Vice President (1997â€“2001),1,persons_vice_presidents
+Aliu Mahama,president,Vice President (2001â€“2009),1,persons_vice_presidents
+John Dramani Mahama,president,Vice President (2009â€“2012),1,persons_vice_presidents
+Kwesi Amissah-Arthur,president,Vice President (2012â€“2017),3,persons_vice_presidents
+Mahamudu Bawumia,president,Vice President (2017â€“2025),3,persons_vice_presidents
+Jane Naana Opoku-Agyemang,president,Vice President (2025â€“),4,persons_vice_presidents
+Justice D.F. Annan,president,Speaker (1993â€“2001),2,persons_speakers
+Peter Ala Adjetey,president,Speaker (2001â€“2005),2,persons_speakers
+Ebenezer Begyina Sekyi-Hughes,president,Speaker (2005â€“2009),2,persons_speakers
+Joyce Bamford-Addo,president,Speaker (2009â€“2013),2,persons_speakers
+Edward Doe Adjaho,president,Speaker (2013â€“2017),2,persons_speakers
+Aaron Mike Oquaye,president,Speaker (2017â€“2021),3,persons_speakers
+Alban Sumana Kingsford Bagbin,president,Speaker (2021â€“),4,persons_speakers
+Komla Agbeli Gbedemah,minister,Min. of Finance (1957â€“1961),12,ministers
+Kojo Botsio,minister,Min. of Foreign Affairs (1957â€“1963),12,ministers
+Krobo Edusei,minister,Min. of Transport/Interior,12,ministers
+Kwaku Boateng,minister,Min. of Interior (1960â€“1964),11,ministers
+Ebenezer Ako-Adjei,minister,Min. of Foreign Affairs (1959â€“1962),12,ministers
+Tawia Adamafio,minister,Min. of Information (1960â€“1962),12,ministers
+Kofi Baako,minister,Min. of Defence (1960â€“1966),12,ministers
+Alex Quaison-Sackey,minister,Min. of Foreign Affairs (1965â€“1966),12,ministers
+Kwesi Armah,minister,Min. of Trade (1961â€“1965),12,ministers
+Imoru Egala,minister,Min. of Trade (1957â€“1961),12,ministers
+A.E.A. Ofori Atta,minister,Min. of Local Government,12,ministers
+Susana Al-Hassan,minister,Min. of Social Welfare (1961â€“1966),12,ministers
+Jatoe Kaleo,minister,Min. of Agriculture (1962â€“1966),12,ministers
+N.A. Welbeck,minister,Min. of Works (1960â€“1966),12,ministers
+J.H. Mensah,minister,Min. of Finance (1969â€“1972),12,ministers
+William Ofori-Atta,minister,Min. of Foreign Affairs (1969â€“1972),11,ministers
+Victor Owusu,minister,Attorney General (1969â€“1972),11,ministers
+R.R. Amponsah,minister,Min. of Interior (1969â€“1972),11,ministers
+Jones Ofori-Atta,minister,Min. of Education (1969â€“1972),12,ministers
+Albert Adomakoh,minister,Min. of Health (1969â€“1972),12,ministers
+A.A. Munufie,minister,Min. of Agriculture (1969â€“1972),11,ministers
+Amon Nikoi,minister,Min. of Finance (1979â€“1981),12,ministers
+Isaac Chinebuah,minister,Min. of Foreign Affairs (1979â€“1981),11,ministers
+Enoch Kwaku Okoh,minister,Attorney General (1979â€“1981),12,ministers
+Kwesi Botchwey,minister,Sec. for Finance (1982â€“1995),14,ministers
+Obed Asamoah,minister,Sec. for Foreign Affairs (1982â€“1993),13,ministers
+Ato Austin,minister,Sec. for Trade (1982â€“1986),12,ministers
+P.V. Obeng,minister,Chairman PNDC Committee (1982â€“1993),12,ministers
+Tsatsu Tsikata,minister,Nat. Security Adviser (1982â€“2001),12,ministers
+Courage Quashigah,minister,Sec. for Agriculture,13,ministers
+Ama Ata Aidoo,minister,Sec. for Education (1982â€“1983),12,ministers
+Mary Grant,minister,Sec. for Local Government,12,ministers
+E.T. Mensah,minister,Sec. for Youth (1984â€“1993),12,ministers
+Richard Kwame Peprah,minister,Min. of Finance (1995â€“2001),12,ministers
+Victor Gbeho,minister,Min. of Foreign Affairs (1997â€“2001),12,ministers
+Nii Okaija Adamafio,minister,Min. of Interior (1993â€“1997),12,ministers
+Kwamena Ahwoi,minister,Min. of Local Government (1993â€“2001),12,ministers
+Christine Amoako-Nuama,minister,Min. of Education (1997â€“2001),12,ministers
+Harry Sawyer,minister,Attorney General (1993â€“1997),12,ministers
+Nana Oye Lithur,minister,Dep. Attorney General (1997â€“2001),14,ministers
+Samuel Sallas-Mensah,minister,Min. of Interior (1997â€“2001),12,ministers
+John Mahama,minister,Min. of Communications (1997â€“2001),12,ministers
+Ibrahim Adam,minister,Min. of Defence (1997â€“2001),12,ministers
+Kwaku Afriyie,minister,Min. of Health (1993â€“1997),12,ministers
+Mustapha Idris,minister,Min. of Roads (1993â€“1997),12,ministers
+Edward Salia,minister,Min. of Mines & Energy (1997â€“2001),12,ministers
+Cletus Avoka,minister,Min. of Interior (2001),13,ministers
+Yaw Osafo-Maafo,minister,Min. of Finance (2001â€“2005),12,ministers
+Kwadwo Baah-Wiredu,minister,Min. of Finance (2005â€“2008),12,ministers
+Anthony Akoto Osei,minister,Min. of Finance (2008â€“2009),12,ministers
+Hackman Owusu-Agyemang,minister,Min. of Foreign Affairs (2001â€“03) / Interior (2003â€“05),12,ministers
+Nana Akufo-Addo,minister,Min. of Foreign Affairs (2003â€“07) / AG (2001â€“03),12,ministers
+Akwasi Osei-Adjei,minister,Min. of Foreign Affairs (2007â€“2009),12,ministers
+Papa Owusu-Ankomah,minister,AG (2003â€“05) / Interior (2005â€“07) / Education (2001â€“03),12,ministers
+Joe Ghartey,minister,Attorney General (2005â€“2009),15,ministers
+Kwamena Bartels,minister,Min. of Interior (2007â€“09) / Information (2005â€“07),12,ministers
+Kwame Addo-Kufuor,minister,Min. of Defence (2001â€“2007),12,ministers
+Albert Kan-Dapaah,minister,Min. of Defence (2007â€“09) / Energy (2001â€“03),14,ministers
+Joseph Yieleh Chireh,minister,Min. of Health (2007â€“2009),12,ministers
+Richard Anane,minister,Min. of Roads (2001â€“2006),12,ministers
+Joe Gidisu,minister,Min. of Roads (2006â€“2009),12,ministers
+Joseph Kofi Adda,minister,Min. of Energy (2006â€“2009),12,ministers
+Alan Kyerematen,minister,Min. of Trade (2003â€“2007),12,ministers
+Kofi Konadu Apraku,minister,Min. of Trade (2001â€“2003),12,ministers
+Kasim Kasanga,minister,Min. of Lands (2001â€“2005),12,ministers
+Dominic Fobih,minister,Min. of Lands (2005â€“2009),12,ministers
+Jake Obetsebi-Lamptey,minister,Min. of Information (2001â€“03) / Tourism (2003â€“09),12,ministers
+Nana Akomea,minister,Min. of Information (2003â€“2005),12,ministers
+Alhaji Abubakar Saddique Boniface,minister,Min. of Works (2001â€“2009),12,ministers
+Cecilia Johnson,minister,Min. of Women & Children (2001â€“2005),12,ministers
+Hajia Alima Mahama,minister,Min. of Women & Children (2005â€“2009),13,ministers
+Kwadwo Adjei-Darko,minister,Min. of Local Govt (2001â€“2005),12,ministers
+Stephen Asamoah Boateng,minister,Min. of Local Govt (2005â€“2009),12,ministers
+Kwabena Duffuor,minister,Min. of Finance (2009â€“2012),12,ministers
+Seth Terkper,minister,Min. of Finance (2012â€“2017),12,ministers
+Alhaji Muhammad Mumuni,minister,Min. of Foreign Affairs (2009â€“2013),12,ministers
+Hanna Tetteh,minister,Min. of Foreign Affairs (2013â€“17) / Trade (2009â€“13),12,ministers
+Betty Mould-Iddrisu,minister,AG (2009â€“10) / Education (2010â€“11),12,ministers
+Martin Amidu,minister,Attorney General (2010â€“2012),12,ministers
+Marietta Brew Appiah-Oppong,minister,Attorney General (2013â€“2017),12,ministers
+Benjamin Kunbuor,minister,Min. of Interior (2010â€“12) / Defence (2012â€“13),12,ministers
+Mark Woyongo,minister,Min. of Interior (2013â€“2017),12,ministers
+J.E. Smith,minister,Min. of Defence (2009â€“2011),12,ministers
+Alex Tettey-Enyo,minister,Min. of Education (2009â€“2010),12,ministers
+Lee Ocran,minister,Min. of Education (2011â€“2012),12,ministers
+Jane Naana Opoku-Agyemang,minister,Min. of Education (2013â€“2017),12,ministers
+Sherry Ayittey,minister,Min. of Health (2010â€“2013),12,ministers
+Alex Segbefia,minister,Min. of Health (2013â€“2017),12,ministers
+Inusah Fuseini,minister,Min. of Roads (2012â€“2013),12,ministers
+Alhaji Collins Dauda,minister,Min. of Roads (2013â€“14) / Lands (2009â€“13) / Works (2013â€“17),12,ministers
+Sui Nyantakyi,minister,Min. of Roads (2014â€“2017),12,ministers
+Joe Oteng-Adjei,minister,Min. of Energy (2009â€“2013),12,ministers
+Emmanuel Armah-Kofi Buah,minister,Min. of Energy (2013â€“2017),13,ministers
+Ekwow Spio-Garbrah,minister,Min. of Trade (2013â€“2017),12,ministers
+Nii Osah Mills,minister,Min. of Lands (2013â€“2017),12,ministers
+Zita Okaikoi,minister,Min. of Information (2009â€“11) / Tourism (2011â€“13),12,ministers
+Fritz Baffour,minister,Min. of Information (2011â€“2013),12,ministers
+Mahama Ayariga,minister,Min. of Information (2013â€“14) / Youth (2014â€“17),12,ministers
+Haruna Iddrisu,minister,Min. of Communications (2009â€“13) / Employment (2014â€“17),16,ministers
+Edward Omane Boamah,minister,Min. of Communications (2013â€“2017),12,ministers
+Enoch Teye Mensah,minister,Min. of Works (2009â€“13) / Employment (2013â€“14),12,ministers
+Samuel Ofosu-Ampofo,minister,Min. of Local Govt (2010â€“2013),12,ministers
+Julius Debrah,minister,Min. of Local Govt (2013â€“2017),12,ministers
+Kwesi Ahwoi,minister,Min. of Food & Agric (2009â€“2013),12,ministers
+Clement Kofi Humado,minister,Min. of Food & Agric (2013â€“14) / Youth (2009â€“11),12,ministers
+Elizabeth Ofosu-Agyare,minister,Min. of Tourism (2013â€“2017),12,ministers
+Juliana Azumah-Mensah,minister,Min. of Gender (2009â€“2012),12,ministers
+Elvis Afriyie-Ankrah,minister,Min. of Youth (2012â€“2013),12,ministers
+Ken Ofori-Atta,minister,Min. of Finance (2017â€“2023),12,ministers
+Mohammed Amin Adam,minister,Min. of Finance (2024â€“2025),12,ministers
+Shirley Ayorkor Botchwey,minister,Min. of Foreign Affairs (2017â€“2025),12,ministers
+Gloria Akuffo,minister,Attorney General (2017â€“2021),12,ministers
+Godfred Yeboah Dame,minister,Attorney General (2021â€“2025),12,ministers
+Ambrose Dery,minister,Min. of Interior (2017â€“2025),12,ministers
+Dominic Nitiwul,minister,Min. of Defence (2017â€“2025),12,ministers
+Matthew Opoku Prempeh,minister,Min. of Education (2017â€“21) / Energy (2021â€“24),12,ministers
+Yaw Osei Adutwum,minister,Min. of Education (2021â€“2025),12,ministers
+Kwaku Agyeman-Manu,minister,Min. of Health (2017â€“2023),12,ministers
+Kwasi Amoako-Atta,minister,Min. of Roads (2017â€“2025),12,ministers
+Boakye Agyarko,minister,Min. of Energy (2017â€“2018),12,ministers
+John Peter Amewu,minister,Min. of Energy (2018â€“2021),12,ministers
+Kwaku Asomah-Cheremeh,minister,Min. of Lands (2017â€“2021),12,ministers
+Samuel Abu Jinapor,minister,Min. of Lands (2021â€“2025),12,ministers
+Mustapha Abdul-Hamid,minister,Min. of Information (2017â€“2018),12,ministers
+Kojo Oppong Nkrumah,minister,Min. of Information (2018â€“2025),12,ministers
+Ursula Owusu-Ekuful,minister,Min. of Communications (2017â€“2025),12,ministers
+Samuel Atta Akyea,minister,Min. of Works (2017â€“2021),12,ministers
+Francis Asenso-Boakye,minister,Min. of Works (2021â€“2025),12,ministers
+Ignatius Baffuor Awuah,minister,Min. of Employment (2017â€“2025),12,ministers
+Dan Botwe,minister,Min. of Local Govt (2021â€“2025),12,ministers
+Owusu Afriyie Akoto,minister,Min. of Food & Agric (2017â€“2023),12,ministers
+Bryan Acheampong,minister,Min. of Food & Agric (2023â€“2025),12,ministers
+Catherine Afeku,minister,Min. of Tourism (2017â€“2019),12,ministers
+Barbara Oteng-Gyasi,minister,Min. of Tourism (2019â€“2021),12,ministers
+Mohammed Awal,minister,Min. of Tourism (2021â€“2025),12,ministers
+Otiko Afisa Djaba,minister,Min. of Gender (2017â€“2018),12,ministers
+Cynthia Morrison,minister,Min. of Gender (2018â€“2021),12,ministers
+Sarah Adwoa Safo,minister,Min. of Gender (2021â€“2023),12,ministers
+Isaac Kwame Asiamah,minister,Min. of Youth (2017â€“2021),12,ministers
+Mustapha Ussif,minister,Min. of Youth (2021â€“2025),12,ministers
+Kwaku Ofori Asiamah,minister,Min. of Transport (2017â€“2025),12,ministers
+Elizabeth Afoley Quaye,minister,Min. of Fisheries (2017â€“2021),12,ministers
+Mavis Hawa Koomson,minister,Min. of Fisheries (2021â€“2025),12,ministers
+Kwabena Frimpong-Boateng,minister,Min. of Environment (2017â€“2021),12,ministers
+Kofi Dzamesi,minister,Min. of Chieftaincy (2017â€“2025),12,ministers
+Osei Kyei-Mensah-Bonsu,minister,Majority Leader (2017â€“2025),12,ministers
+Cassiel Ato Forson,minister,Minority Leader (2023â€“2025),14,ministers
+Samuel Nartey George,minister,Min. of Communications (2025â€“),12,ministers
+John Abdulai Jinapor,minister,Min. of Energy (2025â€“),12,ministers
+Ibrahim Murtala Mohammed,minister,Min. of Environment (2025â€“),12,ministers
+Emelia Arthur,minister,Min. of Fisheries (2025â€“),12,ministers
+Eric Opoku,minister,Min. of Food & Agriculture (2025â€“),12,ministers
+Samuel Okudzeto Ablakwa,minister,Min. of Foreign Affairs (2025â€“),12,ministers
+Agnes Naa Momo Lartey,minister,Min. of Gender (2025â€“),12,ministers
+Kwabena Minta Akandoh,minister,Min. of Health (2025â€“),12,ministers
+Mohammed Mubarak Muntaka,minister,Min. of Interior (2025â€“),12,ministers
+Dominic Ayine,minister,Attorney General (2025â€“),12,ministers
+Abdul-Rashid Pelpuo,minister,Min. of Labor (2025â€“),12,ministers
+Ahmed Ibrahim,minister,Min. of Local Government (2025â€“),12,ministers
+Governs Kwame Agbodza,minister,Min. of Roads (2025â€“),12,ministers
+Abla Dzifa Gomashie,minister,Min. of Tourism (2025â€“),12,ministers
+Elizabeth Ofosu Agyare,minister,Min. of Trade (2025â€“),12,ministers
+Joseph Bukari Nikpe,minister,Min. of Transportation (2025â€“),12,ministers
+Kenneth Gilbert Adjei,minister,Min. of Works & Housing (2025â€“),12,ministers
+George Opare Addo,minister,Min. of Youth (2025â€“),12,ministers
+Johnson Asiama,minister,Bank of Ghana Governor (2025â€“),12,ministers
+Kwasi Anin-Yeboah,minister,Chief Justice (2020â€“2023),2,persons_other_notables
+Gertrude Sackey Torkornoo,minister,Chief Justice (2023â€“),3,persons_other_notables
+B.B. Carboo,minister,Former MP for Ningo-Prampram (Stanley Basil Bade Carboo),23,persons_other_notables
+Kwaku Ananse,minister,Folklore (Ananse the Spider),21,persons_cultural_figures
