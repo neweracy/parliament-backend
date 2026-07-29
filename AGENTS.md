@@ -20,12 +20,23 @@ Node.js transcription app with two AI engines: Deepgram (Speech-to-Text) and Kha
 | `server.js` | Main backend — Deepgram routes, session auth, metadata, post-processing wiring |
 | `providers/khaya.js` | Khaya AI ASR provider (transcribe + getLanguages) |
 | `lib/hybrid/` | Hybrid confidence pipeline — Deepgram + Khaya AI correction for low-confidence words |
-| `lib/location-correction/index.js` | Rule-based correction engine — fused/split/hyphenated/spelling fixes for Ghana locations, persons, MPs, and parties |
+| `lib/location-correction/index.js` | Rule-based correction engine — public entry (`correctLocations`, `correctSingle`, `getPartyAbbr`, `isTitle`) |
+| `lib/location-correction/dataset-builder.js` | Dataset construction — canonical/alias/party maps, `SUPPLEMENTARY_LOCATIONS` |
+| `lib/location-correction/normalize.js` | Text normalization utilities — `stripAll`, `levenshtein`, `phoneticKey` |
+| `lib/location-correction/indexes.js` | Phonetic + initials indexes, `STOPWORDS`, `COMMON_BLOCK`, `TITLE_PREFIXES` |
+| `lib/location-correction/matchers.js` | Seven match strategies + `isTitle`, `matchTitlePerson` |
 | `lib/location-correction/word-walk.js` | Word-level n-gram walk — title-aware person detection, 3→2→1 n-gram entity correction on the words array |
+| `lib/location-correction/years/numbers.js` | Number word lookup tables (ONES, TENS, MONTHS, ORDINALS) |
+| `lib/location-correction/years/parsers.js` | Parsing helpers — `parseCenturyPrefix`, `parseTwoDigitSuffix`, `parseDayWords`, `ordinalSuffix` |
+| `lib/location-correction/years/patterns.js` | Seven pattern matchers — `matchTwoThousand`, `matchCenturySuffix`, `matchDecade`, etc. |
+| `lib/location-correction/year-correction.js` | Year/date correction public entry — `correctYears`, `correctYearsInText` (re-exports pattern matchers) |
 | `lib/location-correction/persons-dataset.js` | Presidents, VPs, Speakers, ministers dataset |
 | `lib/location-correction/mps-dataset.js` | Members of Parliament dataset (current + previous parliament) |
 | `lib/location-correction/parties-dataset.js` | Registered + historical Ghana political parties dataset |
-| `lib/location-correction/bedrock-postprocess.js` | Amazon Bedrock (Claude) LLM post-processing pass, dataset-aware, parallel-batched |
+| `lib/location-correction/bedrock-postprocess.js` | Amazon Bedrock (Claude) LLM post-processing — public entry (`postProcessWithBedrock`, `isBedrockConfigured`) |
+| `lib/location-correction/bedrock/client.js` | Bedrock client creation/invocation (accepts injected client for testing) |
+| `lib/location-correction/bedrock/prompt.js` | System prompt building with dataset reference |
+| `lib/location-correction/bedrock/align.js` | LCS alignment and chunk-word splitting |
 | `deepgram.toml` | Metadata, lifecycle commands, tags |
 | `Makefile` | Standardized build/run targets |
 | `sample.env` | Environment variable template |
@@ -205,8 +216,13 @@ docker compose down -v   # Tear down and remove volumes
 | `services/postprocess/app/main.py` | FastAPI app, lifespan, signal/drain handling |
 | `services/postprocess/app/config.py` | Settings via pydantic-settings, defaults, validation |
 | `services/postprocess/app/pipeline.py` | Stage orchestrator: Correction_Engine → Year_Corrector → LLM_Refiner |
-| `services/postprocess/app/correction/engine.py` | Rule-based Ghana entity correction (n-gram driver) |
+| `services/postprocess/app/correction/engine.py` | Rule-based Ghana entity correction — `correct_single`, `correct_text`, `correct_words`, scoring, party display |
+| `services/postprocess/app/correction/text_walk.py` | Re-exports `correct_text` (structural parity with JS split) |
+| `services/postprocess/app/correction/word_walk.py` | Re-exports `correct_words` (structural parity with JS split) |
 | `services/postprocess/app/years/corrector.py` | Year/date/decade conversion |
+| `services/postprocess/app/years/numbers.py` | Number word lookup tables |
+| `services/postprocess/app/years/parsers.py` | Parsing helpers for year/date patterns |
+| `services/postprocess/app/years/patterns.py` | Seven year/date pattern matchers |
 | `services/postprocess/app/llm/refiner.py` | Bedrock LLM refinement (chunking, waves, alignment) |
 | `services/postprocess/app/datasets/cache.py` | Dataset_Cache — periodic refresh from PostgreSQL |
 | `services/postprocess/app/datasets/index.py` | Match_Index build (canonical, fused, phonetic, BK-tree) |
