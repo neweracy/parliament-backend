@@ -115,3 +115,11 @@ make test             # contract conformance (app must be running)
 ```
 
 `test/` covers `hybrid/`, `location-correction/`, `postprocess-client/`, `providers/`, and `routes/`, with `fast-check` property tests alongside unit tests and helpers in `test/helpers/`.
+
+## Authoritative Implementation and Data Flow
+
+**Correction algorithms:** `services/postprocess/app/correction/engine.py` is the authoritative implementation for correction-algorithm changes. The JS_Correction_Engine (`lib/location-correction/`) follows Python's algorithm decisions. When a fix or enhancement is applied to the Python engine, the same change must be ported to JS or recorded as an accepted divergence in `test/parity/accepted-divergences.json`.
+
+**Entity data:** flows the other direction. The primary Dataset_Source lives in `lib/location-correction/*-dataset.js` plus `SUPPLEMENTARY_LOCATIONS` exported from `lib/location-correction/index.js`. Data is generated into the Python service via `services/postprocess/scripts/export_js_datasets.js`. Adding a new entity means editing the JS dataset file; the Python service receives it through the generation pipeline.
+
+These are independent axes — an algorithm fix does not touch dataset files, and adding an entity does not touch algorithm code.

@@ -1,0 +1,305 @@
+{
+  "version": "1.0.0",
+  "entries": [
+    {
+      "fixture_id": "hyphenated-kyei-mensah-bonsu",
+      "field": "words[0].entityType",
+      "js_value": "person",
+      "py_value": "minister",
+      "reason": "entityType granularity — JS uses generic 'person' for all person kinds; Python preserves the dataset entity_type (minister, president, mp). Port direction: JS adopts Python's granular type.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "hyphenated-kyei-mensah-bonsu",
+      "field": "entities[0]",
+      "js_value": "{\"name\":\"Osei Kyei-Mensah-Bonsu\",\"kind\":\"person\",\"type\":\"person\",\"mentions\":1}",
+      "py_value": "{\"name\":\"Osei Kyei-Mensah-Bonsu\",\"kind\":\"person\",\"type\":\"minister\",\"mentions\":1}",
+      "reason": "entityType granularity — same root cause as the word-level entityType divergence above.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "minister-botchway",
+      "field": "words[0].entityType",
+      "js_value": "person",
+      "py_value": "minister",
+      "reason": "entityType granularity — JS uses generic 'person'; Python preserves 'minister' from dataset.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "minister-botchway",
+      "field": "entities[0]",
+      "js_value": "{\"name\":\"Kwesi Botchwey\",\"kind\":\"person\",\"type\":\"person\",\"mentions\":1}",
+      "py_value": "{\"name\":\"Kwesi Botchwey\",\"kind\":\"person\",\"type\":\"minister\",\"mentions\":1}",
+      "reason": "entityType granularity — same root cause as the word-level entityType divergence.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "minister-osafo-maafo",
+      "field": "words[0].entityType",
+      "js_value": "person",
+      "py_value": "minister",
+      "reason": "entityType granularity — JS uses generic 'person'; Python preserves 'minister' from dataset.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "minister-osafo-maafo",
+      "field": "entities[0]",
+      "js_value": "{\"name\":\"Yaw Osafo-Maafo\",\"kind\":\"person\",\"type\":\"person\",\"mentions\":1}",
+      "py_value": "{\"name\":\"Yaw Osafo-Maafo\",\"kind\":\"person\",\"type\":\"minister\",\"mentions\":1}",
+      "reason": "entityType granularity — same root cause as the word-level entityType divergence.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "mp-sam-nartey-george",
+      "field": "words[0].entityType",
+      "js_value": "person",
+      "py_value": "minister",
+      "reason": "entityType granularity — JS uses generic 'person'; Python preserves 'minister' from dataset.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "mp-sam-nartey-george",
+      "field": "entities[0]",
+      "js_value": "{\"name\":\"Samuel Nartey George\",\"kind\":\"person\",\"type\":\"person\",\"mentions\":1}",
+      "py_value": "{\"name\":\"Samuel Nartey George\",\"kind\":\"person\",\"type\":\"minister\",\"mentions\":1}",
+      "reason": "entityType granularity — same root cause as the word-level entityType divergence.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "person-president-nkrumah",
+      "field": "words[0].entityType",
+      "js_value": "person",
+      "py_value": "president",
+      "reason": "entityType granularity — JS uses generic 'person'; Python preserves 'president' from dataset.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "person-president-nkrumah",
+      "field": "entities[0]",
+      "js_value": "{\"name\":\"Kwame Nkrumah\",\"kind\":\"person\",\"type\":\"person\",\"mentions\":1}",
+      "py_value": "{\"name\":\"Kwame Nkrumah\",\"kind\":\"person\",\"type\":\"president\",\"mentions\":1}",
+      "reason": "entityType granularity — same root cause as the word-level entityType divergence.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "person-speaker-adjetey",
+      "field": "words[0].entityType",
+      "js_value": "person",
+      "py_value": "president",
+      "reason": "entityType granularity — JS uses generic 'person'; Python preserves 'president' from dataset. (Peter Ala Adjetey is categorised as president-type in the dataset.)",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "person-speaker-adjetey",
+      "field": "entities[0]",
+      "js_value": "{\"name\":\"Peter Ala Adjetey\",\"kind\":\"person\",\"type\":\"person\",\"mentions\":1}",
+      "py_value": "{\"name\":\"Peter Ala Adjetey\",\"kind\":\"person\",\"type\":\"president\",\"mentions\":1}",
+      "reason": "entityType granularity — same root cause as the word-level entityType divergence.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "title-person-carboo",
+      "field": "words[1].entityType",
+      "js_value": "person",
+      "py_value": "minister",
+      "reason": "entityType granularity — JS uses generic 'person'; Python preserves 'minister' from dataset.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "title-person-carboo",
+      "field": "entities[0]",
+      "js_value": "{\"name\":\"B.B. Carboo\",\"kind\":\"person\",\"type\":\"person\",\"mentions\":1}",
+      "py_value": "{\"name\":\"B.B. Carboo\",\"kind\":\"person\",\"type\":\"minister\",\"mentions\":1}",
+      "reason": "entityType granularity — same root cause as the word-level entityType divergence.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "block-general",
+      "field": "transcript",
+      "js_value": "the general public",
+      "py_value": "the Joseph Arthur Ankrah public",
+      "reason": "Block-list divergence — JS correctly blocks 'general' from fuzzy correction; Python's block list does not include 'general' and fuzzy-matches it to 'Joseph Arthur Ankrah'. Python is overly aggressive here.",
+      "authoritative": "js",
+      "resolution": "port-to-py",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "block-nation",
+      "field": "transcript",
+      "js_value": "the nation is strong",
+      "py_value": "the National Democratic Congress is strong",
+      "reason": "Block-list divergence — JS correctly blocks 'nation' from correction; Python's block list does not include 'nation' and matches it to 'National Democratic Congress'.",
+      "authoritative": "js",
+      "resolution": "port-to-py",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "block-national",
+      "field": "transcript",
+      "js_value": "the national anthem",
+      "py_value": "the National Democratic Congress anthem",
+      "reason": "Block-list divergence — JS correctly blocks 'national' from correction; Python's block list does not include 'national' and matches it to 'National Democratic Congress'.",
+      "authoritative": "js",
+      "resolution": "port-to-py",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "no-entity-prose",
+      "field": "transcript",
+      "js_value": "the weather is nice today",
+      "py_value": "the weather is nice Akim Oda",
+      "reason": "Equidistant fuzzy tie-break — Python's rapidfuzz matches 'today' to 'Akim Oda' above the threshold while JS's levenshtein correctly rejects it. The Python fuzzy score cutoff is too permissive for this input.",
+      "authoritative": "js",
+      "resolution": "port-to-py",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "party-ndc-abbr",
+      "field": "transcript",
+      "js_value": "National Democratic Congress",
+      "py_value": "ndc",
+      "reason": "Text-level party expansion — JS correctLocations() expands party abbreviations in the transcript text; Python correct_text() does not expand short party abbreviations due to MIN_CANDIDATE_LENGTH gate. Port direction: JS-follows-Python since Python is authoritative for algorithms.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "party-cpp-abbr",
+      "field": "transcript",
+      "js_value": "Convention People's Party",
+      "py_value": "cpp",
+      "reason": "Text-level party expansion — JS correctLocations() expands party abbreviations in the transcript text; Python correct_text() does not expand short party abbreviations due to MIN_CANDIDATE_LENGTH gate. Same root cause as party-ndc-abbr.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "initials-ofori-atta",
+      "field": "words.length",
+      "js_value": "1",
+      "py_value": "2",
+      "reason": "Word-array structure — JS text-level correction merges 'K. Ofori-Atta' into a single corrected word 'Ken Ofori-Atta' spanning both original positions; Python keeps the original word boundaries and only corrects the transcript text. This is an accepted structural divergence: the text path in JS re-segments words, while Python preserves the original word array structure.",
+      "authoritative": "py",
+      "resolution": "accepted",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "initials-ofori-atta",
+      "field": "words[0].word",
+      "js_value": "Ken Ofori-Atta",
+      "py_value": "K.",
+      "reason": "Word-array structure — same root cause as the words.length divergence: JS merges multi-word corrections into single words.",
+      "authoritative": "py",
+      "resolution": "accepted",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "initials-ofori-atta",
+      "field": "words[0].end",
+      "js_value": "0.6",
+      "py_value": "0.3",
+      "reason": "Word-array structure — same root cause: merged word spans both original positions.",
+      "authoritative": "py",
+      "resolution": "accepted",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "initials-ofori-atta",
+      "field": "words[0].locationCorrected",
+      "js_value": "true",
+      "py_value": "false",
+      "reason": "Word-array structure — JS marks the merged word as corrected; Python does not mark individual words when only the text-level correction applied.",
+      "authoritative": "py",
+      "resolution": "accepted",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "initials-ofori-atta",
+      "field": "words[0].entityKind",
+      "js_value": "person",
+      "py_value": "false",
+      "reason": "Word-array structure — JS marks the merged word with entity metadata; Python does not annotate words when only the text-level correction applied.",
+      "authoritative": "py",
+      "resolution": "accepted",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "initials-ofori-atta",
+      "field": "words[0].entityType",
+      "js_value": "person",
+      "py_value": "false",
+      "reason": "Word-array structure — same root cause as entityKind above.",
+      "authoritative": "py",
+      "resolution": "accepted",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "initials-ofori-atta",
+      "field": "entities.length",
+      "js_value": "1",
+      "py_value": "0",
+      "reason": "Word-array structure — JS produces an entity summary because it annotated the merged word; Python has no word-level annotation so produces no entity.",
+      "authoritative": "py",
+      "resolution": "accepted",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "initials-ofori-atta",
+      "field": "entities[0]",
+      "js_value": "{\"name\":\"Ken Ofori-Atta\",\"kind\":\"person\",\"type\":\"person\",\"mentions\":1}",
+      "py_value": "undefined",
+      "reason": "Word-array structure — same root cause: JS has entity from merged word, Python has none.",
+      "authoritative": "py",
+      "resolution": "accepted",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "tie-break-exact-over-fused",
+      "field": "entities.length",
+      "js_value": "0",
+      "py_value": "1",
+      "reason": "Identity-match entity reporting — Python reports an entity when the input already matches a canonical name (identity match counts as a 'found' entity); JS does not report entities for identity matches where no actual correction occurred.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    },
+    {
+      "fixture_id": "tie-break-exact-over-fused",
+      "field": "entities[0]",
+      "js_value": "undefined",
+      "py_value": "{\"name\":\"Kumasi\",\"kind\":\"location\",\"type\":\"city\",\"mentions\":1}",
+      "reason": "Identity-match entity reporting — same root cause: Python counts identity matches as entity occurrences for the entity summary.",
+      "authoritative": "py",
+      "resolution": "port-to-js",
+      "recorded_at": "2026-07-29T12:30:00.000Z"
+    }
+  ]
+}
