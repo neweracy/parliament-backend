@@ -14,9 +14,9 @@
       "expected_entities": ["Ningo-Prampram"]
     },
     {
-      "id": "fused-prampram",
+      "id": "split-prampram",
       "description": "Split tokens 'pram pram' join to canonical 'Prampram'",
-      "category": "fused",
+      "category": "split",
       "input_transcript": "pram pram",
       "input_words": [
         { "word": "pram", "start": 0.0, "end": 0.3, "confidence": 0.95 },
@@ -29,7 +29,7 @@
     {
       "id": "fuzzy-kumasi",
       "description": "Edit-distance-1 misspelling 'Kumase' corrects to 'Kumasi'",
-      "category": "fuzzy",
+      "category": "location",
       "input_transcript": "Kumase",
       "input_words": [
         { "word": "Kumase", "start": 0.0, "end": 0.3, "confidence": 0.95 }
@@ -41,7 +41,7 @@
     {
       "id": "initials-ofori-atta",
       "description": "Initial + surname 'K. Ofori-Atta' expands to full name 'Ken Ofori-Atta'",
-      "category": "initials",
+      "category": "person",
       "input_transcript": "K. Ofori-Atta",
       "input_words": [
         { "word": "K.", "start": 0.0, "end": 0.3, "confidence": 0.95 },
@@ -54,7 +54,7 @@
     {
       "id": "title-person-carboo",
       "description": "Title prefix 'Honorable' followed by fuzzy person match 'bb kabo' corrects to 'B.B. Carboo'",
-      "category": "title_person",
+      "category": "person",
       "input_transcript": "Honorable bb kabo",
       "input_words": [
         { "word": "Honorable", "start": 0.0, "end": 0.3, "confidence": 0.95 },
@@ -80,7 +80,7 @@
     {
       "id": "block-general",
       "description": "Block_List token 'general' must not be corrected despite fuzzy proximity to entities",
-      "category": "block_list",
+      "category": "no_entity",
       "input_transcript": "the general public",
       "input_words": [
         { "word": "the", "start": 0.0, "end": 0.3, "confidence": 0.95 },
@@ -94,7 +94,7 @@
     {
       "id": "block-page",
       "description": "Block_List token 'page' must not be corrected",
-      "category": "block_list",
+      "category": "no_entity",
       "input_transcript": "turn the page",
       "input_words": [
         { "word": "turn", "start": 0.0, "end": 0.3, "confidence": 0.95 },
@@ -108,7 +108,7 @@
     {
       "id": "block-nation",
       "description": "Block_List token 'nation' must not be corrected to 'National' or any entity",
-      "category": "block_list",
+      "category": "no_entity",
       "input_transcript": "the nation is strong",
       "input_words": [
         { "word": "the", "start": 0.0, "end": 0.3, "confidence": 0.95 },
@@ -123,7 +123,7 @@
     {
       "id": "block-national",
       "description": "Block_List token 'national' must not be corrected to NDC or any party entity",
-      "category": "block_list",
+      "category": "no_entity",
       "input_transcript": "the national anthem",
       "input_words": [
         { "word": "the", "start": 0.0, "end": 0.3, "confidence": 0.95 },
@@ -137,7 +137,7 @@
     {
       "id": "block-dankwa",
       "description": "Canonical name part 'Dankwa' must not be replaced by a location (defect guard)",
-      "category": "block_list",
+      "category": "no_entity",
       "input_transcript": "Dankwa said hello",
       "input_words": [
         { "word": "Dankwa", "start": 0.0, "end": 0.3, "confidence": 0.95 },
@@ -151,7 +151,7 @@
     {
       "id": "block-dramani",
       "description": "Canonical name part 'Dramani' must not be replaced by a location (defect guard)",
-      "category": "block_list",
+      "category": "no_entity",
       "input_transcript": "Dramani was present",
       "input_words": [
         { "word": "Dramani", "start": 0.0, "end": 0.3, "confidence": 0.95 },
@@ -209,9 +209,9 @@
       "expected_entities": []
     },
     {
-      "id": "year-decade",
+      "id": "year-decade-seventies",
       "description": "Spoken decade 'the nineteen seventies' converts to 'the 1970s'",
-      "category": "year",
+      "category": "decade",
       "input_transcript": "the nineteen seventies",
       "input_words": [
         { "word": "the", "start": 0.0, "end": 0.3, "confidence": 0.95 },
@@ -251,7 +251,7 @@
     {
       "id": "tie-break-exact-over-fused",
       "description": "Exact match wins over fused match when both candidates apply to the same span",
-      "category": "tie_break",
+      "category": "location",
       "input_transcript": "Kumasi",
       "input_words": [
         { "word": "Kumasi", "start": 0.0, "end": 0.3, "confidence": 0.95 }
@@ -259,6 +259,188 @@
       "expected_transcript": "Kumasi",
       "should_correct": false,
       "expected_entities": ["Kumasi"]
+    },
+    {
+      "id": "location-obuasi-alias",
+      "description": "Supplementary alias 'Obuase' corrects to canonical city name 'Obuasi'",
+      "category": "location",
+      "input_transcript": "Obuase",
+      "input_words": [
+        { "word": "Obuase", "start": 0.0, "end": 0.3, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Obuasi",
+      "should_correct": true,
+      "expected_entities": ["Obuasi"]
+    },
+    {
+      "id": "location-bolgatanga-alias",
+      "description": "Short alias 'Bolga' expands to full city name 'Bolgatanga'",
+      "category": "location",
+      "input_transcript": "Bolga",
+      "input_words": [
+        { "word": "Bolga", "start": 0.0, "end": 0.3, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Bolgatanga",
+      "should_correct": true,
+      "expected_entities": ["Bolgatanga"]
+    },
+    {
+      "id": "location-sekondi-takoradi",
+      "description": "Partial name 'Sekondi' expands to hyphenated canonical 'Sekondi-Takoradi'",
+      "category": "location",
+      "input_transcript": "Sekondi",
+      "input_words": [
+        { "word": "Sekondi", "start": 0.0, "end": 0.3, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Sekondi-Takoradi",
+      "should_correct": true,
+      "expected_entities": ["Sekondi-Takoradi"]
+    },
+    {
+      "id": "person-president-nkrumah",
+      "description": "Alias 'Kwame Nkruma' corrects to canonical president name 'Kwame Nkrumah'",
+      "category": "person",
+      "input_transcript": "Kwame Nkruma",
+      "input_words": [
+        { "word": "Kwame", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "Nkruma", "start": 0.3, "end": 0.6, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Kwame Nkrumah",
+      "should_correct": true,
+      "expected_entities": ["Kwame Nkrumah"]
+    },
+    {
+      "id": "person-speaker-adjetey",
+      "description": "Speaker alias 'Ala Adjetey' expands to full canonical 'Peter Ala Adjetey'",
+      "category": "person",
+      "input_transcript": "Ala Adjetey",
+      "input_words": [
+        { "word": "Ala", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "Adjetey", "start": 0.3, "end": 0.6, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Peter Ala Adjetey",
+      "should_correct": true,
+      "expected_entities": ["Peter Ala Adjetey"]
+    },
+    {
+      "id": "minister-botchway",
+      "description": "Minister alias 'Botchway' corrects to canonical 'Kwesi Botchwey'",
+      "category": "minister",
+      "input_transcript": "Botchway",
+      "input_words": [
+        { "word": "Botchway", "start": 0.0, "end": 0.3, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Kwesi Botchwey",
+      "should_correct": true,
+      "expected_entities": ["Kwesi Botchwey"]
+    },
+    {
+      "id": "minister-osafo-maafo",
+      "description": "Minister alias 'Osafo Maafo' (without hyphen) corrects to canonical 'Yaw Osafo-Maafo'",
+      "category": "minister",
+      "input_transcript": "Osafo Maafo",
+      "input_words": [
+        { "word": "Osafo", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "Maafo", "start": 0.3, "end": 0.6, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Yaw Osafo-Maafo",
+      "should_correct": true,
+      "expected_entities": ["Yaw Osafo-Maafo"]
+    },
+    {
+      "id": "mp-sam-nartey-george",
+      "description": "MP alias 'Sam Nartey George' corrects to canonical 'Samuel Nartey George'",
+      "category": "mp",
+      "input_transcript": "Sam Nartey George",
+      "input_words": [
+        { "word": "Sam", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "Nartey", "start": 0.3, "end": 0.6, "confidence": 0.95 },
+        { "word": "George", "start": 0.6, "end": 0.9, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Samuel Nartey George",
+      "should_correct": true,
+      "expected_entities": ["Samuel Nartey George"]
+    },
+    {
+      "id": "party-cpp-abbr",
+      "description": "Party abbreviation 'cpp' normalizes to uppercase 'CPP'",
+      "category": "party",
+      "input_transcript": "cpp",
+      "input_words": [
+        { "word": "cpp", "start": 0.0, "end": 0.3, "confidence": 0.95 }
+      ],
+      "expected_transcript": "CPP",
+      "should_correct": true,
+      "expected_entities": ["Convention People's Party"]
+    },
+    {
+      "id": "party-canonical-alias",
+      "description": "Party alias 'Convention Peoples Party' corrects to canonical with apostrophe",
+      "category": "party",
+      "input_transcript": "Convention Peoples Party",
+      "input_words": [
+        { "word": "Convention", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "Peoples", "start": 0.3, "end": 0.6, "confidence": 0.95 },
+        { "word": "Party", "start": 0.6, "end": 0.9, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Convention People's Party",
+      "should_correct": true,
+      "expected_entities": ["Convention People's Party"]
+    },
+    {
+      "id": "year-decade-twenties",
+      "description": "Spoken decade 'the twenty twenties' converts to 'the 2020s'",
+      "category": "decade",
+      "input_transcript": "the twenty twenties",
+      "input_words": [
+        { "word": "the", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "twenty", "start": 0.3, "end": 0.6, "confidence": 0.95 },
+        { "word": "twenties", "start": 0.6, "end": 0.9, "confidence": 0.95 }
+      ],
+      "expected_transcript": "the 2020s",
+      "should_correct": true,
+      "expected_entities": []
+    },
+    {
+      "id": "hyphenated-kyei-mensah-bonsu",
+      "description": "Hyphenated surname 'Kyei-Mensah-Bonsu' expands to full name 'Osei Kyei-Mensah-Bonsu'",
+      "category": "hyphenated",
+      "input_transcript": "Kyei-Mensah-Bonsu",
+      "input_words": [
+        { "word": "Kyei-Mensah-Bonsu", "start": 0.0, "end": 0.3, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Osei Kyei-Mensah-Bonsu",
+      "should_correct": true,
+      "expected_entities": ["Osei Kyei-Mensah-Bonsu"]
+    },
+    {
+      "id": "hyphenated-afenyo-markin-split",
+      "description": "Hyphen dropped 'Afenyo Markin' corrects to hyphenated canonical 'Alexander Kwamena Afenyo-Markin'",
+      "category": "hyphenated",
+      "input_transcript": "Afenyo Markin",
+      "input_words": [
+        { "word": "Afenyo", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "Markin", "start": 0.3, "end": 0.6, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Alexander Kwamena Afenyo-Markin",
+      "should_correct": true,
+      "expected_entities": ["Alexander Kwamena Afenyo-Markin"]
+    },
+    {
+      "id": "no-entity-prose",
+      "description": "Plain prose with no correctable Ghana entities remains unchanged",
+      "category": "no_entity",
+      "input_transcript": "the weather is nice today",
+      "input_words": [
+        { "word": "the", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "weather", "start": 0.3, "end": 0.6, "confidence": 0.95 },
+        { "word": "is", "start": 0.6, "end": 0.9, "confidence": 0.95 },
+        { "word": "nice", "start": 0.9, "end": 1.2, "confidence": 0.95 },
+        { "word": "today", "start": 1.2, "end": 1.5, "confidence": 0.95 }
+      ],
+      "expected_transcript": "the weather is nice today",
+      "should_correct": false,
+      "expected_entities": []
     }
   ]
 }
