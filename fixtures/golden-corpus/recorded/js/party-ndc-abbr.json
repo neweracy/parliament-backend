@@ -1,0 +1,34 @@
+{
+  "fixture_id": "party-ndc-abbr",
+  "engine": "js",
+  "corpus_version": "2.0.0",
+  "recorded_at": "2026-07-29T11:57:54.261Z",
+  "transcript": "National Democratic Congress",
+  "words": [
+    {
+      "word": "NDC",
+      "start": 0,
+      "end": 0.3,
+      "confidence": 0.95,
+      "locationCorrected": true,
+      "entityKind": "party",
+      "entityType": "party"
+    }
+  ],
+  "entities": [
+    {
+      "name": "NDC",
+      "kind": "party",
+      "type": "party",
+      "mentions": 1
+    }
+  ],
+  "corrections": [
+    {
+      "original": "ndc",
+      "corrected": "National Democratic Congress",
+      "strategy": "exact",
+      "confidence": 1
+    }
+  ]
+}

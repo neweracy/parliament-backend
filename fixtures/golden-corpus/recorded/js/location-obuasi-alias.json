@@ -1,0 +1,34 @@
+{
+  "fixture_id": "location-obuasi-alias",
+  "engine": "js",
+  "corpus_version": "2.0.0",
+  "recorded_at": "2026-07-29T11:57:54.261Z",
+  "transcript": "Obuasi",
+  "words": [
+    {
+      "word": "Obuasi",
+      "start": 0,
+      "end": 0.3,
+      "confidence": 0.95,
+      "locationCorrected": true,
+      "entityKind": "location",
+      "entityType": "city"
+    }
+  ],
+  "entities": [
+    {
+      "name": "Obuasi",
+      "kind": "location",
+      "type": "city",
+      "mentions": 1
+    }
+  ],
+  "corrections": [
+    {
+      "original": "Obuase",
+      "corrected": "Obuasi",
+      "strategy": "exact",
+      "confidence": 1
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "fixture_id": "year-nineteen-ninety-two",
+  "engine": "js",
+  "corpus_version": "2.0.0",
+  "recorded_at": "2026-07-29T11:57:54.261Z",
+  "transcript": "1992",
+  "words": [
+    {
+      "word": "1992",
+      "start": 0,
+      "end": 0.9,
+      "confidence": 0.95,
+      "yearCorrected": true
+    }
+  ],
+  "entities": [],
+  "corrections": [
+    {
+      "original": "nineteen ninety two",
+      "corrected": "1992",
+      "strategy": "year",
+      "confidence": 1
+    }
+  ]
+}

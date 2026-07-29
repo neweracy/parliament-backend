@@ -1,0 +1,40 @@
+{
+  "fixture_id": "title-person-carboo",
+  "engine": "js",
+  "corpus_version": "2.0.0",
+  "recorded_at": "2026-07-29T11:57:54.261Z",
+  "transcript": "Honorable B.B. Carboo",
+  "words": [
+    {
+      "word": "Honorable",
+      "start": 0,
+      "end": 0.3,
+      "confidence": 0.95
+    },
+    {
+      "word": "B.B. Carboo",
+      "start": 0.3,
+      "end": 0.9,
+      "confidence": 0.95,
+      "locationCorrected": true,
+      "entityKind": "person",
+      "entityType": "person"
+    }
+  ],
+  "entities": [
+    {
+      "name": "B.B. Carboo",
+      "kind": "person",
+      "type": "person",
+      "mentions": 1
+    }
+  ],
+  "corrections": [
+    {
+      "original": "bb kabo",
+      "corrected": "B.B. Carboo",
+      "strategy": "exact",
+      "confidence": 1
+    }
+  ]
+}

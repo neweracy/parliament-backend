@@ -1,0 +1,34 @@
+{
+  "fixture_id": "initials-ofori-atta",
+  "engine": "js",
+  "corpus_version": "2.0.0",
+  "recorded_at": "2026-07-29T11:57:54.261Z",
+  "transcript": "Ken Ofori-Atta",
+  "words": [
+    {
+      "word": "Ken Ofori-Atta",
+      "start": 0,
+      "end": 0.6,
+      "confidence": 0.95,
+      "locationCorrected": true,
+      "entityKind": "person",
+      "entityType": "person"
+    }
+  ],
+  "entities": [
+    {
+      "name": "Ken Ofori-Atta",
+      "kind": "person",
+      "type": "person",
+      "mentions": 1
+    }
+  ],
+  "corrections": [
+    {
+      "original": "K. Ofori-Atta",
+      "corrected": "Ken Ofori-Atta",
+      "strategy": "initials",
+      "confidence": 0.95
+    }
+  ]
+}

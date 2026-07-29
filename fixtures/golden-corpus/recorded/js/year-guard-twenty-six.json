@@ -1,0 +1,23 @@
+{
+  "fixture_id": "year-guard-twenty-six",
+  "engine": "js",
+  "corpus_version": "2.0.0",
+  "recorded_at": "2026-07-29T11:57:54.261Z",
+  "transcript": "twenty six",
+  "words": [
+    {
+      "word": "twenty",
+      "start": 0,
+      "end": 0.3,
+      "confidence": 0.95
+    },
+    {
+      "word": "six",
+      "start": 0.3,
+      "end": 0.6,
+      "confidence": 0.95
+    }
+  ],
+  "entities": [],
+  "corrections": []
+}
