@@ -9,7 +9,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fc = require('fast-check');
-const { scoreResult, selectWinner } = require('../../lib/hybrid/scorer');
+const { scoreResult, selectWinner } = require('../../lib/hybrid/scorer'); // eslint-disable-line no-unused-vars
 
 const LANGUAGES = ['tw', 'ee', 'gaa'];
 

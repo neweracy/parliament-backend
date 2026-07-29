@@ -260,10 +260,11 @@ docker compose down -v   # Tear down and remove volumes
 ```bash
 cd services/postprocess
 pip install -e ".[dev]"
-pytest                     # All tests
-pytest tests/unit/         # Unit tests only
-pytest tests/property/     # Property-based tests only
-pytest tests/integration/  # Integration tests (requires PostgreSQL)
+ruff check app tests && pytest   # Lint + all tests (sequenced)
+pytest                           # All tests
+pytest tests/unit/               # Unit tests only
+pytest tests/property/           # Property-based tests only
+pytest tests/integration/        # Integration tests (requires PostgreSQL)
 ```
 
 ## Testing

@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "postprocess-service"
+version = "0.1.0"
+description = "Transcript post-processing service — entity correction, year/date correction, and LLM refinement"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.115.12",
+    "uvicorn[standard]==0.34.2",
+    "pydantic==2.11.4",
+    "pydantic-settings==2.9.1",
+    "sqlalchemy==2.0.41",
+    "psycopg[binary]==3.2.9",
+    "alembic==1.15.2",
+    "rapidfuzz==3.13.0",
+    "pybktree==1.1",
+    "boto3==1.39.2",
+    "structlog==25.4.0",
+    "aws-embedded-metrics==3.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.4.1",
+    "pytest-asyncio==1.0.0",
+    "hypothesis==6.135.1",
+    "httpx==0.28.1",
+    "ruff==0.14.4",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["ARG", "PLR"]

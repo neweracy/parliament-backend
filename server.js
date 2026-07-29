@@ -124,7 +124,7 @@ function loadApiKey() {
     try {
       const config = require("./config.json");
       apiKey = config.dgKey;
-    } catch (err) {
+    } catch (_err) {
       // config.json doesn't exist or is invalid - that's ok
     }
   }
@@ -178,8 +178,6 @@ function loadOpenApiSpec() {
   if (!fs.existsSync(specPath)) return null;
 
   const yaml = fs.readFileSync(specPath, "utf-8");
-  // Simple YAML-to-JSON for OpenAPI (handles the subset we use)
-  const lines = yaml.split("\n");
   // Use a basic approach: just serve the raw YAML via swagger-ui's yamlStr option
   return yaml;
 }

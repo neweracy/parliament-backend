@@ -134,6 +134,7 @@ function discoverServiceEnvVars() {
   const relPath = path.relative(ROOT, SERVICE_CONFIG_PY);
 
   // Extract the Settings class body (from "class Settings" to the next class or end)
+  // eslint-disable-next-line no-useless-escape
   const classRe = /^class Settings\(BaseSettings\):.*?\n([\s\S]*?)(?=\n(?:class |def (?!_))|\Z)/m;
   const classMatch = classRe.exec(content);
   if (!classMatch) return discovered;

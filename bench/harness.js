@@ -398,6 +398,7 @@ function compareResults(current, baseline) {
       const curMedian = current.js_rule_stage[key]?.median_ms;
       const baseMedian = baseline.js_rule_stage[key]?.median_ms;
 
+      // eslint-disable-next-line eqeqeq
       if (curMedian != null && baseMedian != null && baseMedian > 0) {
         const pctChange = ((curMedian - baseMedian) / baseMedian) * 100;
 
@@ -430,6 +431,7 @@ function compareResults(current, baseline) {
       const curMedian = current.py_rule_stage[key]?.median_ms;
       const baseMedian = baseline.py_rule_stage[key]?.median_ms;
 
+      // eslint-disable-next-line eqeqeq
       if (curMedian != null && baseMedian != null && baseMedian > 0) {
         const pctChange = ((curMedian - baseMedian) / baseMedian) * 100;
 
@@ -470,6 +472,7 @@ function compareResults(current, baseline) {
   // --- Absolute budget proposals (reporting only, never fail) ---
   if (current.js_rule_stage) {
     const median10k = current.js_rule_stage['10000']?.median_ms;
+    // eslint-disable-next-line eqeqeq
     if (median10k != null) {
       if (median10k > PROPOSED_RULE_STAGE_MS) {
         reports.push(
@@ -485,6 +488,7 @@ function compareResults(current, baseline) {
 
   if (current.py_index_build && !current.py_index_build.unavailable) {
     const median = current.py_index_build.median_ms;
+    // eslint-disable-next-line eqeqeq
     if (median != null) {
       if (median > PROPOSED_INDEX_BUILD_MS) {
         reports.push(

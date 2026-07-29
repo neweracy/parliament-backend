@@ -62,6 +62,7 @@ function buildWordsFromTranscript(transcript) {
  * @param {Array<{word: string, start: number, end: number, confidence: number}>} inputWords
  * @returns {{ transcript: string, words: Array }}
  */
+// eslint-disable-next-line no-unused-vars
 function runCorrection(transcript, inputWords) {
   // Text-level correction
   const textResult = correctLocations(transcript);
