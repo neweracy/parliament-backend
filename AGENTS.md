@@ -21,6 +21,7 @@ Node.js transcription app with two AI engines: Deepgram (Speech-to-Text) and Kha
 | `providers/khaya.js` | Khaya AI ASR provider (transcribe + getLanguages) |
 | `lib/hybrid/` | Hybrid confidence pipeline — Deepgram + Khaya AI correction for low-confidence words |
 | `lib/location-correction/index.js` | Rule-based correction engine — fused/split/hyphenated/spelling fixes for Ghana locations, persons, MPs, and parties |
+| `lib/location-correction/word-walk.js` | Word-level n-gram walk — title-aware person detection, 3→2→1 n-gram entity correction on the words array |
 | `lib/location-correction/persons-dataset.js` | Presidents, VPs, Speakers, ministers dataset |
 | `lib/location-correction/mps-dataset.js` | Members of Parliament dataset (current + previous parliament) |
 | `lib/location-correction/parties-dataset.js` | Registered + historical Ghana political parties dataset |
@@ -38,8 +39,11 @@ Node.js transcription app with two AI engines: Deepgram (Speech-to-Text) and Kha
 | `frontend/vite.config.ts` | Vite + React plugin, `/api` proxy to backend |
 | `deploy/Dockerfile` | Production container (Caddy + backend) |
 | `deploy/Caddyfile` | Reverse proxy, rate limiting, static serving |
+| `services/postprocess/` | Python Postprocessing Service (FastAPI + Uvicorn) |
+| `lib/postprocess-client.js` | Gateway client for the Postprocessing Service (timeout, retry, circuit breaker) |
 
 See `frontend/AGENTS.md` for frontend-specific conventions.
+See the **Postprocessing Service** section below for the Python microservice.
 
 ## Quick Start
 
@@ -164,6 +168,102 @@ chore(deps): update frontend submodule
 ```
 
 Scope is typically `node-transcription` or `deps`.
+
+## Postprocessing Service (Python)
+
+A FastAPI microservice at `services/postprocess/` that owns all transcript post-processing: entity correction, year/date correction, and LLM refinement. The Gateway calls it over internal HTTP when `POSTPROCESS_MODE=python`.
+
+### Request Path
+
+```
+Client → Gateway (:8081) → POST /v1/postprocess → Postprocessing Service (:8082) → Bedrock
+                                                 → Dataset_Store (PostgreSQL)
+```
+
+The Gateway is the only public entry point. The Postprocessing Service listens on an internal address only and is authenticated via a shared Bearer token (`SERVICE_TOKEN` / `POSTPROCESS_TOKEN`).
+
+### Startup Command
+
+```bash
+cd services/postprocess
+uvicorn app.main:app --host 0.0.0.0 --port 8082 --workers ${UVICORN_WORKERS:-2} --timeout-graceful-shutdown ${DRAIN_TIMEOUT_SECONDS:-15}
+```
+
+Or via Docker:
+
+```bash
+cd services/postprocess
+docker compose up        # Gateway + Postprocess + PostgreSQL
+docker compose down -v   # Tear down and remove volumes
+```
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `services/postprocess/app/main.py` | FastAPI app, lifespan, signal/drain handling |
+| `services/postprocess/app/config.py` | Settings via pydantic-settings, defaults, validation |
+| `services/postprocess/app/pipeline.py` | Stage orchestrator: Correction_Engine → Year_Corrector → LLM_Refiner |
+| `services/postprocess/app/correction/engine.py` | Rule-based Ghana entity correction (n-gram driver) |
+| `services/postprocess/app/years/corrector.py` | Year/date/decade conversion |
+| `services/postprocess/app/llm/refiner.py` | Bedrock LLM refinement (chunking, waves, alignment) |
+| `services/postprocess/app/datasets/cache.py` | Dataset_Cache — periodic refresh from PostgreSQL |
+| `services/postprocess/app/datasets/index.py` | Match_Index build (canonical, fused, phonetic, BK-tree) |
+| `services/postprocess/Dockerfile` | Multi-stage production image |
+| `services/postprocess/docker-compose.yml` | Local dev: Gateway + Service + PostgreSQL |
+| `services/postprocess/deploy/ecs-task-definition.json` | ECS Fargate task definition fragment |
+| `services/postprocess/deploy/iam-policy.json` | IAM policy for bedrock:InvokeModel |
+| `services/postprocess/sample.env` | All configuration variables with defaults |
+
+### Postprocessing Service Configuration
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `SERVICE_TOKEN` | Yes | — | Bearer token for Gateway → Service auth |
+| `DATABASE_URL` | Yes | — | PostgreSQL connection (format: `postgresql+psycopg://user:pass@host:port/db`) |
+| `HOST` | No | `0.0.0.0` | Bind address |
+| `PORT` | No | `8082` | HTTP port |
+| `UVICORN_WORKERS` | No | `2` | Worker processes (size to vCPU count) |
+| `DRAIN_TIMEOUT_SECONDS` | No | `15` | Graceful shutdown drain period |
+| `DATASET_REFRESH_SECONDS` | No | `300` | Interval between Dataset_Store refreshes |
+| `DATASET_LOAD_RETRY_SECONDS` | No | `30` | Retry interval on failed startup load |
+| `MIN_CONFIDENCE` | No | `0.75` | Minimum word confidence for correction |
+| `WORD_ACCEPT_THRESHOLD` | No | `0.90` | Minimum match score to accept a correction |
+| `FUZZY_SCORE_CUTOFF` | No | `0.70` | Minimum rapidfuzz similarity |
+| `MIN_CANDIDATE_LENGTH` | No | `4` | Min token length for fuzzy/phonetic |
+| `AWS_REGION` | No | `us-east-1` | AWS region for Bedrock |
+| `BEDROCK_MODEL_ID` | No | `us.anthropic.claude-haiku-4-5-20251001-v1:0` | Bedrock model ID |
+| `LLM_ENABLED` | No | `true` | Enable/disable LLM refinement stage |
+| `LLM_CHUNK_SIZE` | No | `300` | Words per LLM chunk |
+| `LLM_MAX_PARALLEL` | No | `3` | Concurrent Bedrock invocations per wave |
+| `LLM_CHUNK_TIMEOUT_MS` | No | `15000` | Per-chunk timeout |
+| `LLM_RETRIEVAL_MODE` | No | `dataset_store` | `dataset_store` or `knowledge_base` |
+| `LLM_MAX_PROMPT_RECORDS` | No | `50` | Max entity records per prompt |
+| `KNOWLEDGE_BASE_ID` | No | — | Bedrock KB ID (if retrieval mode = knowledge_base) |
+| `HISTORY_ENABLED` | No | `true` | Persist correction history |
+| `LOG_LEVEL` | No | `info` | Minimum log level |
+
+### Gateway-Side Variables (for calling the Postprocessing Service)
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `POSTPROCESS_MODE` | No | `js` | `js` / `python` / `off` |
+| `POSTPROCESS_URL` | No | `http://localhost:8082` | Service base URL |
+| `POSTPROCESS_TOKEN` | No | — | Bearer token (must match `SERVICE_TOKEN`) |
+| `POSTPROCESS_TIMEOUT_MS` | No | `20000` | Request timeout |
+| `POSTPROCESS_BREAKER_THRESHOLD` | No | `5` | Consecutive failures to open circuit |
+| `POSTPROCESS_BREAKER_COOLDOWN_MS` | No | `30000` | Cool-down before half-open probe |
+
+### Running Tests
+
+```bash
+cd services/postprocess
+pip install -e ".[dev]"
+pytest                     # All tests
+pytest tests/unit/         # Unit tests only
+pytest tests/property/     # Property-based tests only
+pytest tests/integration/  # Integration tests (requires PostgreSQL)
+```
 
 ## Testing
 
