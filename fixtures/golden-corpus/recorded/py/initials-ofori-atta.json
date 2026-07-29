@@ -1,0 +1,30 @@
+{
+  "fixture_id": "initials-ofori-atta",
+  "engine": "py",
+  "corpus_version": "2.0.0",
+  "recorded_at": "2026-07-29T12:24:20.663408Z",
+  "transcript": "Ken Ofori-Atta",
+  "words": [
+    {
+      "word": "K.",
+      "start": 0.0,
+      "end": 0.3,
+      "confidence": 0.95
+    },
+    {
+      "word": "Ofori-Atta",
+      "start": 0.3,
+      "end": 0.6,
+      "confidence": 0.95
+    }
+  ],
+  "entities": [],
+  "corrections": [
+    {
+      "original": "K. Ofori-Atta",
+      "corrected": "Ken Ofori-Atta",
+      "strategy": "initials",
+      "confidence": 0.95
+    }
+  ]
+}

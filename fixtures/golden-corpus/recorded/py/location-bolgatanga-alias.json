@@ -1,0 +1,34 @@
+{
+  "fixture_id": "location-bolgatanga-alias",
+  "engine": "py",
+  "corpus_version": "2.0.0",
+  "recorded_at": "2026-07-29T12:24:20.663408Z",
+  "transcript": "Bolgatanga",
+  "words": [
+    {
+      "word": "Bolgatanga",
+      "start": 0.0,
+      "end": 0.3,
+      "confidence": 0.95,
+      "locationCorrected": true,
+      "entityKind": "location",
+      "entityType": "city"
+    }
+  ],
+  "entities": [
+    {
+      "name": "Bolgatanga",
+      "kind": "location",
+      "type": "city",
+      "mentions": 1
+    }
+  ],
+  "corrections": [
+    {
+      "original": "Bolga",
+      "corrected": "Bolgatanga",
+      "strategy": "exact",
+      "confidence": 1.0
+    }
+  ]
+}

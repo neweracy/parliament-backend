@@ -1,0 +1,24 @@
+{
+  "fixture_id": "tie-break-exact-over-fused",
+  "engine": "py",
+  "corpus_version": "2.0.0",
+  "recorded_at": "2026-07-29T12:24:20.663408Z",
+  "transcript": "Kumasi",
+  "words": [
+    {
+      "word": "Kumasi",
+      "start": 0.0,
+      "end": 0.3,
+      "confidence": 0.95
+    }
+  ],
+  "entities": [
+    {
+      "name": "Kumasi",
+      "kind": "location",
+      "type": "city",
+      "mentions": 1
+    }
+  ],
+  "corrections": []
+}

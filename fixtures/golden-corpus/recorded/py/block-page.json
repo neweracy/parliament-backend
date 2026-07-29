@@ -1,0 +1,29 @@
+{
+  "fixture_id": "block-page",
+  "engine": "py",
+  "corpus_version": "2.0.0",
+  "recorded_at": "2026-07-29T12:24:20.663408Z",
+  "transcript": "turn the page",
+  "words": [
+    {
+      "word": "turn",
+      "start": 0.0,
+      "end": 0.3,
+      "confidence": 0.95
+    },
+    {
+      "word": "the",
+      "start": 0.3,
+      "end": 0.6,
+      "confidence": 0.95
+    },
+    {
+      "word": "page",
+      "start": 0.6,
+      "end": 0.9,
+      "confidence": 0.95
+    }
+  ],
+  "entities": [],
+  "corrections": []
+}

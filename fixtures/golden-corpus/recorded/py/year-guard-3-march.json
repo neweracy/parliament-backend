@@ -1,0 +1,23 @@
+{
+  "fixture_id": "year-guard-3-march",
+  "engine": "py",
+  "corpus_version": "2.0.0",
+  "recorded_at": "2026-07-29T12:24:20.663408Z",
+  "transcript": "3 March",
+  "words": [
+    {
+      "word": "3",
+      "start": 0.0,
+      "end": 0.3,
+      "confidence": 0.95
+    },
+    {
+      "word": "March",
+      "start": 0.3,
+      "end": 0.6,
+      "confidence": 0.95
+    }
+  ],
+  "entities": [],
+  "corrections": []
+}

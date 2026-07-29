@@ -1,0 +1,48 @@
+{
+  "fixture_id": "no-entity-prose",
+  "engine": "py",
+  "corpus_version": "2.0.0",
+  "recorded_at": "2026-07-29T12:24:20.663408Z",
+  "transcript": "the weather is nice Akim Oda",
+  "words": [
+    {
+      "word": "the",
+      "start": 0.0,
+      "end": 0.3,
+      "confidence": 0.95
+    },
+    {
+      "word": "weather",
+      "start": 0.3,
+      "end": 0.6,
+      "confidence": 0.95
+    },
+    {
+      "word": "is",
+      "start": 0.6,
+      "end": 0.9,
+      "confidence": 0.95
+    },
+    {
+      "word": "nice",
+      "start": 0.9,
+      "end": 1.2,
+      "confidence": 0.95
+    },
+    {
+      "word": "today",
+      "start": 1.2,
+      "end": 1.5,
+      "confidence": 0.95
+    }
+  ],
+  "entities": [],
+  "corrections": [
+    {
+      "original": "today",
+      "corrected": "Akim Oda",
+      "strategy": "fuzzy",
+      "confidence": 0.76
+    }
+  ]
+}

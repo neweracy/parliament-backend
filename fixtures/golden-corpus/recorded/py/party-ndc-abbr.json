@@ -1,0 +1,27 @@
+{
+  "fixture_id": "party-ndc-abbr",
+  "engine": "py",
+  "corpus_version": "2.0.0",
+  "recorded_at": "2026-07-29T12:24:20.663408Z",
+  "transcript": "ndc",
+  "words": [
+    {
+      "word": "NDC",
+      "start": 0.0,
+      "end": 0.3,
+      "confidence": 0.95,
+      "locationCorrected": true,
+      "entityKind": "party",
+      "entityType": "party"
+    }
+  ],
+  "entities": [
+    {
+      "name": "NDC",
+      "kind": "party",
+      "type": "party",
+      "mentions": 1
+    }
+  ],
+  "corrections": []
+}
