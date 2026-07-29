@@ -1,0 +1,188 @@
+{
+  "schema_version": "1.0.0",
+  "measurements": [
+    {
+      "phase": "pre-refactor",
+      "recorded_at": "2026-07-29T13:30:46.374Z",
+      "git_commit": "cfce1cf",
+      "machine": {
+        "id": "f5d6f907bea2b19630e6a82f7b328dee6823c0c139476521de9767e7b4aa2491",
+        "cpu_model": "Intel(R) Core(TM) i7-8850H CPU @ 2.60GHz",
+        "cores": 12,
+        "total_memory_bytes": 25457172480,
+        "platform": "win32",
+        "node_version": "v25.3.0",
+        "python_version": "3.13.14"
+      },
+      "js_rule_stage": {
+        "100": {
+          "runs_ms": [
+            53.6016,
+            55.6311,
+            55.7396,
+            49.6706,
+            54.1364
+          ],
+          "median_ms": 54.1364
+        },
+        "1000": {
+          "runs_ms": [
+            506.6711,
+            491.6645,
+            488.6069,
+            502.6125,
+            479.3928
+          ],
+          "median_ms": 491.6645
+        },
+        "10000": {
+          "runs_ms": [
+            4387.6793,
+            4431.8568,
+            4494.7079,
+            4336.0758,
+            4412.3854
+          ],
+          "median_ms": 4412.3854
+        }
+      },
+      "py_rule_stage": {
+        "unavailable": true,
+        "error": "Exit code 1: Traceback (most recent call last):\r\n  File \"D:\\code\\transcript-end\\services\\postprocess\\scripts\\bench_rule_stage.py\", line 20, in <module>\r\n    from app.correction.engine import correct_text, correct_words  # noqa: E402\r\n    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n  File \"D:\\code\\transcript-end\\services\\postprocess\\app\\correction\\engine.py\", line 19, in <module>\r\n    from app.correction.blocklist import is_stopword, is_title, is_word_stopword\r\n  File \"D:\\code\\transcript-end\\services\\postprocess\\app\\correction\\blocklist.py\", line 22, in <module>\r\n    from app.datasets.cache import DatasetSnapshot\r\n  File \"D:\\code\\transcript-end\\services\\postprocess\\app\\datasets\\cache.py\", line 26, in <module>\r\n    import structlog\r\nModuleNotFoundError: No module named 'structlog'"
+      },
+      "py_index_build": {
+        "runs_ms": [
+          80.6251,
+          76.2799,
+          82.5404,
+          81.7874,
+          86.4091
+        ],
+        "median_ms": 81.7874,
+        "record_count": 5000
+      },
+      "frontend_chunks": {
+        "entry": {
+          "path": "assets/index-2GB2TsGZ.js",
+          "raw_bytes": 394236,
+          "gzip_bytes": 126667
+        },
+        "routes": [
+          {
+            "path": "assets/About-Q24YakfM.js",
+            "raw_bytes": 3389,
+            "gzip_bytes": 1159,
+            "role": "route"
+          },
+          {
+            "path": "assets/History--nUXUEEE.js",
+            "raw_bytes": 6927,
+            "gzip_bytes": 2085,
+            "role": "route"
+          },
+          {
+            "path": "assets/history-repo-C11PwA0w.js",
+            "raw_bytes": 575,
+            "gzip_bytes": 363,
+            "role": "route"
+          },
+          {
+            "path": "assets/Landing-BF0HmEaO.js",
+            "raw_bytes": 15737,
+            "gzip_bytes": 4410,
+            "role": "route"
+          },
+          {
+            "path": "assets/Projects-DOsXEv11.js",
+            "raw_bytes": 3970,
+            "gzip_bytes": 1556,
+            "role": "route"
+          },
+          {
+            "path": "assets/Transcribe-B2NvUgv2.js",
+            "raw_bytes": 89918,
+            "gzip_bytes": 26481,
+            "role": "route"
+          }
+        ],
+        "all_chunks": [
+          {
+            "path": "assets/About-Q24YakfM.js",
+            "raw_bytes": 3389,
+            "gzip_bytes": 1159
+          },
+          {
+            "path": "assets/amador-loureiro-BVyNlchWqzs-unsplash-BIAsWUqo.jpg",
+            "raw_bytes": 1991972,
+            "gzip_bytes": 1988755
+          },
+          {
+            "path": "assets/EmptyState-C8ma6_td.js",
+            "raw_bytes": 876,
+            "gzip_bytes": 472
+          },
+          {
+            "path": "assets/History--nUXUEEE.js",
+            "raw_bytes": 6927,
+            "gzip_bytes": 2085
+          },
+          {
+            "path": "assets/history-repo-C11PwA0w.js",
+            "raw_bytes": 575,
+            "gzip_bytes": 363
+          },
+          {
+            "path": "assets/index-2GB2TsGZ.js",
+            "raw_bytes": 394236,
+            "gzip_bytes": 126667
+          },
+          {
+            "path": "assets/index-DweLyQot.css",
+            "raw_bytes": 127874,
+            "gzip_bytes": 20710
+          },
+          {
+            "path": "assets/joshua-hoehne-1UDjq8s8cy0-unsplash-DABClmAe.jpg",
+            "raw_bytes": 1008207,
+            "gzip_bytes": 1002444
+          },
+          {
+            "path": "assets/Landing-BF0HmEaO.js",
+            "raw_bytes": 15737,
+            "gzip_bytes": 4410
+          },
+          {
+            "path": "assets/ling-app-p5VW_ZUon7o-unsplash-CQvyVYnK.jpg",
+            "raw_bytes": 1525743,
+            "gzip_bytes": 1513345
+          },
+          {
+            "path": "assets/NotFound-BaWFLVdC.js",
+            "raw_bytes": 587,
+            "gzip_bytes": 354
+          },
+          {
+            "path": "assets/project-repo-D3764etQ.js",
+            "raw_bytes": 976,
+            "gzip_bytes": 455
+          },
+          {
+            "path": "assets/Projects-DOsXEv11.js",
+            "raw_bytes": 3970,
+            "gzip_bytes": 1556
+          },
+          {
+            "path": "assets/Transcribe-B2NvUgv2.js",
+            "raw_bytes": 89918,
+            "gzip_bytes": 26481
+          },
+          {
+            "path": "assets/veronika-tarakanova-Ez-XMWsYHsE-unsplash-C3_Kgpj_.jpg",
+            "raw_bytes": 3217161,
+            "gzip_bytes": 3202280
+          }
+        ]
+      }
+    }
+  ]
+}
