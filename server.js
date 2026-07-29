@@ -608,6 +608,19 @@ app.get("/api/audio-proxy", async (req, res) => {
 });
 
 // ============================================================================
+// HEALTH CHECK — unauthenticated, no outbound calls, no secrets exposed
+// ============================================================================
+
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    uptime_seconds: Math.floor(process.uptime()),
+    postprocess_mode: POSTPROCESS_MODE,
+    version: require('./package.json').version,
+  });
+});
+
+// ============================================================================
 // SERVER START
 // ============================================================================
 
@@ -620,6 +633,7 @@ app.listen(CONFIG.port, CONFIG.host, () => {
   console.log(`📡 POST /api/khaya/transcription (auth required) [Khaya AI]`);
   console.log(`📡 GET  /api/khaya/languages`);
   console.log(`📡 GET  /api/metadata`);
+  console.log(`📡 GET  /health`);
   if (openApiYaml) {
     console.log(`📖 API Docs at http://localhost:${CONFIG.port}/docs`);
   }

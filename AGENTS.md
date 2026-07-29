@@ -100,6 +100,7 @@ Install: `corepack pnpm install` — Frontend: `cd frontend && corepack pnpm ins
 | `/api/transcription/hybrid` | POST | JWT | Deepgram primary + Khaya AI correction pipeline for low-confidence segments |
 | `/api/khaya/transcription` | POST | JWT | Transcribe audio via Khaya AI (requires `language` code) |
 | `/api/khaya/languages` | GET | None | List Khaya-supported languages |
+| `/health` | GET | None | Health check — status, uptime, postprocess mode, version (used by Fly.io and Caddy) |
 
 ## Post-Processing Pipeline
 
