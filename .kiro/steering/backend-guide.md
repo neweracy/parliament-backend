@@ -60,7 +60,7 @@ FastAPI app at `services/postprocess/`, port 8082, Bearer-token auth (`SERVICE_T
 | `GET /health` | None | 200 with record count/version/uptime, 503 before first dataset load |
 | `POST /v1/datasets/reload` | Bearer | Force a Dataset_Cache reload |
 
-Pipeline order in `app/pipeline.py`: Correction_Engine (`app/correction/engine.py`) → Year_Corrector (`app/years/`) → LLM_Refiner gate. **The LLM_Refiner is implemented in `app/llm/refiner.py` but not yet wired into `run_pipeline`** — the stage is still a placeholder that reports `llm_status` as `skipped`/`unconfigured` and never increments `bedrock_corrections`.
+Pipeline order in `app/pipeline.py`: Correction_Engine (`app/correction/engine.py`) → Year_Corrector (`app/years/`) → LLM_Refiner gate. **The LLM_Refiner is fully wired** — when `LLM_ENABLED` is true, a `BedrockClient` is constructed, and `refine_chunks` from `app/llm/refiner.py` is invoked as stage 3. The pipeline reports `llm_status` as `applied` (all chunks OK), `degraded` (partial or all failed), `skipped` (disabled by request or setting), or `unconfigured` (no credentials / empty model ID).
 
 Run it:
 
