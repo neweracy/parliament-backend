@@ -1,0 +1,264 @@
+{
+  "version": "2.0.0",
+  "cases": [
+    {
+      "id": "fused-ningo",
+      "description": "Fused spelling 'ningoprampram' corrects to hyphenated canonical 'Ningo-Prampram'",
+      "category": "fused",
+      "input_transcript": "ningoprampram",
+      "input_words": [
+        { "word": "ningoprampram", "start": 0.0, "end": 0.3, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Ningo-Prampram",
+      "should_correct": true,
+      "expected_entities": ["Ningo-Prampram"]
+    },
+    {
+      "id": "fused-prampram",
+      "description": "Split tokens 'pram pram' join to canonical 'Prampram'",
+      "category": "fused",
+      "input_transcript": "pram pram",
+      "input_words": [
+        { "word": "pram", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "pram", "start": 0.3, "end": 0.6, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Prampram",
+      "should_correct": true,
+      "expected_entities": ["Prampram"]
+    },
+    {
+      "id": "fuzzy-kumasi",
+      "description": "Edit-distance-1 misspelling 'Kumase' corrects to 'Kumasi'",
+      "category": "fuzzy",
+      "input_transcript": "Kumase",
+      "input_words": [
+        { "word": "Kumase", "start": 0.0, "end": 0.3, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Kumasi",
+      "should_correct": true,
+      "expected_entities": ["Kumasi"]
+    },
+    {
+      "id": "initials-ofori-atta",
+      "description": "Initial + surname 'K. Ofori-Atta' expands to full name 'Ken Ofori-Atta'",
+      "category": "initials",
+      "input_transcript": "K. Ofori-Atta",
+      "input_words": [
+        { "word": "K.", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "Ofori-Atta", "start": 0.3, "end": 0.6, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Ken Ofori-Atta",
+      "should_correct": true,
+      "expected_entities": ["Ken Ofori-Atta"]
+    },
+    {
+      "id": "title-person-carboo",
+      "description": "Title prefix 'Honorable' followed by fuzzy person match 'bb kabo' corrects to 'B.B. Carboo'",
+      "category": "title_person",
+      "input_transcript": "Honorable bb kabo",
+      "input_words": [
+        { "word": "Honorable", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "bb", "start": 0.3, "end": 0.6, "confidence": 0.95 },
+        { "word": "kabo", "start": 0.6, "end": 0.9, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Honorable B.B. Carboo",
+      "should_correct": true,
+      "expected_entities": ["B.B. Carboo"]
+    },
+    {
+      "id": "party-ndc-abbr",
+      "description": "Short party input 'ndc' normalizes to uppercase abbreviation 'NDC'",
+      "category": "party",
+      "input_transcript": "ndc",
+      "input_words": [
+        { "word": "ndc", "start": 0.0, "end": 0.3, "confidence": 0.95 }
+      ],
+      "expected_transcript": "NDC",
+      "should_correct": true,
+      "expected_entities": ["National Democratic Congress"]
+    },
+    {
+      "id": "block-general",
+      "description": "Block_List token 'general' must not be corrected despite fuzzy proximity to entities",
+      "category": "block_list",
+      "input_transcript": "the general public",
+      "input_words": [
+        { "word": "the", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "general", "start": 0.3, "end": 0.6, "confidence": 0.95 },
+        { "word": "public", "start": 0.6, "end": 0.9, "confidence": 0.95 }
+      ],
+      "expected_transcript": "the general public",
+      "should_correct": false,
+      "expected_entities": []
+    },
+    {
+      "id": "block-page",
+      "description": "Block_List token 'page' must not be corrected",
+      "category": "block_list",
+      "input_transcript": "turn the page",
+      "input_words": [
+        { "word": "turn", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "the", "start": 0.3, "end": 0.6, "confidence": 0.95 },
+        { "word": "page", "start": 0.6, "end": 0.9, "confidence": 0.95 }
+      ],
+      "expected_transcript": "turn the page",
+      "should_correct": false,
+      "expected_entities": []
+    },
+    {
+      "id": "block-nation",
+      "description": "Block_List token 'nation' must not be corrected to 'National' or any entity",
+      "category": "block_list",
+      "input_transcript": "the nation is strong",
+      "input_words": [
+        { "word": "the", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "nation", "start": 0.3, "end": 0.6, "confidence": 0.95 },
+        { "word": "is", "start": 0.6, "end": 0.9, "confidence": 0.95 },
+        { "word": "strong", "start": 0.9, "end": 1.2, "confidence": 0.95 }
+      ],
+      "expected_transcript": "the nation is strong",
+      "should_correct": false,
+      "expected_entities": []
+    },
+    {
+      "id": "block-national",
+      "description": "Block_List token 'national' must not be corrected to NDC or any party entity",
+      "category": "block_list",
+      "input_transcript": "the national anthem",
+      "input_words": [
+        { "word": "the", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "national", "start": 0.3, "end": 0.6, "confidence": 0.95 },
+        { "word": "anthem", "start": 0.6, "end": 0.9, "confidence": 0.95 }
+      ],
+      "expected_transcript": "the national anthem",
+      "should_correct": false,
+      "expected_entities": []
+    },
+    {
+      "id": "block-dankwa",
+      "description": "Canonical name part 'Dankwa' must not be replaced by a location (defect guard)",
+      "category": "block_list",
+      "input_transcript": "Dankwa said hello",
+      "input_words": [
+        { "word": "Dankwa", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "said", "start": 0.3, "end": 0.6, "confidence": 0.95 },
+        { "word": "hello", "start": 0.6, "end": 0.9, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Dankwa said hello",
+      "should_correct": false,
+      "expected_entities": []
+    },
+    {
+      "id": "block-dramani",
+      "description": "Canonical name part 'Dramani' must not be replaced by a location (defect guard)",
+      "category": "block_list",
+      "input_transcript": "Dramani was present",
+      "input_words": [
+        { "word": "Dramani", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "was", "start": 0.3, "end": 0.6, "confidence": 0.95 },
+        { "word": "present", "start": 0.6, "end": 0.9, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Dramani was present",
+      "should_correct": false,
+      "expected_entities": []
+    },
+    {
+      "id": "year-nineteen-ninety-two",
+      "description": "Spoken year 'nineteen ninety two' converts to numeric '1992'",
+      "category": "year",
+      "input_transcript": "nineteen ninety two",
+      "input_words": [
+        { "word": "nineteen", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "ninety", "start": 0.3, "end": 0.6, "confidence": 0.95 },
+        { "word": "two", "start": 0.6, "end": 0.9, "confidence": 0.95 }
+      ],
+      "expected_transcript": "1992",
+      "should_correct": true,
+      "expected_entities": []
+    },
+    {
+      "id": "year-two-thousand",
+      "description": "Spoken year 'two thousand and sixteen' converts to numeric '2016'",
+      "category": "year",
+      "input_transcript": "two thousand and sixteen",
+      "input_words": [
+        { "word": "two", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "thousand", "start": 0.3, "end": 0.6, "confidence": 0.95 },
+        { "word": "and", "start": 0.6, "end": 0.9, "confidence": 0.95 },
+        { "word": "sixteen", "start": 0.9, "end": 1.2, "confidence": 0.95 }
+      ],
+      "expected_transcript": "2016",
+      "should_correct": true,
+      "expected_entities": []
+    },
+    {
+      "id": "year-full-date",
+      "description": "Spoken full date 'seventh of July nineteen ninety two' converts to '7th July 1992'",
+      "category": "year",
+      "input_transcript": "seventh of July nineteen ninety two",
+      "input_words": [
+        { "word": "seventh", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "of", "start": 0.3, "end": 0.6, "confidence": 0.95 },
+        { "word": "July", "start": 0.6, "end": 0.9, "confidence": 0.95 },
+        { "word": "nineteen", "start": 0.9, "end": 1.2, "confidence": 0.95 },
+        { "word": "ninety", "start": 1.2, "end": 1.5, "confidence": 0.95 },
+        { "word": "two", "start": 1.5, "end": 1.8, "confidence": 0.95 }
+      ],
+      "expected_transcript": "7th July 1992",
+      "should_correct": true,
+      "expected_entities": []
+    },
+    {
+      "id": "year-decade",
+      "description": "Spoken decade 'the nineteen seventies' converts to 'the 1970s'",
+      "category": "year",
+      "input_transcript": "the nineteen seventies",
+      "input_words": [
+        { "word": "the", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "nineteen", "start": 0.3, "end": 0.6, "confidence": 0.95 },
+        { "word": "seventies", "start": 0.6, "end": 0.9, "confidence": 0.95 }
+      ],
+      "expected_transcript": "the 1970s",
+      "should_correct": true,
+      "expected_entities": []
+    },
+    {
+      "id": "year-guard-twenty-six",
+      "description": "Twenty-single-digit guard: 'twenty six' must not be converted to a year",
+      "category": "year",
+      "input_transcript": "twenty six",
+      "input_words": [
+        { "word": "twenty", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "six", "start": 0.3, "end": 0.6, "confidence": 0.95 }
+      ],
+      "expected_transcript": "twenty six",
+      "should_correct": false,
+      "expected_entities": []
+    },
+    {
+      "id": "year-guard-3-march",
+      "description": "Numeric-day guard: '3 March' without a following year must stay unchanged",
+      "category": "year",
+      "input_transcript": "3 March",
+      "input_words": [
+        { "word": "3", "start": 0.0, "end": 0.3, "confidence": 0.95 },
+        { "word": "March", "start": 0.3, "end": 0.6, "confidence": 0.95 }
+      ],
+      "expected_transcript": "3 March",
+      "should_correct": false,
+      "expected_entities": []
+    },
+    {
+      "id": "tie-break-exact-over-fused",
+      "description": "Exact match wins over fused match when both candidates apply to the same span",
+      "category": "tie_break",
+      "input_transcript": "Kumasi",
+      "input_words": [
+        { "word": "Kumasi", "start": 0.0, "end": 0.3, "confidence": 0.95 }
+      ],
+      "expected_transcript": "Kumasi",
+      "should_correct": false,
+      "expected_entities": ["Kumasi"]
+    }
+  ]
+}
