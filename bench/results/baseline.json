@@ -184,5 +184,178 @@
         ]
       }
     }
+  ],
+  "call_budgets": [
+    {
+      "recorded_at": "2026-07-30T09:56:23.566Z",
+      "git_commit": "eff8053",
+      "call_counts": [
+        {
+          "fixture_id": "fused-ningo",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "split-prampram",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "fuzzy-kumasi",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "initials-ofori-atta",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "title-person-carboo",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "party-ndc-abbr",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "block-general",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "block-page",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "block-nation",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "block-national",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "block-dankwa",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "block-dramani",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "year-nineteen-ninety-two",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "year-two-thousand",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "year-full-date",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "year-decade-seventies",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "year-guard-twenty-six",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "year-guard-3-march",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "tie-break-exact-over-fused",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "location-obuasi-alias",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "location-bolgatanga-alias",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "location-sekondi-takoradi",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "person-president-nkrumah",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "person-speaker-adjetey",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "minister-botchway",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "minister-osafo-maafo",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "mp-sam-nartey-george",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "party-cpp-abbr",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "party-canonical-alias",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "year-decade-twenties",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "hyphenated-kyei-mensah-bonsu",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "hyphenated-afenyo-markin-split",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        },
+        {
+          "fixture_id": "no-entity-prose",
+          "bedrock_invocations": 1,
+          "khaya_calls": 0
+        }
+      ]
+    }
   ]
 }

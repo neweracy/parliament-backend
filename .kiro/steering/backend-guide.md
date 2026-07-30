@@ -116,6 +116,18 @@ make test             # contract conformance (app must be running)
 
 `test/` covers `hybrid/`, `location-correction/`, `postprocess-client/`, `providers/`, and `routes/`, with `fast-check` property tests alongside unit tests and helpers in `test/helpers/`.
 
+## Benchmark Harness
+
+The Benchmark_Harness measures rule-stage correction, Match_Index build, and frontend bundle sizes. It compares post-refactor measurements against a recorded baseline and fails on regressions above 10%.
+
+```bash
+node bench/harness.js                  # Measure and compare against baseline
+node bench/harness.js --record-baseline # Record a new pre-refactor baseline entry
+node bench/harness.js --count-calls    # Count Bedrock/Khaya invocations per fixture
+```
+
+Results are stored in `bench/results/baseline.json` as an append-only measurements array, keyed by a stable machine identifier (hash of CPU model + core count + memory). Comparison only fires when a baseline entry exists for the current machine.
+
 ## Authoritative Implementation and Data Flow
 
 **Correction algorithms:** `services/postprocess/app/correction/engine.py` is the authoritative implementation for correction-algorithm changes. The JS_Correction_Engine (`lib/location-correction/`) follows Python's algorithm decisions. When a fix or enhancement is applied to the Python engine, the same change must be ported to JS or recorded as an accepted divergence in `test/parity/accepted-divergences.json`.

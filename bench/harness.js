@@ -524,9 +524,125 @@ function compareResults(current, baseline) {
 // Main
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Stubbed-Provider Call Counting (--count-calls mode)
+// ---------------------------------------------------------------------------
+
+/**
+ * Async version of call counting that properly awaits Bedrock stubs.
+ * Runs each Golden_Corpus fixture through the JS pipeline with stubbed
+ * providers, counting Bedrock and Khaya invocations per fixture.
+ *
+ * @returns {Promise<Array<{fixture_id: string, bedrock_invocations: number, khaya_calls: number}>>}
+ */
+async function countProviderCallsAsync() {
+  const { loadCorpus } = require('../fixtures/golden-corpus/loader');
+  const { setClient } = require('../lib/location-correction/bedrock/client');
+  const { postProcessWithBedrock } = require('../lib/location-correction/bedrock-postprocess');
+
+  const corpus = loadCorpus();
+  const results = [];
+
+  for (const fixture of corpus) {
+    let bedrockInvocations = 0;
+
+    // Inject a counting stub via the bedrock/client.js seam
+    const stubClient = {
+      send: async (command) => {
+        bedrockInvocations++;
+        // Echo input back as unchanged text — mimics a no-op LLM response
+        const bodyStr = typeof command.input?.body === 'string'
+          ? command.input.body
+          : new TextDecoder().decode(command.input?.body || new Uint8Array());
+        let userMessage = '';
+        try {
+          const parsed = JSON.parse(bodyStr);
+          userMessage = parsed.messages?.[0]?.content || '';
+        } catch {
+          userMessage = fixture.input_transcript;
+        }
+        const responseBody = JSON.stringify({
+          content: [{ type: 'text', text: userMessage }],
+        });
+        return { body: new TextEncoder().encode(responseBody) };
+      },
+    };
+    setClient(stubClient);
+
+    // Simulate Bedrock being configured
+    const origAccessKey = process.env.AWS_ACCESS_KEY_ID;
+    const origSecretKey = process.env.AWS_SECRET_ACCESS_KEY;
+    process.env.AWS_ACCESS_KEY_ID = 'stub-key';
+    process.env.AWS_SECRET_ACCESS_KEY = 'stub-secret';
+
+    try {
+      await postProcessWithBedrock(fixture.input_transcript, fixture.input_words);
+    } catch {
+      // Non-fatal — count whatever was invoked before failure
+    }
+
+    // Restore env
+    if (origAccessKey === undefined) {
+      delete process.env.AWS_ACCESS_KEY_ID;
+    } else {
+      process.env.AWS_ACCESS_KEY_ID = origAccessKey;
+    }
+    if (origSecretKey === undefined) {
+      delete process.env.AWS_SECRET_ACCESS_KEY;
+    } else {
+      process.env.AWS_SECRET_ACCESS_KEY = origSecretKey;
+    }
+
+    // Khaya calls: 0 in the JS pipeline (Khaya is only in hybrid route)
+    results.push({
+      fixture_id: fixture.id,
+      bedrock_invocations: bedrockInvocations,
+      khaya_calls: 0,
+    });
+  }
+
+  // Reset client
+  setClient(null);
+
+  return results;
+}
+
 function main() {
   const args = process.argv.slice(2);
   const recordBaseline = args.includes('--record-baseline');
+  const countCalls = args.includes('--count-calls');
+
+  // --- Count-calls mode ---
+  if (countCalls) {
+    console.log('Counting provider calls per Golden_Corpus fixture...');
+    countProviderCallsAsync().then((callResults) => {
+      console.log('');
+      console.log('Provider call counts per fixture:');
+      for (const r of callResults) {
+        console.log(`  ${r.fixture_id}: bedrock=${r.bedrock_invocations}, khaya=${r.khaya_calls}`);
+      }
+
+      // Persist into baseline.json
+      const results = loadResults();
+      const callEntry = {
+        recorded_at: new Date().toISOString(),
+        git_commit: getGitCommit(),
+        call_counts: callResults,
+      };
+
+      // Append or update the call_budgets section
+      if (!results.call_budgets) {
+        results.call_budgets = [];
+      }
+      results.call_budgets.push(callEntry);
+      saveResults(results);
+      console.log(`\nCall counts recorded in ${RESULTS_FILE}`);
+    }).catch((err) => {
+      console.error('Call counting failed:', err.message);
+      process.exit(1);
+    });
+    return;
+  }
 
   const machine = getMachineIdentity();
   console.log(`Machine: ${machine.cpu_model} (${machine.cores} cores, ${(machine.total_memory_bytes / (1024 ** 3)).toFixed(1)} GB)`);
