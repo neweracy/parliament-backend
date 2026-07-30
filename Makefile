@@ -4,7 +4,7 @@
 # Use corepack to ensure correct pnpm version
 PNPM := corepack pnpm
 
-.PHONY: help check check-prereqs install init install-backend install-frontend start-backend start-frontend start test update clean status
+.PHONY: help check check-prereqs install init install-backend install-frontend start-backend start-frontend start test test-unit test-contracts test-python lint bench update clean status
 
 # Default target: show help
 help:
@@ -21,7 +21,14 @@ help:
 	@echo "  make start             Start application (backend + frontend)"
 	@echo "  make start-backend     Start backend only (port 8081)"
 	@echo "  make start-frontend    Start frontend only (port 8080)"
-	@echo "  make test              Run contract conformance tests"
+	@echo ""
+	@echo "Testing:"
+	@echo "  make lint              Lint the backend (eslint)"
+	@echo "  make test-unit         Run backend unit tests (eslint + node --test)"
+	@echo "  make test-python       Run the Python postprocessing service tests"
+	@echo "  make test-contracts    Run contract conformance tests (app must be running)"
+	@echo "  make test              Run contract conformance tests (alias)"
+	@echo "  make bench             Run the benchmark harness against the baseline"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  make update            Update submodules to latest commits"
@@ -163,8 +170,27 @@ start:
 	@echo ""
 	@$(MAKE) start-backend & $(MAKE) start-frontend & wait
 
-# Run contract conformance tests
-test:
+# Lint the backend
+lint:
+	@echo "==> Linting backend..."
+	$(PNPM) run lint
+
+# Run backend unit tests (eslint + node --test)
+test-unit:
+	@echo "==> Running backend unit tests..."
+	$(PNPM) test
+
+# Run the Python postprocessing service test suite
+test-python:
+	@if [ ! -d "services/postprocess" ]; then \
+		echo "Error: services/postprocess not found."; \
+		exit 1; \
+	fi
+	@echo "==> Running Python postprocessing service tests..."
+	cd services/postprocess && pytest
+
+# Run contract conformance tests (requires the app to be running)
+test-contracts:
 	@if [ ! -f ".env" ]; then \
 		echo "❌ Error: .env file not found. Copy sample.env to .env and add your DEEPGRAM_API_KEY"; \
 		exit 1; \
@@ -175,6 +201,14 @@ test:
 	fi
 	@echo "==> Running contract conformance tests..."
 	@bash contracts/tests/run-transcription-app.sh
+
+# Alias for test-contracts (preserves existing behaviour)
+test: test-contracts
+
+# Run the benchmark harness against the recorded baseline
+bench:
+	@echo "==> Running benchmark harness..."
+	node bench/harness.js
 
 # Update submodules to latest commits
 update:

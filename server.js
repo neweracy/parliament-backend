@@ -1,29 +1,41 @@
 /**
- * Node Transcription Starter - Backend Server
+ * Node Transcription — Backend Gateway
  *
- * This is a simple Express server that provides a transcription API endpoint
- * powered by Deepgram's Speech-to-Text service. It's designed to be easily
- * modified and extended for your own projects.
+ * Express API server that terminates client requests, authenticates them with
+ * JWT session tokens, calls the ASR providers (Deepgram and Khaya AI), and runs
+ * transcript post-processing.
  *
- * Key Features:
- * - Single API endpoint: POST /api/transcription
- * - Accepts both file uploads and URLs
- * - CORS enabled for frontend communication
- * - JWT session auth with rate limiting (production only)
- * - Pure API server (frontend served separately)
+ * Endpoints:
+ * - POST /api/transcription          — Deepgram transcription + post-processing
+ * - POST /api/transcription/hybrid   — Deepgram + Khaya AI hybrid correction
+ * - POST /api/khaya/transcription    — Khaya AI transcription
+ * - GET  /api/khaya/languages        — Khaya-supported languages
+ * - GET  /api/session                — Issue a JWT session token
+ * - GET  /api/metadata               — App metadata from deepgram.toml
+ * - GET  /api/audio-proxy            — CORS-friendly remote audio proxy
+ * - GET  /health                     — Health check
+ *
+ * Post-processing is selected by POSTPROCESS_MODE (js | python | off).
  */
 
 require("dotenv").config({ override: true });
 
+// --- Third-party ---
 const { createClient } = require("@deepgram/sdk");
 const cors = require("cors");
-const crypto = require("crypto");
 const express = require("express");
-const fs = require("fs");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
-const path = require("path");
 const swaggerUi = require("swagger-ui-express");
+const toml = require("toml");
+
+// --- Node built-ins ---
+const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+const { Readable } = require("stream");
+
+// --- Local: correction pipeline ---
 const { correctLocations } = require("./lib/location-correction");
 const { correctWordsWalk } = require("./lib/location-correction/word-walk");
 const { postProcessWithBedrock, isBedrockConfigured } = require("./lib/location-correction/bedrock-postprocess");
@@ -31,15 +43,38 @@ const { correctYears, correctYearsInText } = require("./lib/location-correction/
 const { postprocess } = require("./lib/postprocess-client");
 const { degradedResponse, mergeSuccess, logDegraded } = require("./lib/postprocess-mode");
 
+// --- Local: routes and providers ---
+const khayaRoutes = require("./routes/khaya");
+const hybridRoutes = require("./routes/hybrid");
+const khayaProvider = require("./providers/khaya");
+const { sliceAndConcatAudio } = require("./lib/hybrid/audio-slicer");
+
+// --- Local: package metadata ---
+const { version: APP_VERSION } = require("./package.json");
+
 // ============================================================================
 // POSTPROCESS MODE — js (default) | python | off
 // ============================================================================
 
-const POSTPROCESS_MODE = ['js', 'python', 'off'].includes(process.env.POSTPROCESS_MODE)
-  ? process.env.POSTPROCESS_MODE
-  : (process.env.POSTPROCESS_MODE
-      ? (console.warn(`[config] unsupported POSTPROCESS_MODE=${process.env.POSTPROCESS_MODE}, falling back to js`), 'js')
-      : 'js');
+const VALID_POSTPROCESS_MODES = ['js', 'python', 'off'];
+
+/**
+ * Resolves POSTPROCESS_MODE from the environment.
+ * Unknown values warn once and fall back to 'js'.
+ *
+ * @returns {'js' | 'python' | 'off'}
+ */
+function resolvePostprocessMode() {
+  const raw = process.env.POSTPROCESS_MODE;
+
+  if (!raw) return 'js';
+  if (VALID_POSTPROCESS_MODES.includes(raw)) return raw;
+
+  console.warn(`[config] unsupported POSTPROCESS_MODE=${raw}, falling back to js`);
+  return 'js';
+}
+
+const POSTPROCESS_MODE = resolvePostprocessMode();
 
 // ============================================================================
 // CONFIGURATION - Customize these values for your needs
@@ -177,9 +212,9 @@ function loadOpenApiSpec() {
   const specPath = path.join(__dirname, "contracts", "interfaces", "transcription", "openapi.yml");
   if (!fs.existsSync(specPath)) return null;
 
-  const yaml = fs.readFileSync(specPath, "utf-8");
-  // Use a basic approach: just serve the raw YAML via swagger-ui's yamlStr option
-  return yaml;
+  // Served as raw YAML at /api/openapi.yml; Swagger UI fetches it by URL rather
+  // than being handed a parsed object, so no YAML parser is needed here.
+  return fs.readFileSync(specPath, "utf-8");
 }
 
 const openApiYaml = loadOpenApiSpec();
@@ -187,7 +222,7 @@ if (openApiYaml) {
   app.use("/docs", swaggerUi.serve, swaggerUi.setup(null, {
     swaggerOptions: { url: "/api/openapi.yml" },
   }));
-  app.get("/api/openapi.yml", (req, res) => {
+  app.get("/api/openapi.yml", (_req, res) => {
     res.type("text/yaml").send(openApiYaml);
   });
 }
@@ -442,7 +477,7 @@ function formatErrorResponse(error, statusCode = 500) {
 /**
  * GET /api/session — Issues a signed JWT for session authentication.
  */
-app.get("/api/session", (req, res) => {
+app.get("/api/session", (_req, res) => {
   const token = jwt.sign(
     { iat: Math.floor(Date.now() / 1000) },
     SESSION_SECRET,
@@ -509,9 +544,8 @@ app.post("/api/transcription", requireSession, upload.single("file"), async (req
  * Returns metadata about this starter application from deepgram.toml
  * Required for standardization compliance
  */
-app.get("/api/metadata", (req, res) => {
+app.get("/api/metadata", (_req, res) => {
   try {
-    const toml = require("toml");
     const tomlPath = path.join(__dirname, "deepgram.toml");
     const tomlContent = fs.readFileSync(tomlPath, "utf-8");
     const config = toml.parse(tomlContent);
@@ -533,31 +567,15 @@ app.get("/api/metadata", (req, res) => {
   }
 });
 
-/**
- * ADD YOUR CUSTOM ROUTES HERE
- *
- * Examples:
- * - POST /stt/transcribe-with-diarization
- * - POST /stt/summarize
- * - GET /health (health check endpoint)
- * - POST /webhooks/deepgram (callback endpoint)
- */
-
 // ============================================================================
 // KHAYA AI (GhanaNLP) ASR v3 - African Language Transcription
 // ============================================================================
-
-const khayaRoutes = require("./routes/khaya");
-const khayaProvider = require("./providers/khaya");
 
 app.use("/api/khaya", khayaRoutes(requireSession, upload));
 
 // ============================================================================
 // HYBRID CONFIDENCE TRANSCRIPTION - Deepgram + Khaya AI correction pipeline
 // ============================================================================
-
-const { sliceAndConcatAudio } = require("./lib/hybrid/audio-slicer");
-const hybridRoutes = require("./routes/hybrid");
 
 const hybridDeps = {
   transcribePrimary: transcribePrimaryForHybrid,
@@ -595,7 +613,6 @@ app.get("/api/audio-proxy", async (req, res) => {
     res.setHeader("Cache-Control", "public, max-age=3600");
 
     // Use Node.js Readable stream from the fetch body
-    const { Readable } = require("stream");
     const readable = Readable.fromWeb(upstream.body);
     readable.pipe(res);
   } catch (err) {
@@ -609,12 +626,12 @@ app.get("/api/audio-proxy", async (req, res) => {
 // HEALTH CHECK — unauthenticated, no outbound calls, no secrets exposed
 // ============================================================================
 
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
     uptime_seconds: Math.floor(process.uptime()),
     postprocess_mode: POSTPROCESS_MODE,
-    version: require('./package.json').version,
+    version: APP_VERSION,
   });
 });
 
@@ -622,21 +639,38 @@ app.get('/health', (req, res) => {
 // SERVER START
 // ============================================================================
 
+/**
+ * Routes advertised in the startup banner.
+ * Keep in sync when adding an endpoint — see the backend guide convention.
+ */
+const ADVERTISED_ROUTES = [
+  { method: "GET", path: "/api/session", detail: "" },
+  { method: "POST", path: "/api/transcription", detail: "(auth required) [Deepgram]" },
+  { method: "POST", path: "/api/transcription/hybrid", detail: "(auth required) [Hybrid: Deepgram + Khaya]" },
+  { method: "POST", path: "/api/khaya/transcription", detail: "(auth required) [Khaya AI]" },
+  { method: "GET", path: "/api/khaya/languages", detail: "" },
+  { method: "GET", path: "/api/metadata", detail: "" },
+  { method: "GET", path: "/health", detail: "" },
+];
+
 app.listen(CONFIG.port, CONFIG.host, () => {
-  console.log("\n" + "=".repeat(70));
+  const divider = "=".repeat(70);
+
+  console.log(`\n${divider}`);
   console.log(`🚀 Backend API running at http://localhost:${CONFIG.port}`);
-  console.log(`📡 GET  /api/session`);
-  console.log(`📡 POST /api/transcription (auth required) [Deepgram]`);
-  console.log(`📡 POST /api/transcription/hybrid (auth required) [Hybrid: Deepgram + Khaya]`);
-  console.log(`📡 POST /api/khaya/transcription (auth required) [Khaya AI]`);
-  console.log(`📡 GET  /api/khaya/languages`);
-  console.log(`📡 GET  /api/metadata`);
-  console.log(`📡 GET  /health`);
+
+  for (const { method, path: routePath, detail } of ADVERTISED_ROUTES) {
+    console.log(`📡 ${method.padEnd(4)} ${routePath}${detail ? ` ${detail}` : ""}`);
+  }
+
+  console.log(`⚙️  Post-processing mode: ${POSTPROCESS_MODE}`);
+
   if (openApiYaml) {
     console.log(`📖 API Docs at http://localhost:${CONFIG.port}/docs`);
   }
   if (!khayaProvider.getApiKey()) {
     console.log(`⚠️  KHAYA_API_KEY not set — Khaya AI endpoints will return 500`);
   }
-  console.log("=".repeat(70) + "\n");
+
+  console.log(`${divider}\n`);
 });
