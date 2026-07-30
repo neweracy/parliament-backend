@@ -9,7 +9,7 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { correctLocations, correctSingle } = require('../../lib/location-correction');
+const { correctLocations, correctSingle } = require('../../lib/location-correction'); // eslint-disable-line no-unused-vars
 
 // ---------------------------------------------------------------------------
 // Helper

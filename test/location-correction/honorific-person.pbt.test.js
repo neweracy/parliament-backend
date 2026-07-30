@@ -72,6 +72,7 @@ function extractMultiWordSuffixes(entries) {
   return suffixes;
 }
 
+// eslint-disable-next-line no-unused-vars
 const MULTI_WORD_NAMES = extractMultiWordSuffixes([...ALL_PERSONS, ...ALL_MPS]);
 
 // ---------------------------------------------------------------------------

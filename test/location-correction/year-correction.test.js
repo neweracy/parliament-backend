@@ -13,7 +13,7 @@ const {
   matchMonthDay,
   matchNumericDayMonthYear,
   ordinalSuffix,
-  parseDayWords,
+  parseDayWords, // eslint-disable-line no-unused-vars
 } = require('../../lib/location-correction/year-correction');
 
 // Helper: build words array from string

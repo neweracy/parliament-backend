@@ -71,6 +71,14 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Windows reserved device names — accidental artifacts from `> nul` redirects
+nul
+NUL
+con
+CON
+prn
+aux
+
 # kiro — settings and steering are local, but specs are tracked
 .kiro/settings/
 .kiro/steering/

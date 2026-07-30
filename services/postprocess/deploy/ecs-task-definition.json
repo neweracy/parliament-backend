@@ -1,0 +1,59 @@
+{
+  "family": "postprocess-service",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/postprocess-execution-role",
+  "taskRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/postprocess-task-role",
+  "containerDefinitions": [
+    {
+      "name": "postprocess",
+      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/postprocess-service:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8082,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "HOST", "value": "0.0.0.0" },
+        { "name": "PORT", "value": "8082" },
+        { "name": "UVICORN_WORKERS", "value": "2" },
+        { "name": "DRAIN_TIMEOUT_SECONDS", "value": "15" },
+        { "name": "AWS_REGION", "value": "${AWS_REGION}" },
+        { "name": "BEDROCK_MODEL_ID", "value": "us.anthropic.claude-haiku-4-5-20251001-v1:0" },
+        { "name": "LLM_ENABLED", "value": "true" },
+        { "name": "DATASET_REFRESH_SECONDS", "value": "300" },
+        { "name": "LOG_LEVEL", "value": "info" }
+      ],
+      "secrets": [
+        {
+          "name": "SERVICE_TOKEN",
+          "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:postprocess/service-token"
+        },
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:postprocess/database-url"
+        }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -sf http://localhost:8082/health || exit 1"],
+        "interval": 15,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 30
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/postprocess-service",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "postprocess"
+        }
+      },
+      "stopTimeout": 15
+    }
+  ]
+}

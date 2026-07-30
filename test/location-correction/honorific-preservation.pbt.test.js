@@ -60,6 +60,7 @@ function collectPartyInputs() {
   return inputs;
 }
 
+// eslint-disable-next-line no-unused-vars
 const PARTY_INPUTS = collectPartyInputs();
 
 /**
@@ -70,7 +71,7 @@ function collectUntitledPersonAliases() {
   const aliases = [];
   const allEntries = [...ALL_PERSONS, ...ALL_MPS];
   for (const entry of allEntries) {
-    const canonical = entry.canonical || entry.name;
+    const canonical = entry.canonical || entry.name; // eslint-disable-line no-unused-vars
     if (entry.aliases) {
       for (const alias of entry.aliases) {
         // Only include aliases that are 4+ chars (short ones may not match)
@@ -84,6 +85,7 @@ function collectUntitledPersonAliases() {
   return [...new Set(aliases)];
 }
 
+// eslint-disable-next-line no-unused-vars
 const UNTITLED_PERSON_ALIASES = collectUntitledPersonAliases();
 
 /**

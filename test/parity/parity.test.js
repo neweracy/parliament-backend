@@ -91,7 +91,7 @@ describe('Parity: JS vs Python correction engine outputs', () => {
     assert.ok(pairedFixtures.length > 0, 'No paired JS/PY fixtures found');
   });
 
-  for (const { file, jsData, pyData, fixtureId } of pairedFixtures) {
+  for (const { file: _file, jsData, pyData, fixtureId } of pairedFixtures) {
     it(`parity: ${fixtureId}`, () => {
       const { equivalent, differences } = behaviourEquivalent(jsData, pyData);
 

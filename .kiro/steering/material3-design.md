@@ -5,7 +5,7 @@ fileMatchPattern: "frontend/**"
 
 # Material Design 3 (Material You) — Web Implementation Guide
 
-This project applies MD3 principles via vanilla CSS/JS (no @material/web components — those are maintenance-mode). Comprehensive reference docs live at `.agents/skills/material-3/references/` — read those for deep dives.
+This project applies MD3 principles through a CSS custom-property token layer in `frontend/src/styles/` (no @material/web components — those are maintenance-mode). Tailwind v4 + daisyUI provide the utility and component layer on top. Comprehensive reference docs live at `.agents/skills/material-3/references/` — read those for deep dives.
 
 ## Reference Index
 
@@ -63,25 +63,27 @@ Duration: Short (50–200ms), Medium (250–400ms), Long (450–600ms), Extra-lo
 | 3 | FAB, dialogs | `surface-container-high` |
 | 4–5 | Hover/focus only | `surface-container-highest` |
 
-## Mapping to Deepgram Design System
+## Where Tokens Live
 
-This project uses Deepgram's `dg-*` classes. Apply M3 principles within:
+| File | Contents |
+|------|----------|
+| `frontend/src/styles/tokens.css` | Typescale (15 styles), shape, motion easing/duration, and a small `--dg-*` alias block |
+| `frontend/src/styles/theme-light.css` / `theme-dark.css` | `--md-sys-color-*` values under `[data-theme="light"]` / `[data-theme="dark"]` |
+| `frontend/src/styles/app.css` | Tailwind + daisyUI theme declarations, then an `@theme` block bridging MD3-only colors into Tailwind |
+| `frontend/src/styles/base.css` | Element defaults, focus rings, scrollbars |
 
-| Deepgram Class | M3 Equivalent |
-|----------------|---------------|
-| `dg-btn--primary` | Filled button (primary, full radius) |
-| `dg-btn--secondary` | Tonal button (secondary-container) |
-| `dg-btn--ghost` | Text button |
-| `dg-card` | Filled/outlined card (medium radius) |
-| `dg-input` | Filled text field (small top-corner radius) |
-| `dg-form-label` | Label Large type role |
+The `--dg-*` block is a thin alias layer (`--dg-primary`, `--dg-surface`, `--dg-border`, `--dg-radius-*`) over MD3 tokens. There are no `dg-*` CSS **classes** in this codebase — component styling is daisyUI classes plus Tailwind utilities.
+
+## Interop with daisyUI
+
+daisyUI owns `primary`, `secondary`, `accent`, `error`, `info`, `success`, `warning`, and `base-*` along with their `-content` pairs. Do not redefine those in `@theme` — it breaks the content contrast pairing. Only MD3-specific roles (surface containers, outline, inverse-surface) are exposed to Tailwind.
 
 ## Anti-Patterns
 
-- Never hardcode colors — use `var(--md-sys-color-*)` tokens
-- Never pair colors outside intended pairs (breaks contrast in dynamic/dark/high-contrast)
+- Never hardcode colors — use daisyUI semantic classes or `var(--md-sys-color-*)` tokens
+- Never pair colors outside intended pairs (breaks contrast in dark/high-contrast)
 - Never use shadows as primary depth cue — use tonal surface color
-- Never use `border-radius` literals — use shape tokens
+- Never use `border-radius` literals — use shape tokens or daisyUI radius variables
 - Never stretch content to fill ultra-wide screens — constrain to ~1040px max
 - Never use `outline` for dividers (use `outline-variant`)
 
