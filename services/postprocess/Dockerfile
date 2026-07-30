@@ -32,9 +32,14 @@ RUN apt-get update && \
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=deps /usr/local/bin /usr/local/bin
 
-# Copy application code
+# Copy application code, migrations, and the seed tooling
 COPY app/ ./app/
 COPY migrations/ ./migrations/
+COPY alembic.ini ./alembic.ini
+COPY scripts/ ./scripts/
+COPY datasets_export_raw.json ./datasets_export_raw.json
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash appuser
@@ -55,5 +60,10 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
 # Graceful shutdown: Uvicorn handles SIGTERM by completing in-flight requests
 # within the timeout-graceful-shutdown period (mapped to DRAIN_TIMEOUT_SECONDS)
 STOPSIGNAL SIGTERM
+
+# Entrypoint applies migrations and seeds the datasets (idempotent) when
+# RUN_MIGRATIONS is not "false", then exec's the CMD. This makes a cold
+# `docker compose up` come up with a populated Dataset_Store.
+ENTRYPOINT ["./docker-entrypoint.sh"]
 
 CMD ["sh", "-c", "uvicorn app.main:app --host ${HOST:-0.0.0.0} --port ${PORT:-8082} --workers ${UVICORN_WORKERS:-2} --timeout-graceful-shutdown ${DRAIN_TIMEOUT_SECONDS:-15}"]

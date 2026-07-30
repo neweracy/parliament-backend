@@ -79,6 +79,12 @@ SERVICE_ROOT = SCRIPT_DIR.parent
 REPO_ROOT = SERVICE_ROOT.parent.parent
 EXPORTER = SCRIPT_DIR / "export_js_datasets.js"
 
+# Node-free fallback: a committed snapshot of the exporter's stdout. Written by
+# `node scripts/export_js_datasets.js > datasets_export_raw.json` and used when
+# Node or the lib/ tree is unavailable (e.g. inside the service container, which
+# ships neither). Regenerate it whenever the JS datasets change.
+RAW_EXPORT_FALLBACK = SERVICE_ROOT / "datasets_export_raw.json"
+
 NODE_TIMEOUT_SECONDS = 120
 
 UPSERT_RECORD_SQL = text(
@@ -129,14 +135,45 @@ BLOCK_LIST_KINDS = ("block", "stopword", "word_stopword", "title")
 
 
 def export_js_datasets() -> dict[str, Any]:
+    """Return the exporter output, preferring live Node over the committed snapshot.
+
+    The JS modules under ``lib/location-correction/`` are the single source of
+    truth, so a live ``node`` run is authoritative and used whenever Node and
+    the exporter script are both present. When they are not — most importantly
+    inside the service container, which ships neither Node nor the ``lib/``
+    tree — the committed ``datasets_export_raw.json`` snapshot is used instead.
+    Exits non-zero only when neither source is available.
+    """
+    if EXPORTER.is_file() and _node_available():
+        return _export_via_node()
+
+    if RAW_EXPORT_FALLBACK.is_file():
+        print(f"note: Node unavailable — reading committed export {RAW_EXPORT_FALLBACK.name}\n")
+        try:
+            return json.loads(RAW_EXPORT_FALLBACK.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            _fail(f"{RAW_EXPORT_FALLBACK.name} is not valid JSON: {exc}")
+
+    _fail(
+        "cannot read the JS datasets: `node` is unavailable and no committed "
+        f"{RAW_EXPORT_FALLBACK.name} was found. Regenerate it with "
+        "`node scripts/export_js_datasets.js > datasets_export_raw.json`."
+    )
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _node_available() -> bool:
+    """Return True when a `node` executable is resolvable on PATH."""
+    from shutil import which
+
+    return which("node") is not None
+
+
+def _export_via_node() -> dict[str, Any]:
     """Run the Node exporter and parse its JSON stdout.
 
-    Exits non-zero if Node is unavailable, the exporter fails, or its output is
-    not parseable JSON.
+    Exits non-zero if the exporter fails or its output is not parseable JSON.
     """
-    if not EXPORTER.is_file():
-        _fail(f"exporter not found at {EXPORTER}")
-
     try:
         proc = subprocess.run(
             ["node", str(EXPORTER)],
@@ -146,8 +183,6 @@ def export_js_datasets() -> dict[str, Any]:
             timeout=NODE_TIMEOUT_SECONDS,
             check=False,
         )
-    except FileNotFoundError:
-        _fail("`node` was not found on PATH; the JS datasets cannot be read")
     except subprocess.TimeoutExpired:
         _fail(f"the Node exporter did not finish within {NODE_TIMEOUT_SECONDS}s")
 

@@ -7,7 +7,8 @@ __pycache__
 .venv
 venv
 tests/
-scripts/
+scripts/*
+!scripts/migrate_js_datasets.py
 docker-compose.yml
 sample.env
 .dockerignore

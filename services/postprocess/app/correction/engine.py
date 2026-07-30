@@ -38,13 +38,16 @@ def correct_single(
     span_len: int,
     index: MatchIndex,
     snapshot: DatasetSnapshot,
+    *,
+    fuzzy_score_cutoff: float = 0.70,
+    min_candidate_length: int = MIN_CANDIDATE_LENGTH,
 ) -> MatchResult | None:
     """Run the short-circuiting strategy chain for a single text span.
 
     Behaviour:
       1. Lowercase the text.
       2. If the lowercased text is a stopword → return None immediately.
-      3. If len(text_lower) < MIN_CANDIDATE_LENGTH (4): try only
+      3. If len(text_lower) < min_candidate_length (default 4): try only
          ``match_exact`` and ``match_fused``, then return.
       4. Otherwise, try each strategy in order, returning on first hit:
          exact → fused → initials → phonetic → fuzzy → substring.
@@ -61,6 +64,10 @@ def correct_single(
         The derived lookup structures built from the Dataset_Cache.
     snapshot : DatasetSnapshot
         The immutable dataset snapshot (provides stopword/block lists).
+    fuzzy_score_cutoff : float
+        Minimum score cutoff passed to ``match_fuzzy`` (default 0.70).
+    min_candidate_length : int
+        Minimum input length for full strategy chain (default 4).
 
     Returns
     -------
@@ -73,8 +80,8 @@ def correct_single(
     if is_stopword(text_lower, snapshot):
         return None
 
-    # Short inputs (< 4 chars): only exact and fused are tried
-    if len(text_lower) < MIN_CANDIDATE_LENGTH:
+    # Short inputs (< min_candidate_length chars): only exact and fused
+    if len(text_lower) < min_candidate_length:
         result = match_exact(text_lower, index)
         if result is not None:
             return result
@@ -100,7 +107,13 @@ def correct_single(
     if result is not None:
         return result
 
-    result = match_fuzzy(text_lower, index, snapshot)
+    result = match_fuzzy(
+        text_lower,
+        index,
+        snapshot,
+        fuzzy_score_cutoff=fuzzy_score_cutoff,
+        min_candidate_length=min_candidate_length,
+    )
     if result is not None:
         return result
 
@@ -239,6 +252,9 @@ def _match_title_person(
     index: MatchIndex,
     snapshot: DatasetSnapshot,
     min_confidence: float,
+    *,
+    fuzzy_score_cutoff: float = 0.70,
+    min_candidate_length: int = MIN_CANDIDATE_LENGTH,
 ) -> tuple[MatchResult, int] | None:
     """Try to match person name tokens following a title token.
 
@@ -267,7 +283,14 @@ def _match_title_person(
         if win_size > 1 and is_stopword(name_tokens[-1].word.lower(), snapshot):
             continue
 
-        match = correct_single(phrase, win_size, index, snapshot)
+        match = correct_single(
+            phrase,
+            win_size,
+            index,
+            snapshot,
+            fuzzy_score_cutoff=fuzzy_score_cutoff,
+            min_candidate_length=min_candidate_length,
+        )
         if match and match.entity_kind == "person" and match.confidence >= threshold:
             return (match, win_size)
 
@@ -313,6 +336,8 @@ def correct_text(
     snapshot: DatasetSnapshot,
     *,
     min_confidence: float = 0.75,
+    fuzzy_score_cutoff: float = 0.70,
+    min_candidate_length: int = MIN_CANDIDATE_LENGTH,
 ) -> TextCorrectionResult:
     """Correct all entity references in a transcript text.
 
@@ -337,6 +362,10 @@ def correct_text(
         The immutable dataset snapshot (block lists, stopwords, etc.).
     min_confidence : float
         Minimum confidence threshold to accept a correction (default 0.75).
+    fuzzy_score_cutoff : float
+        Minimum score cutoff passed to ``match_fuzzy`` (default 0.70).
+    min_candidate_length : int
+        Minimum input length for full strategy chain (default 4).
 
     Returns
     -------
@@ -366,7 +395,15 @@ def correct_text(
 
         # --- Step 2: Title-person branch (checked first) ---
         if is_title(tokens[i].word, snapshot):
-            title_result = _match_title_person(tokens, i, index, snapshot, min_confidence)
+            title_result = _match_title_person(
+                tokens,
+                i,
+                index,
+                snapshot,
+                min_confidence,
+                fuzzy_score_cutoff=fuzzy_score_cutoff,
+                min_candidate_length=min_candidate_length,
+            )
             if title_result:
                 match, tokens_consumed = title_result
 
@@ -446,7 +483,14 @@ def correct_text(
                     continue
 
             # Strategy A: try the phrase as-is via correct_single
-            match = correct_single(phrase, n, index, snapshot)
+            match = correct_single(
+                phrase,
+                n,
+                index,
+                snapshot,
+                fuzzy_score_cutoff=fuzzy_score_cutoff,
+                min_candidate_length=min_candidate_length,
+            )
 
             # Strategy B: joined match (for n > 1 when correct_single fails)
             if match is None and n > 1:
@@ -564,6 +608,9 @@ def _match_title_person_words(
     index: MatchIndex,
     snapshot: DatasetSnapshot,
     min_confidence: float,
+    *,
+    fuzzy_score_cutoff: float = 0.70,
+    min_candidate_length: int = MIN_CANDIDATE_LENGTH,
 ) -> tuple[MatchResult, int] | None:
     """Try to match person name tokens following a title in word dicts.
 
@@ -587,7 +634,14 @@ def _match_title_person_words(
         ):
             continue
 
-        match = correct_single(phrase, win_size, index, snapshot)
+        match = correct_single(
+            phrase,
+            win_size,
+            index,
+            snapshot,
+            fuzzy_score_cutoff=fuzzy_score_cutoff,
+            min_candidate_length=min_candidate_length,
+        )
         if match and match.entity_kind == "person" and match.confidence >= threshold:
             return (match, win_size)
 
@@ -636,6 +690,8 @@ def correct_words(
     *,
     word_accept_threshold: float = 0.90,
     min_confidence: float = 0.75,
+    fuzzy_score_cutoff: float = 0.70,
+    min_candidate_length: int = MIN_CANDIDATE_LENGTH,
 ) -> WordCorrectionResult:
     """Correct all entity references in a transcript word list.
 
@@ -664,6 +720,10 @@ def correct_words(
         Minimum confidence to accept a match at word level (default 0.90).
     min_confidence : float
         Minimum confidence for title-person matching (default 0.75).
+    fuzzy_score_cutoff : float
+        Minimum score cutoff passed to ``match_fuzzy`` (default 0.70).
+    min_candidate_length : int
+        Minimum input length for full strategy chain (default 4).
 
     Returns
     -------
@@ -686,7 +746,13 @@ def correct_words(
         # --- Title-person branch ---
         if is_title(current_word, snapshot):
             title_result = _match_title_person_words(
-                words, i, index, snapshot, min_confidence
+                words,
+                i,
+                index,
+                snapshot,
+                min_confidence,
+                fuzzy_score_cutoff=fuzzy_score_cutoff,
+                min_candidate_length=min_candidate_length,
             )
             if title_result:
                 match, name_count = title_result
@@ -785,7 +851,14 @@ def correct_words(
             phrase = " ".join(window_words)
 
             # Try correction via correct_single
-            match = correct_single(phrase, n, index, snapshot)
+            match = correct_single(
+                phrase,
+                n,
+                index,
+                snapshot,
+                fuzzy_score_cutoff=fuzzy_score_cutoff,
+                min_candidate_length=min_candidate_length,
+            )
 
             # For n > 1: also try joined (fused) match
             if match is None and n > 1:

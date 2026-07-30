@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 
 from app.deps import get_correlation_id, verify_service_token
 from app.models.request import CorrectionRequest
+from app.obs.metrics import emit_error
 from app.pipeline import run_pipeline
 
 router = APIRouter()
@@ -37,6 +38,7 @@ async def postprocess(
     snapshot = cache.get_snapshot() if cache else None
 
     if snapshot is None:
+        emit_error("DATASET_NOT_LOADED")
         return JSONResponse(
             status_code=503,
             content={
@@ -62,6 +64,8 @@ async def postprocess(
         cache,
         bedrock_client=getattr(request.app.state, "bedrock_client", None),
         settings=getattr(request.app.state, "settings", None),
+        history_writer=getattr(request.app.state, "history_writer", None),
+        session_factory=getattr(request.app.state, "session_factory", None),
     )
 
     # Serialize with by_alias=True, exclude_none=True

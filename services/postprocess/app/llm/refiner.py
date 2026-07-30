@@ -23,6 +23,7 @@ from app.llm.align import apply_aligned, apply_aligned_with_map
 from app.llm.bedrock import BedrockClient
 from app.llm.prompt import build_system_prompt, build_user_content, estimate_prompt_tokens
 from app.llm.retrieval import retrieve_candidates
+from app.obs.metrics import emit_llm_prompt_tokens
 
 logger = structlog.get_logger("llm.refiner")
 
@@ -191,6 +192,9 @@ async def _process_chunk(
             token_estimate=token_estimate,
             word_count=len(chunk.words),
         )
+
+        # Emit prompt token metric (Req 12.10)
+        emit_llm_prompt_tokens(token_estimate)
 
         # 5. Call bedrock via asyncio.to_thread under asyncio.wait_for
         timeout_seconds = settings.llm_chunk_timeout_ms / 1000.0

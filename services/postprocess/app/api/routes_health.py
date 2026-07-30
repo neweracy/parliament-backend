@@ -14,6 +14,8 @@ import time
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from app.obs.metrics import emit_dataset_cache_age, emit_dataset_cache_records
+
 router = APIRouter()
 
 
@@ -46,6 +48,11 @@ async def health(request: Request) -> JSONResponse:
     # Check if LLM (Bedrock) is configured
     settings = request.app.state.settings
     llm_configured = bool(settings.llm_enabled)
+
+    # Emit Dataset_Cache metrics (Req 13.4)
+    emit_dataset_cache_records(snapshot.record_count)
+    cache_age_seconds = (time.time() - snapshot.loaded_at.timestamp())
+    emit_dataset_cache_age(cache_age_seconds)
 
     return JSONResponse(
         status_code=200,

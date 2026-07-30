@@ -9,14 +9,18 @@ Concurrency model:
   They run via ``await asyncio.to_thread(run_rule_stages, ...)`` so the event
   loop stays free for /health probes and concurrent requests.
 
-Requirements: 6.6, 2.1, 2.3, 2.4, 10.7, 10.8
+Requirements: 6.6, 2.1, 2.3, 2.4, 10.7, 10.8, 13.9, 17.3, 17.5
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import time
 from collections import Counter
+from datetime import datetime, timezone
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
 from app.correction.engine import (
@@ -26,6 +30,7 @@ from app.correction.engine import (
     correct_words,
 )
 from app.datasets.cache import DatasetCache, DatasetSnapshot
+from app.history.writer import CorrectionHistoryWriter, HistoryRecord
 from app.llm.bedrock import BedrockClient
 from app.llm.refiner import refine_chunks
 from app.models.entities import CorrectionRecord, EntityKind, EntityType, MatchStrategy
@@ -35,6 +40,12 @@ from app.models.response import (
     CorrectionResponse,
     EntitySummary,
     Metadata,
+)
+from app.obs.metrics import (
+    emit_corrections_applied,
+    emit_handler_latency,
+    emit_llm_latency,
+    emit_rule_latency,
 )
 from app.years.corrector import correct_years, correct_years_in_text
 
@@ -47,6 +58,7 @@ from app.years.corrector import correct_years, correct_years_in_text
 def _run_rule_stages(
     request: CorrectionRequest,
     snapshot: DatasetSnapshot,
+    settings: Settings | None = None,
 ) -> tuple[TextCorrectionResult, WordCorrectionResult, str, list[dict], int]:
     """Execute the Correction_Engine and Year_Corrector synchronously.
 
@@ -55,13 +67,25 @@ def _run_rule_stages(
     """
     index = snapshot.index
 
+    # Resolve correction thresholds from settings (deployment-level) with
+    # request.options providing per-request overrides for the two values
+    # that appear on CorrectionOptions.
+    min_confidence = request.options.min_confidence
+    word_accept_threshold = request.options.word_accept_threshold
+    fuzzy_score_cutoff: float = settings.fuzzy_score_cutoff if settings else 0.70
+    min_candidate_length: int = (
+        settings.min_candidate_length if settings else 4
+    )
+
     # --- Stage 1: Correction_Engine ---
     # correct_text operates on the transcript string
     text_result = correct_text(
         request.transcript,
         index,
         snapshot,
-        min_confidence=request.options.min_confidence,
+        min_confidence=min_confidence,
+        fuzzy_score_cutoff=fuzzy_score_cutoff,
+        min_candidate_length=min_candidate_length,
     )
 
     # correct_words operates on the word list
@@ -74,8 +98,10 @@ def _run_rule_stages(
         word_dicts,
         index,
         snapshot,
-        word_accept_threshold=request.options.word_accept_threshold,
-        min_confidence=request.options.min_confidence,
+        word_accept_threshold=word_accept_threshold,
+        min_confidence=min_confidence,
+        fuzzy_score_cutoff=fuzzy_score_cutoff,
+        min_candidate_length=min_candidate_length,
     )
 
     # --- Stage 2: Year_Corrector ---
@@ -144,6 +170,8 @@ async def run_pipeline(
     *,
     bedrock_client: BedrockClient | None = None,
     settings: Settings | None = None,
+    history_writer: CorrectionHistoryWriter | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> CorrectionResponse:
     """Execute the full correction pipeline and return a CorrectionResponse.
 
@@ -166,6 +194,12 @@ async def run_pipeline(
         is not available.
     settings : Settings | None
         Application settings. None when called without app context (tests).
+    history_writer : CorrectionHistoryWriter | None
+        The correction history writer. None when history is disabled.
+    session_factory : async_sessionmaker[AsyncSession] | None
+        An async session factory for database access (pg_trgm retrieval).
+        None when no database is available (tests); retrieval falls back
+        to the Dataset_Cache canonical_map.
 
     Returns
     -------
@@ -198,11 +232,14 @@ async def run_pipeline(
     rule_start = time.perf_counter()
 
     text_result, word_result, final_text, final_words, year_count = (
-        await asyncio.to_thread(_run_rule_stages, request, snapshot)
+        await asyncio.to_thread(_run_rule_stages, request, snapshot, settings)
     )
 
     rule_end = time.perf_counter()
     rule_latency_ms = int((rule_end - rule_start) * 1000)
+
+    # Emit rule latency metric (Req 10.8, 13.4)
+    emit_rule_latency(rule_latency_ms)
 
     # --- Stage 3: LLM_Refiner gate ---
     llm_start = time.perf_counter()
@@ -227,13 +264,23 @@ async def run_pipeline(
         llm_status = "unconfigured"
     else:
         try:
-            _, internal_status, count = await refine_chunks(
-                final_words,
-                snapshot,
-                bedrock_client,
-                None,  # session — retrieval falls back to snapshot
-                settings,
-            )
+            # Acquire a database session for pg_trgm retrieval if available
+            session: AsyncSession | None = None
+            try:
+                if session_factory is not None:
+                    session = session_factory()
+
+                _, internal_status, count = await refine_chunks(
+                    final_words,
+                    snapshot,
+                    bedrock_client,
+                    session,
+                    settings,
+                )
+            finally:
+                if session is not None:
+                    await session.close()
+
             # Map internal statuses to external
             if internal_status == "ok":
                 llm_status = "applied"
@@ -246,6 +293,9 @@ async def run_pipeline(
 
     llm_end = time.perf_counter()
     llm_latency_ms = int((llm_end - llm_start) * 1000)
+
+    # Emit LLM latency metric (Req 10.8, 13.4)
+    emit_llm_latency(llm_latency_ms, llm_status)
 
     # --- Build Entity_Summary ---
     entity_summary = _build_entity_summary(
@@ -304,6 +354,41 @@ async def run_pipeline(
 
     # --- Total latency (recorded but not exposed in metadata yet) ---
     _total_latency_ms = int((time.perf_counter() - total_start) * 1000)
+
+    # Emit handler latency metric (Req 10.8, 13.4)
+    emit_handler_latency(_total_latency_ms)
+
+    # Emit corrections applied per Match_Strategy (Req 13.3)
+    strategy_counts: Counter[str] = Counter()
+    for cr in corrections:
+        strategy_counts[cr.strategy.value] += 1
+    for strategy_name, count in strategy_counts.items():
+        emit_corrections_applied(strategy_name, count)
+
+    # --- Enqueue corrections into history writer (Req 13.9, 17.3) ---
+    if history_writer is not None and corrections:
+        text_hash = hashlib.sha256(
+            request.transcript.encode("utf-8")
+        ).hexdigest()[:16]
+        correlation_id = request.correlation_id or ""
+        now = datetime.now(timezone.utc)
+        dataset_version = snapshot.version if snapshot else ""
+
+        for cr in corrections:
+            history_writer.enqueue(
+                HistoryRecord(
+                    correlation_id=correlation_id,
+                    text_hash=text_hash,
+                    original=cr.original,
+                    corrected=cr.corrected,
+                    strategy=cr.strategy.value,
+                    confidence=cr.confidence,
+                    entity_kind=cr.entity_kind.value,
+                    entity_type=cr.entity_type.value,
+                    model_version=dataset_version,
+                    created_at=now,
+                )
+            )
 
     return CorrectionResponse(
         transcript=final_text,
