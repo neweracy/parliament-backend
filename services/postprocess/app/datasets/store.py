@@ -54,24 +54,84 @@ class SimilarityResult:
     aliases: list[str] = field(default_factory=list)
 
 
-def make_engine(database_url: str):
+def normalize_database_url(database_url: str) -> str:
+    """Force the psycopg 3 driver, which is the pinned async driver.
+
+    Accepts the ``postgres://`` and ``postgresql://`` forms that managed
+    providers and secrets managers hand out, and rewrites them to the
+    explicit ``postgresql+psycopg://`` form SQLAlchemy needs.
+    """
+    if database_url.startswith("postgresql+"):
+        return database_url
+    if database_url.startswith("postgresql://"):
+        return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    if database_url.startswith("postgres://"):
+        return database_url.replace("postgres://", "postgresql+psycopg://", 1)
+    return database_url
+
+
+def make_engine(
+    database_url: str,
+    *,
+    pool_size: int = 5,
+    max_overflow: int = 5,
+    pool_recycle_seconds: int = 1800,
+    pool_timeout_seconds: int = 10,
+    connect_timeout_seconds: int = 10,
+    statement_timeout_ms: int = 15000,
+    sslmode: str | None = None,
+):
     """Create an async SQLAlchemy engine from a DATABASE_URL.
 
-    Converts postgresql:// to postgresql+psycopg:// if needed, since
-    psycopg (v3) is the async driver.
+    Timeout and recycle settings exist because the defaults are unbounded,
+    which is unsafe in production:
+
+    - ``pool_recycle`` retires connections before an upstream reaper (RDS Proxy,
+      PgBouncer, NAT idle timeout) can close them out from under the pool.
+      ``pool_pre_ping`` alone only detects an already-dead connection after the
+      fact; recycling avoids the round-trip and the error window entirely.
+    - ``connect_timeout`` bounds TCP establishment. Without it a black-holed
+      network hangs the connection attempt indefinitely.
+    - ``statement_timeout`` is applied server-side per connection so a runaway
+      query cannot pin a pool slot forever.
+    - ``pool_timeout`` bounds how long a caller waits for a free slot, turning
+      pool exhaustion into a prompt error rather than an unbounded stall.
+
+    ``sslmode`` is only injected when the caller asks for it and the URL does
+    not already specify one, so an explicit ``?sslmode=`` in DATABASE_URL always
+    wins.
     """
-    url = database_url
-    if url.startswith("postgresql://"):
-        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
-    elif url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql+psycopg://", 1)
+    url = normalize_database_url(database_url)
+
+    connect_args: dict[str, object] = {
+        "connect_timeout": connect_timeout_seconds,
+        # libpq passes this straight to the server for this connection.
+        "options": f"-c statement_timeout={statement_timeout_ms}",
+    }
+
+    # Respect an sslmode already present in the URL rather than fighting it.
+    if sslmode and "sslmode=" not in url:
+        connect_args["sslmode"] = sslmode
 
     return create_async_engine(
         url,
-        pool_size=5,
-        max_overflow=5,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
         pool_pre_ping=True,
+        pool_recycle=pool_recycle_seconds,
+        pool_timeout=pool_timeout_seconds,
+        connect_args=connect_args,
     )
+
+
+async def check_connectivity(session: AsyncSession) -> None:
+    """Issue the cheapest possible round-trip to prove the database is reachable.
+
+    Raises whatever the driver raises on failure; callers decide how to report
+    it. Used by the readiness probe, which must fail when the database is gone
+    even though a cached snapshot would still satisfy reads.
+    """
+    await session.execute(text("SELECT 1"))
 
 
 def make_session_factory(engine) -> async_sessionmaker[AsyncSession]:
@@ -204,6 +264,30 @@ async def load_all_block_lists(
     return grouped
 
 
+async def _fetch_aliases(
+    session: AsyncSession,
+    record_ids: list[int],
+) -> dict[int, list[str]]:
+    """Load aliases for the given record ids, grouped and ordered by ordinal."""
+    if not record_ids:
+        return {}
+
+    result = await session.execute(
+        text(
+            "SELECT entity_record_id, alias "
+            "FROM entity_alias "
+            "WHERE entity_record_id = ANY(:ids) "
+            "ORDER BY entity_record_id, ordinal"
+        ),
+        {"ids": record_ids},
+    )
+
+    grouped: dict[int, list[str]] = {}
+    for row in result.fetchall():
+        grouped.setdefault(row[0], []).append(row[1])
+    return grouped
+
+
 async def similarity_search(
     session: AsyncSession,
     query_text: str,
@@ -288,42 +372,19 @@ async def similarity_search(
     if not rows:
         return []
 
-    # Fetch aliases for the matched records
-    matched_ids = [row[0] for row in rows]
-    aliases_result = await session.execute(
-        text(
-            "SELECT entity_record_id, alias "
-            "FROM entity_alias "
-            "WHERE entity_record_id = ANY(:ids) "
-            "ORDER BY entity_record_id, ordinal"
-        ),
-        {"ids": matched_ids},
-    )
-    alias_rows = aliases_result.fetchall()
+    aliases_by_record = await _fetch_aliases(session, [row[0] for row in rows])
 
-    aliases_by_record: dict[int, list[str]] = {}
-    for alias_row in alias_rows:
-        record_id = alias_row[0]
-        alias_text = alias_row[1]
-        if record_id not in aliases_by_record:
-            aliases_by_record[record_id] = []
-        aliases_by_record[record_id].append(alias_text)
-
-    # Build results
-    results: list[SimilarityResult] = []
-    for row in rows:
-        results.append(
-            SimilarityResult(
-                record_id=row[0],
-                canonical=row[1],
-                entity_kind=row[2],
-                entity_type=row[3],
-                similarity=float(row[4]),
-                aliases=aliases_by_record.get(row[0], []),
-            )
+    return [
+        SimilarityResult(
+            record_id=row[0],
+            canonical=row[1],
+            entity_kind=row[2],
+            entity_type=row[3],
+            similarity=float(row[4]),
+            aliases=aliases_by_record.get(row[0], []),
         )
-
-    return results
+        for row in rows
+    ]
 
 
 async def similarity_search_multi(
@@ -354,28 +415,88 @@ async def similarity_search_multi(
     if not query_texts:
         return []
 
-    # Collect results from all queries, keeping best score per record
-    seen: dict[int, SimilarityResult] = {}
+    # Trigram similarity needs at least a few characters to be meaningful.
+    candidates = [q.strip() for q in query_texts if q and len(q.strip()) >= 3]
+    if not candidates:
+        return []
 
-    for query_text in query_texts:
-        # Skip empty or very short queries that won't produce useful trigrams
-        if not query_text or len(query_text.strip()) < 3:
-            continue
+    # Deduplicate so repeated phrases in a chunk don't cost extra work.
+    unique_queries = list(dict.fromkeys(candidates))
 
-        results = await similarity_search(
-            session,
-            query_text,
-            limit=limit,
-            threshold=threshold,
-        )
-        for r in results:
-            if r.record_id not in seen or r.similarity > seen[r.record_id].similarity:
-                seen[r.record_id] = r
-
-    # Sort by similarity descending, then canonical for determinism
-    all_results = sorted(
-        seen.values(),
-        key=lambda r: (-r.similarity, r.canonical),
+    # Single round-trip over all queries. The previous implementation looped and
+    # called similarity_search once per query, costing 2N round-trips (a
+    # similarity query plus an alias fetch each). Under concurrent LLM
+    # retrieval that dominated latency and held pool slots far longer than
+    # necessary. unnest() lets one statement score every query at once.
+    result = await session.execute(
+        text(
+            """
+            WITH queries AS (
+                SELECT unnest(CAST(:queries AS text[])) AS q
+            ),
+            canonical_matches AS (
+                SELECT
+                    er.id AS record_id,
+                    er.canonical,
+                    er.entity_kind,
+                    er.entity_type,
+                    similarity(er.canonical, queries.q) AS sim_score
+                FROM entity_record er
+                CROSS JOIN queries
+                WHERE er.active = true
+                  AND similarity(er.canonical, queries.q) >= :threshold
+            ),
+            alias_matches AS (
+                SELECT
+                    er.id AS record_id,
+                    er.canonical,
+                    er.entity_kind,
+                    er.entity_type,
+                    similarity(ea.alias, queries.q) AS sim_score
+                FROM entity_alias ea
+                JOIN entity_record er ON er.id = ea.entity_record_id
+                CROSS JOIN queries
+                WHERE er.active = true
+                  AND similarity(ea.alias, queries.q) >= :threshold
+            ),
+            combined AS (
+                SELECT * FROM canonical_matches
+                UNION ALL
+                SELECT * FROM alias_matches
+            ),
+            best_per_record AS (
+                SELECT
+                    record_id,
+                    canonical,
+                    entity_kind,
+                    entity_type,
+                    MAX(sim_score) AS best_sim
+                FROM combined
+                GROUP BY record_id, canonical, entity_kind, entity_type
+            )
+            SELECT record_id, canonical, entity_kind, entity_type, best_sim
+            FROM best_per_record
+            ORDER BY best_sim DESC, canonical
+            LIMIT :limit
+            """
+        ),
+        {"queries": unique_queries, "threshold": threshold, "limit": limit},
     )
+    rows = result.fetchall()
 
-    return all_results[:limit]
+    if not rows:
+        return []
+
+    aliases_by_record = await _fetch_aliases(session, [row[0] for row in rows])
+
+    return [
+        SimilarityResult(
+            record_id=row[0],
+            canonical=row[1],
+            entity_kind=row[2],
+            entity_type=row[3],
+            similarity=float(row[4]),
+            aliases=aliases_by_record.get(row[0], []),
+        )
+        for row in rows
+    ]

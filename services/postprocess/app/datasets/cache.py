@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.datasets.index import MatchIndex, build_index
 from app.datasets.store import (
@@ -67,17 +68,34 @@ class DatasetCache:
 
     def __init__(
         self,
-        database_url: str,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
         refresh_seconds: int = 300,
         load_retry_seconds: int = 30,
+        *,
+        database_url: str | None = None,
     ) -> None:
-        self._database_url = database_url
+        """Build a cache over a shared session factory.
+
+        Pass ``session_factory`` so the cache shares the process-wide pool.
+        ``database_url`` is a fallback that creates a private engine, kept for
+        standalone use (scripts, tests); when used, this cache owns that engine
+        and disposes it in ``stop()``.
+        """
+        if session_factory is None and database_url is None:
+            raise ValueError("provide either session_factory or database_url")
+
         self._refresh_seconds = refresh_seconds
         self._load_retry_seconds = load_retry_seconds
 
         self._snapshot: DatasetSnapshot | None = None
-        self._engine = make_engine(database_url)
-        self._session_factory = make_session_factory(self._engine)
+
+        if session_factory is not None:
+            # Shared pool — this cache must not dispose an engine it doesn't own.
+            self._session_factory = session_factory
+            self._engine = None
+        else:
+            self._engine = make_engine(database_url)  # type: ignore[arg-type]
+            self._session_factory = make_session_factory(self._engine)
 
         self._refresh_task: asyncio.Task | None = None
         self._startup_task: asyncio.Task | None = None
@@ -106,7 +124,7 @@ class DatasetCache:
             )
 
     async def stop(self) -> None:
-        """Cancel background tasks and dispose of the engine."""
+        """Cancel background tasks, and dispose the engine only if we own it."""
         self._stopping = True
 
         if self._refresh_task is not None:
@@ -125,7 +143,10 @@ class DatasetCache:
                 pass
             self._startup_task = None
 
-        await self._engine.dispose()
+        # Only dispose an engine this cache created. When running on the shared
+        # pool, the application lifespan owns disposal.
+        if self._engine is not None:
+            await self._engine.dispose()
 
     async def reload(self) -> DatasetSnapshot | None:
         """On-demand reload triggered by the /v1/datasets/reload endpoint.

@@ -13,7 +13,11 @@ services:
   # PostgreSQL Dataset_Store
   # ---------------------------------------------------------------------------
   postgres:
-    image: postgres:16
+    # pgvector-enabled build of PostgreSQL 16. The stock postgres:16 image does
+    # not ship the vector extension, so "CREATE EXTENSION vector" fails and the
+    # Hansard schema migration cannot run. This image is otherwise identical to
+    # postgres:16, so the existing data volume stays compatible.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: postprocess
       POSTGRES_PASSWORD: localdev
@@ -45,8 +49,12 @@ services:
       DRAIN_TIMEOUT_SECONDS: "15"
       SERVICE_TOKEN: "local-dev-token"
       DATABASE_URL: "postgresql+psycopg://postprocess:localdev@postgres:5432/postprocess"
-      AWS_REGION: "us-east-1"
-      LLM_ENABLED: "false"
+      # AWS Bedrock — enables LLM correction and Titan embeddings for RAG
+      AWS_REGION: "${AWS_REGION:-us-east-1}"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+      LLM_ENABLED: "true"
+      BEDROCK_MODEL_ID: "us.anthropic.claude-haiku-4-5-20251001-v1:0"
       LOG_LEVEL: "debug"
     ports:
       - "8082:8082"

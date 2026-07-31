@@ -26,6 +26,16 @@ logger = structlog.get_logger("history")
 _BATCH_SIZE = 50
 
 
+def _emit_history_dropped() -> None:
+    """Emit the dropped-history metric, tolerating an unavailable metrics stack."""
+    try:
+        from app.obs.metrics import emit_history_dropped  # noqa: WPS433
+
+        emit_history_dropped()
+    except Exception:  # pragma: no cover - metrics must never break the request path
+        pass
+
+
 @dataclass(frozen=True)
 class HistoryRecord:
     """One applied correction destined for the correction_history table."""
@@ -63,6 +73,9 @@ class CorrectionHistoryWriter:
         self,
         session_factory: async_sessionmaker[AsyncSession],
         max_queue_size: int = 1000,
+        *,
+        retention_days: int = 90,
+        retention_interval_seconds: int = 86400,
     ) -> None:
         self._session_factory = session_factory
         self._queue: asyncio.Queue[HistoryRecord] = asyncio.Queue(
@@ -70,6 +83,9 @@ class CorrectionHistoryWriter:
         )
         self._dropped_count: int = 0
         self._task: asyncio.Task[None] | None = None
+        self._retention_days = retention_days
+        self._retention_interval_seconds = retention_interval_seconds
+        self._retention_task: asyncio.Task[None] | None = None
 
     @property
     def dropped_count(self) -> int:
@@ -77,11 +93,23 @@ class CorrectionHistoryWriter:
         return self._dropped_count
 
     def start(self) -> None:
-        """Launch the background writer task."""
+        """Launch the background writer and the retention sweeper."""
         self._task = asyncio.create_task(self._writer_loop(), name="history-writer")
+        if self._retention_days > 0:
+            self._retention_task = asyncio.create_task(
+                self._retention_loop(), name="history-retention"
+            )
 
     async def stop(self) -> None:
-        """Cancel the writer task gracefully, draining remaining items."""
+        """Cancel background tasks gracefully, draining remaining items."""
+        if self._retention_task is not None:
+            self._retention_task.cancel()
+            try:
+                await self._retention_task
+            except asyncio.CancelledError:
+                pass
+            self._retention_task = None
+
         if self._task is None:
             return
 
@@ -96,15 +124,22 @@ class CorrectionHistoryWriter:
         await self._drain_remaining()
 
     def enqueue(self, record: HistoryRecord) -> None:
-        """Put a record on the queue. Drops silently if full (never blocks)."""
+        """Put a record on the queue. Drops if full, but never blocks.
+
+        Overflow is logged at WARNING and counted as a metric. Dropping audit
+        data is a real loss, so it must be visible to monitoring rather than
+        buried at debug level where nobody would see it.
+        """
         try:
             self._queue.put_nowait(record)
         except asyncio.QueueFull:
             self._dropped_count += 1
-            logger.debug(
+            logger.warning(
                 "history.queue_overflow",
                 dropped_total=self._dropped_count,
+                queue_maxsize=self._queue.maxsize,
             )
+            _emit_history_dropped()
 
     async def _writer_loop(self) -> None:
         """Background loop consuming records and persisting them in batches."""
@@ -129,6 +164,55 @@ class CorrectionHistoryWriter:
                 logger.error("history.writer_error", exc_info=True)
                 # Brief backoff on unexpected errors to avoid tight loop
                 await asyncio.sleep(1.0)
+
+    async def _retention_loop(self) -> None:
+        """Periodically delete history rows older than the retention window.
+
+        ``correction_history`` gains a row per applied correction, so without a
+        sweeper it grows without bound and eventually degrades both queries and
+        backups. Deletes are batched and capped per pass to avoid holding a long
+        transaction or a large lock on a busy table.
+        """
+        while True:
+            try:
+                await asyncio.sleep(self._retention_interval_seconds)
+                await self._prune_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.error("history.retention_error", exc_info=True)
+
+    async def _prune_once(self, *, batch_limit: int = 10000) -> int:
+        """Delete one batch of expired rows. Returns the number removed."""
+        if self._retention_days <= 0:
+            return 0
+
+        try:
+            async with self._session_factory() as session:
+                async with session.begin():
+                    result = await session.execute(
+                        text(
+                            "DELETE FROM correction_history "
+                            "WHERE id IN ("
+                            "  SELECT id FROM correction_history "
+                            "  WHERE created_at < now() - make_interval(days => :days) "
+                            "  ORDER BY id "
+                            "  LIMIT :limit"
+                            ")"
+                        ),
+                        {"days": self._retention_days, "limit": batch_limit},
+                    )
+            deleted = result.rowcount or 0
+            if deleted:
+                logger.info(
+                    "history.retention_pruned",
+                    deleted=deleted,
+                    retention_days=self._retention_days,
+                )
+            return deleted
+        except Exception:
+            logger.error("history.retention_prune_failed", exc_info=True)
+            return 0
 
     async def _drain_remaining(self) -> None:
         """Drain and persist any records left in the queue after cancellation."""

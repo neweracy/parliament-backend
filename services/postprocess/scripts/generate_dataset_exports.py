@@ -30,26 +30,39 @@ OUTPUT_DIR = SERVICE_ROOT / "datasets"
 
 
 def load_raw_data_from_node() -> dict:
-    """Invoke export_js_datasets.js via subprocess and parse its stdout JSON."""
+    """Invoke export_js_datasets.js via subprocess and parse its stdout JSON.
+
+    Node emits UTF-8. Decoding is pinned to UTF-8 rather than left to
+    ``text=True``, which uses the platform locale encoding — cp1252 on Windows.
+    That default silently turned every en-dash (U+2013) in a role string into
+    the mojibake ``â€“``, corrupting the generated datasets while leaving the
+    upstream JS source clean. Bytes are captured and decoded explicitly so the
+    platform locale cannot influence the result.
+    """
     try:
         result = subprocess.run(
             ["node", str(EXPORTER)],
             capture_output=True,
-            text=True,
             cwd=str(REPO_ROOT),
             check=True,
         )
     except subprocess.CalledProcessError as exc:
         print(f"ERROR: export_js_datasets.js failed (exit {exc.returncode})", file=sys.stderr)
         if exc.stderr:
-            print(exc.stderr, file=sys.stderr)
+            print(exc.stderr.decode("utf-8", errors="replace"), file=sys.stderr)
         sys.exit(1)
     except FileNotFoundError:
         print("ERROR: node not found — is Node.js installed?", file=sys.stderr)
         sys.exit(1)
 
     try:
-        return json.loads(result.stdout)
+        stdout = result.stdout.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        print(f"ERROR: exporter output was not valid UTF-8: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        return json.loads(stdout)
     except json.JSONDecodeError as exc:
         print(f"ERROR: could not parse exporter output as JSON: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -63,6 +76,47 @@ def load_raw_data() -> dict:
         sys.exit(1)
     with open(RAW_JSON_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def clean_aliases(aliases: list, canonical: str = "") -> list[str]:
+    """Normalize an alias list: trim, drop blanks, and de-duplicate case-insensitively.
+
+    Alias matching in the Correction_Engine is case-folded, so ``'BB Kabu'`` and
+    ``'bb kabu'`` are the same key. Carrying both only inflates the Match_Index
+    and the ``entity_alias`` table (whose UNIQUE constraint is case-sensitive, so
+    the database will not collapse them either).
+
+    Order is preserved and the FIRST spelling of each alias wins. That matters:
+    ``migrate_js_datasets.py`` documents alias ordinal order as load-bearing for
+    Match_Index write semantics, so this must be a stable filter and never a sort.
+
+    Internal whitespace is collapsed because a doubled space can never match
+    tokenized speech input.
+    """
+    cleaned: list[str] = []
+    seen: set[str] = set()
+
+    for alias in aliases:
+        if not isinstance(alias, str):
+            continue
+        # Collapse internal runs of whitespace and trim the ends.
+        normalized = " ".join(alias.split())
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(normalized)
+
+    return cleaned
+
+
+def clean_text(value) -> str:
+    """Trim and collapse whitespace in a scalar text field."""
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())
 
 
 def extract_persons(sources: dict) -> list[dict]:
@@ -80,11 +134,12 @@ def extract_persons(sources: dict) -> list[dict]:
         if key not in sources:
             continue
         for rec in sources[key]["records"]:
+            canonical = clean_text(rec["canonical"])
             persons.append({
-                "canonical": rec["canonical"],
+                "canonical": canonical,
                 "entity_type": rec["entity_type"],
-                "role": rec.get("role") or "",
-                "aliases": rec.get("aliases", []),
+                "role": clean_text(rec.get("role")),
+                "aliases": clean_aliases(rec.get("aliases", []), canonical),
                 "source": rec["source"],
             })
     return persons
@@ -98,11 +153,12 @@ def extract_locations(sources: dict) -> list[dict]:
         if key not in sources:
             continue
         for rec in sources[key]["records"]:
+            canonical = clean_text(rec["canonical"])
             locations.append({
-                "canonical": rec["canonical"],
+                "canonical": canonical,
                 "entity_type": rec["entity_type"],
-                "region": rec.get("region") or "",
-                "aliases": rec.get("aliases", []),
+                "region": clean_text(rec.get("region")),
+                "aliases": clean_aliases(rec.get("aliases", []), canonical),
                 "source": rec["source"],
             })
     return locations
@@ -115,12 +171,11 @@ def extract_parties(sources: dict) -> list[dict]:
         return parties
     for rec in sources["parties"]["records"]:
         # The abbreviation is stored in the `party` field by the export script
-        aliases = rec.get("aliases", [])
-        abbreviation = rec.get("party") or ""
+        canonical = clean_text(rec["canonical"])
         parties.append({
-            "canonical": rec["canonical"],
-            "abbreviation": abbreviation,
-            "aliases": aliases,
+            "canonical": canonical,
+            "abbreviation": clean_text(rec.get("party")),
+            "aliases": clean_aliases(rec.get("aliases", []), canonical),
         })
     return parties
 
@@ -131,20 +186,26 @@ def extract_mps(sources: dict) -> list[dict]:
     if "mps" not in sources:
         return mps
     for rec in sources["mps"]["records"]:
+        canonical = clean_text(rec["canonical"])
         mps.append({
-            "canonical": rec["canonical"],
-            "constituency": rec.get("constituency") or "",
-            "party": rec.get("party") or "",
-            "role": rec.get("role") or "",
-            "aliases": rec.get("aliases", []),
+            "canonical": canonical,
+            "constituency": clean_text(rec.get("constituency")),
+            "party": clean_text(rec.get("party")),
+            "role": clean_text(rec.get("role")),
+            "aliases": clean_aliases(rec.get("aliases", []), canonical),
         })
     return mps
 
 
 def write_json(data: list[dict], path: Path) -> None:
-    """Write data as pretty-printed JSON."""
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    """Write data as pretty-printed JSON with a trailing newline.
+
+    Encoding is pinned to UTF-8 and ``ensure_ascii=False`` keeps real characters
+    (en-dashes, accents) rather than escapes. The trailing newline keeps the file
+    POSIX-clean so diffs do not show a "\\ No newline at end of file" marker.
+    """
+    content = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    path.write_text(content, encoding="utf-8", newline="\n")
     print(f"  Written: {path.relative_to(SERVICE_ROOT)} ({len(data)} records)")
 
 

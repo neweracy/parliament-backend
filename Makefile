@@ -4,7 +4,7 @@
 # Use corepack to ensure correct pnpm version
 PNPM := corepack pnpm
 
-.PHONY: help check check-prereqs install init install-backend install-frontend start-backend start-frontend start test test-unit test-contracts test-python lint bench update clean status
+.PHONY: help check check-prereqs install init install-backend install-frontend start-backend start-frontend start test test-unit test-contracts test-python lint bench update clean status postprocess-db postprocess-migrate postprocess-seed postprocess-setup start-postprocess datasets-generate datasets-validate
 
 # Default target: show help
 help:
@@ -21,6 +21,12 @@ help:
 	@echo "  make start             Start application (backend + frontend)"
 	@echo "  make start-backend     Start backend only (port 8081)"
 	@echo "  make start-frontend    Start frontend only (port 8080)"
+	@echo ""
+	@echo "Python postprocessing service (POSTPROCESS_MODE=python):"
+	@echo "  make postprocess-setup Provision DB + migrate + seed datasets (one-time)"
+	@echo "  make start-postprocess Start the service only (port 8082)"
+	@echo "  make datasets-generate Regenerate dataset export artifacts"
+	@echo "  make datasets-validate Validate dataset encoding and integrity"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make lint              Lint the backend (eslint)"
@@ -169,6 +175,71 @@ start:
 	@echo "    Frontend: http://localhost:8080"
 	@echo ""
 	@$(MAKE) start-backend & $(MAKE) start-frontend & wait
+
+# ---------------------------------------------------------------------------
+# Python Postprocessing Service (only needed when POSTPROCESS_MODE=python)
+# ---------------------------------------------------------------------------
+
+# Path to the service venv interpreter. Console scripts (alembic.exe, uvicorn.exe)
+# embed an absolute path at creation time and break if the repo is moved, so the
+# interpreter is always invoked directly with `-m`.
+PP_DIR    := services/postprocess
+PP_PYTHON := ./.venv/Scripts/python.exe
+
+# Start the PostgreSQL Dataset_Store and wait for it to accept connections
+postprocess-db:
+	@echo "==> Starting PostgreSQL (Dataset_Store)..."
+	@cd $(PP_DIR) && docker compose up -d postgres \
+		|| { echo "❌ Failed to start Postgres. Is the Docker daemon running?"; exit 1; }
+	@echo "==> Waiting for Postgres to become healthy..."
+	@cd $(PP_DIR) && for i in $$(seq 1 30); do \
+		status=$$(docker inspect --format '{{.State.Health.Status}}' postprocess-postgres-1 2>/dev/null); \
+		if [ "$$status" = "healthy" ]; then echo "✓ Postgres healthy"; exit 0; fi; \
+		sleep 2; \
+	done; \
+	echo "❌ Postgres did not become healthy in time"; exit 1
+
+# Apply the Alembic schema migrations
+postprocess-migrate:
+	@if [ ! -f "$(PP_DIR)/.env" ]; then \
+		echo "❌ $(PP_DIR)/.env not found. Copy it from $(PP_DIR)/sample.env"; \
+		exit 1; \
+	fi
+	@echo "==> Applying database migrations..."
+	@cd $(PP_DIR) && set -a && . ./.env && set +a && $(PP_PYTHON) -m alembic upgrade head
+
+# Seed the Ghana entity datasets from the JS source of truth
+postprocess-seed:
+	@echo "==> Seeding entity datasets..."
+	@cd $(PP_DIR) && set -a && . ./.env && set +a && $(PP_PYTHON) scripts/migrate_js_datasets.py
+
+# One-shot local provisioning: database + schema + datasets
+postprocess-setup: postprocess-db postprocess-migrate postprocess-seed
+	@echo ""
+	@echo "✓ Postprocessing service ready. Start it with: make start-postprocess"
+	@echo ""
+
+# Start the service (port 8082). Uses run_local.py, which installs the selector
+# event loop policy required by psycopg on Windows.
+start-postprocess:
+	@if [ ! -f "$(PP_DIR)/.env" ]; then \
+		echo "❌ $(PP_DIR)/.env not found. Copy it from $(PP_DIR)/sample.env"; \
+		exit 1; \
+	fi
+	@echo "==> Starting postprocessing service on http://localhost:8082"
+	@cd $(PP_DIR) && $(PP_PYTHON) scripts/run_local.py
+
+# Regenerate the dataset export artifacts under services/postprocess/datasets/
+# from the JS datasets (the single source of truth).
+datasets-generate:
+	@echo "==> Regenerating dataset exports..."
+	@cd $(PP_DIR) && $(PP_PYTHON) scripts/generate_dataset_exports.py
+
+# Validate the dataset exports: encoding, duplicate aliases, natural-key
+# integrity, and CSV/JSON parity. Exits non-zero on any error.
+datasets-validate:
+	@echo "==> Validating dataset exports..."
+	@cd $(PP_DIR) && $(PP_PYTHON) scripts/validate_datasets.py
 
 # Lint the backend
 lint:

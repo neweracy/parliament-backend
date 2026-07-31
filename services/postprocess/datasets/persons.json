@@ -2,7 +2,7 @@
   {
     "canonical": "Kwame Nkrumah",
     "entity_type": "president",
-    "role": "President (1960â€“1966)",
+    "role": "President (1960–1966)",
     "aliases": [
       "Nkrumah",
       "Kwame Nkruma",
@@ -17,13 +17,11 @@
       "Kwami Nkruma",
       "Kwame Nkruhmah",
       "Kwame Enkrooma",
-      "Kwame Nkruma",
       "K. Nkrumah",
       "Kwame N'krumah",
       "Kwame Nkrumahr",
       "Kwameh Nkroumah",
       "Quameh Nkrumah",
-      "Kwame Nkroomah",
       "Nkrouma"
     ],
     "source": "persons_presidents"
@@ -31,7 +29,7 @@
   {
     "canonical": "Joseph Arthur Ankrah",
     "entity_type": "president",
-    "role": "Head of State (1966â€“1969)",
+    "role": "Head of State (1966–1969)",
     "aliases": [
       "Ankrah",
       "General Ankrah",
@@ -87,7 +85,7 @@
   {
     "canonical": "Edward Akufo-Addo",
     "entity_type": "president",
-    "role": "President (1970â€“1972)",
+    "role": "President (1970–1972)",
     "aliases": [
       "Akufo-Addo",
       "Edward Akufo Addo",
@@ -104,7 +102,6 @@
       "Edward Akufoadoh",
       "Akufo Addo",
       "Akuffo Addo",
-      "Edward Akufoaddo",
       "Akufado",
       "Akufaddo",
       "Edward Akufado",
@@ -115,7 +112,7 @@
   {
     "canonical": "Kofi Abrefa Busia",
     "entity_type": "president",
-    "role": "Prime Minister (1969â€“1972)",
+    "role": "Prime Minister (1969–1972)",
     "aliases": [
       "Busia",
       "Dr Busia",
@@ -143,7 +140,7 @@
   {
     "canonical": "Ignatius Kutu Acheampong",
     "entity_type": "president",
-    "role": "Head of State (1972â€“1978)",
+    "role": "Head of State (1972–1978)",
     "aliases": [
       "Acheampong",
       "General Acheampong",
@@ -171,13 +168,12 @@
   {
     "canonical": "Fred Akuffo",
     "entity_type": "president",
-    "role": "Head of State (1978â€“1979)",
+    "role": "Head of State (1978–1979)",
     "aliases": [
       "General Akuffo",
       "Fred W.K. Akuffo",
       "Fred Akufo",
       "Gen Akuffo",
-      "Fred Akufo",
       "Lt Gen Akuffo",
       "Akuffo",
       "Fred Akuffoh",
@@ -199,7 +195,7 @@
   {
     "canonical": "Jerry John Rawlings",
     "entity_type": "president",
-    "role": "Head of State (1979, 1981â€“1993) / President (1993â€“2001)",
+    "role": "Head of State (1979, 1981–1993) / President (1993–2001)",
     "aliases": [
       "Rawlings",
       "J.J. Rawlings",
@@ -227,7 +223,7 @@
   {
     "canonical": "Hilla Limann",
     "entity_type": "president",
-    "role": "President (1979â€“1981)",
+    "role": "President (1979–1981)",
     "aliases": [
       "Limann",
       "Dr Limann",
@@ -255,7 +251,7 @@
   {
     "canonical": "John Agyekum Kufuor",
     "entity_type": "president",
-    "role": "President (2001â€“2009)",
+    "role": "President (2001–2009)",
     "aliases": [
       "Kufuor",
       "J.A. Kufuor",
@@ -283,7 +279,7 @@
   {
     "canonical": "John Evans Atta Mills",
     "entity_type": "president",
-    "role": "President (2009â€“2012)",
+    "role": "President (2009–2012)",
     "aliases": [
       "Atta Mills",
       "Mills",
@@ -311,7 +307,7 @@
   {
     "canonical": "John Dramani Mahama",
     "entity_type": "president",
-    "role": "President (2012â€“2017, 2025â€“)",
+    "role": "President (2012–2017, 2025–)",
     "aliases": [
       "Mahama",
       "John Mahama",
@@ -339,7 +335,7 @@
   {
     "canonical": "Nana Addo Dankwa Akufo-Addo",
     "entity_type": "president",
-    "role": "President (2017â€“2025)",
+    "role": "President (2017–2025)",
     "aliases": [
       "Nana Akufo-Addo",
       "Nana Addo",
@@ -367,7 +363,7 @@
   {
     "canonical": "Kow Nkensen Arkaah",
     "entity_type": "president",
-    "role": "Vice President (1993â€“1997)",
+    "role": "Vice President (1993–1997)",
     "aliases": [
       "Arkaah",
       "K.N. Arkaah"
@@ -377,7 +373,7 @@
   {
     "canonical": "John Evans Atta Mills",
     "entity_type": "president",
-    "role": "Vice President (1997â€“2001)",
+    "role": "Vice President (1997–2001)",
     "aliases": [
       "Atta Mills"
     ],
@@ -386,7 +382,7 @@
   {
     "canonical": "Aliu Mahama",
     "entity_type": "president",
-    "role": "Vice President (2001â€“2009)",
+    "role": "Vice President (2001–2009)",
     "aliases": [
       "Alhaji Aliu Mahama"
     ],
@@ -395,7 +391,7 @@
   {
     "canonical": "John Dramani Mahama",
     "entity_type": "president",
-    "role": "Vice President (2009â€“2012)",
+    "role": "Vice President (2009–2012)",
     "aliases": [
       "Mahama"
     ],
@@ -404,7 +400,7 @@
   {
     "canonical": "Kwesi Amissah-Arthur",
     "entity_type": "president",
-    "role": "Vice President (2012â€“2017)",
+    "role": "Vice President (2012–2017)",
     "aliases": [
       "Amissah-Arthur",
       "Kwesi Amissah Arthur",
@@ -415,7 +411,7 @@
   {
     "canonical": "Mahamudu Bawumia",
     "entity_type": "president",
-    "role": "Vice President (2017â€“2025)",
+    "role": "Vice President (2017–2025)",
     "aliases": [
       "Bawumia",
       "Dr Bawumia",
@@ -426,7 +422,7 @@
   {
     "canonical": "Jane Naana Opoku-Agyemang",
     "entity_type": "president",
-    "role": "Vice President (2025â€“)",
+    "role": "Vice President (2025–)",
     "aliases": [
       "Naana Opoku-Agyemang",
       "Prof Opoku-Agyemang",
@@ -438,7 +434,7 @@
   {
     "canonical": "Justice D.F. Annan",
     "entity_type": "president",
-    "role": "Speaker (1993â€“2001)",
+    "role": "Speaker (1993–2001)",
     "aliases": [
       "Justice Annan",
       "D.F. Annan"
@@ -448,7 +444,7 @@
   {
     "canonical": "Peter Ala Adjetey",
     "entity_type": "president",
-    "role": "Speaker (2001â€“2005)",
+    "role": "Speaker (2001–2005)",
     "aliases": [
       "Ala Adjetey",
       "Adjetey"
@@ -458,7 +454,7 @@
   {
     "canonical": "Ebenezer Begyina Sekyi-Hughes",
     "entity_type": "president",
-    "role": "Speaker (2005â€“2009)",
+    "role": "Speaker (2005–2009)",
     "aliases": [
       "Sekyi-Hughes",
       "Sekyi Hughes"
@@ -468,7 +464,7 @@
   {
     "canonical": "Joyce Bamford-Addo",
     "entity_type": "president",
-    "role": "Speaker (2009â€“2013)",
+    "role": "Speaker (2009–2013)",
     "aliases": [
       "Bamford-Addo",
       "Madam Speaker Bamford-Addo"
@@ -478,7 +474,7 @@
   {
     "canonical": "Edward Doe Adjaho",
     "entity_type": "president",
-    "role": "Speaker (2013â€“2017)",
+    "role": "Speaker (2013–2017)",
     "aliases": [
       "Adjaho",
       "Doe Adjaho"
@@ -488,7 +484,7 @@
   {
     "canonical": "Aaron Mike Oquaye",
     "entity_type": "president",
-    "role": "Speaker (2017â€“2021)",
+    "role": "Speaker (2017–2021)",
     "aliases": [
       "Mike Oquaye",
       "Professor Oquaye",
@@ -499,7 +495,7 @@
   {
     "canonical": "Alban Sumana Kingsford Bagbin",
     "entity_type": "president",
-    "role": "Speaker (2021â€“)",
+    "role": "Speaker (2021–)",
     "aliases": [
       "Bagbin",
       "Alban Bagbin",
@@ -511,7 +507,7 @@
   {
     "canonical": "Komla Agbeli Gbedemah",
     "entity_type": "minister",
-    "role": "Min. of Finance (1957â€“1961)",
+    "role": "Min. of Finance (1957–1961)",
     "aliases": [
       "Gbedemah",
       "K.A. Gbedemah",
@@ -531,7 +527,7 @@
   {
     "canonical": "Kojo Botsio",
     "entity_type": "minister",
-    "role": "Min. of Foreign Affairs (1957â€“1963)",
+    "role": "Min. of Foreign Affairs (1957–1963)",
     "aliases": [
       "Botsio",
       "K. Botsio",
@@ -571,7 +567,7 @@
   {
     "canonical": "Kwaku Boateng",
     "entity_type": "minister",
-    "role": "Min. of Interior (1960â€“1964)",
+    "role": "Min. of Interior (1960–1964)",
     "aliases": [
       "K. Boateng",
       "Kwaku Boateng",
@@ -590,7 +586,7 @@
   {
     "canonical": "Ebenezer Ako-Adjei",
     "entity_type": "minister",
-    "role": "Min. of Foreign Affairs (1959â€“1962)",
+    "role": "Min. of Foreign Affairs (1959–1962)",
     "aliases": [
       "Ako-Adjei",
       "Ako Adjei",
@@ -610,7 +606,7 @@
   {
     "canonical": "Tawia Adamafio",
     "entity_type": "minister",
-    "role": "Min. of Information (1960â€“1962)",
+    "role": "Min. of Information (1960–1962)",
     "aliases": [
       "Adamafio",
       "Tawia Adamafio",
@@ -630,7 +626,7 @@
   {
     "canonical": "Kofi Baako",
     "entity_type": "minister",
-    "role": "Min. of Defence (1960â€“1966)",
+    "role": "Min. of Defence (1960–1966)",
     "aliases": [
       "Baako",
       "Kofi Baako Jr",
@@ -650,7 +646,7 @@
   {
     "canonical": "Alex Quaison-Sackey",
     "entity_type": "minister",
-    "role": "Min. of Foreign Affairs (1965â€“1966)",
+    "role": "Min. of Foreign Affairs (1965–1966)",
     "aliases": [
       "Quaison-Sackey",
       "Alex Quaison Sackey",
@@ -670,7 +666,7 @@
   {
     "canonical": "Kwesi Armah",
     "entity_type": "minister",
-    "role": "Min. of Trade (1961â€“1965)",
+    "role": "Min. of Trade (1961–1965)",
     "aliases": [
       "Armah",
       "Kwesi Armah",
@@ -690,7 +686,7 @@
   {
     "canonical": "Imoru Egala",
     "entity_type": "minister",
-    "role": "Min. of Trade (1957â€“1961)",
+    "role": "Min. of Trade (1957–1961)",
     "aliases": [
       "Egala",
       "Imoru Egala",
@@ -730,7 +726,7 @@
   {
     "canonical": "Susana Al-Hassan",
     "entity_type": "minister",
-    "role": "Min. of Social Welfare (1961â€“1966)",
+    "role": "Min. of Social Welfare (1961–1966)",
     "aliases": [
       "Al-Hassan",
       "Susana Alhassan",
@@ -750,7 +746,7 @@
   {
     "canonical": "Jatoe Kaleo",
     "entity_type": "minister",
-    "role": "Min. of Agriculture (1962â€“1966)",
+    "role": "Min. of Agriculture (1962–1966)",
     "aliases": [
       "Kaleo",
       "Jatoe Kaleo",
@@ -770,7 +766,7 @@
   {
     "canonical": "N.A. Welbeck",
     "entity_type": "minister",
-    "role": "Min. of Works (1960â€“1966)",
+    "role": "Min. of Works (1960–1966)",
     "aliases": [
       "Welbeck",
       "Nathaniel Welbeck",
@@ -790,7 +786,7 @@
   {
     "canonical": "J.H. Mensah",
     "entity_type": "minister",
-    "role": "Min. of Finance (1969â€“1972)",
+    "role": "Min. of Finance (1969–1972)",
     "aliases": [
       "J.H. Mensah",
       "Joseph Henry Mensah",
@@ -810,7 +806,7 @@
   {
     "canonical": "William Ofori-Atta",
     "entity_type": "minister",
-    "role": "Min. of Foreign Affairs (1969â€“1972)",
+    "role": "Min. of Foreign Affairs (1969–1972)",
     "aliases": [
       "Paa Willie",
       "Ofori-Atta",
@@ -829,7 +825,7 @@
   {
     "canonical": "Victor Owusu",
     "entity_type": "minister",
-    "role": "Attorney General (1969â€“1972)",
+    "role": "Attorney General (1969–1972)",
     "aliases": [
       "Victor Owusu",
       "V. Owusu",
@@ -848,7 +844,7 @@
   {
     "canonical": "R.R. Amponsah",
     "entity_type": "minister",
-    "role": "Min. of Interior (1969â€“1972)",
+    "role": "Min. of Interior (1969–1972)",
     "aliases": [
       "Amponsah",
       "R.R. Amponsah",
@@ -867,7 +863,7 @@
   {
     "canonical": "Jones Ofori-Atta",
     "entity_type": "minister",
-    "role": "Min. of Education (1969â€“1972)",
+    "role": "Min. of Education (1969–1972)",
     "aliases": [
       "Jones Ofori Atta",
       "Jones Ofori-Atta",
@@ -887,7 +883,7 @@
   {
     "canonical": "Albert Adomakoh",
     "entity_type": "minister",
-    "role": "Min. of Health (1969â€“1972)",
+    "role": "Min. of Health (1969–1972)",
     "aliases": [
       "Dr Adomakoh",
       "Albert Adomakoh",
@@ -907,7 +903,7 @@
   {
     "canonical": "A.A. Munufie",
     "entity_type": "minister",
-    "role": "Min. of Agriculture (1969â€“1972)",
+    "role": "Min. of Agriculture (1969–1972)",
     "aliases": [
       "Munufie",
       "A.A. Munufie",
@@ -926,7 +922,7 @@
   {
     "canonical": "Amon Nikoi",
     "entity_type": "minister",
-    "role": "Min. of Finance (1979â€“1981)",
+    "role": "Min. of Finance (1979–1981)",
     "aliases": [
       "Nikoi",
       "Amon Nikoi",
@@ -946,7 +942,7 @@
   {
     "canonical": "Isaac Chinebuah",
     "entity_type": "minister",
-    "role": "Min. of Foreign Affairs (1979â€“1981)",
+    "role": "Min. of Foreign Affairs (1979–1981)",
     "aliases": [
       "Chinebuah",
       "Isaac Chinebuah",
@@ -965,7 +961,7 @@
   {
     "canonical": "Enoch Kwaku Okoh",
     "entity_type": "minister",
-    "role": "Attorney General (1979â€“1981)",
+    "role": "Attorney General (1979–1981)",
     "aliases": [
       "E.K. Okoh",
       "Enoch Okoh",
@@ -985,7 +981,7 @@
   {
     "canonical": "Kwesi Botchwey",
     "entity_type": "minister",
-    "role": "Sec. for Finance (1982â€“1995)",
+    "role": "Sec. for Finance (1982–1995)",
     "aliases": [
       "Botchwey",
       "Dr Botchwey",
@@ -1007,7 +1003,7 @@
   {
     "canonical": "Obed Asamoah",
     "entity_type": "minister",
-    "role": "Sec. for Foreign Affairs (1982â€“1993)",
+    "role": "Sec. for Foreign Affairs (1982–1993)",
     "aliases": [
       "Obed Asamoah",
       "Dr Asamoah",
@@ -1028,7 +1024,7 @@
   {
     "canonical": "Ato Austin",
     "entity_type": "minister",
-    "role": "Sec. for Trade (1982â€“1986)",
+    "role": "Sec. for Trade (1982–1986)",
     "aliases": [
       "Ato Austin",
       "A. Austin",
@@ -1048,7 +1044,7 @@
   {
     "canonical": "P.V. Obeng",
     "entity_type": "minister",
-    "role": "Chairman PNDC Committee (1982â€“1993)",
+    "role": "Chairman PNDC Committee (1982–1993)",
     "aliases": [
       "P.V. Obeng",
       "Obeng",
@@ -1068,7 +1064,7 @@
   {
     "canonical": "Tsatsu Tsikata",
     "entity_type": "minister",
-    "role": "Nat. Security Adviser (1982â€“2001)",
+    "role": "Nat. Security Adviser (1982–2001)",
     "aliases": [
       "Tsatsu",
       "Captain Tsikata",
@@ -1109,7 +1105,7 @@
   {
     "canonical": "Ama Ata Aidoo",
     "entity_type": "minister",
-    "role": "Sec. for Education (1982â€“1983)",
+    "role": "Sec. for Education (1982–1983)",
     "aliases": [
       "Ata Aidoo",
       "Prof Ata Aidoo",
@@ -1141,7 +1137,6 @@
       "Mary Grant Secretary",
       "Mary Grant Local Government",
       "Grant M.",
-      "Mary Grant",
       "Marry Grant"
     ],
     "source": "ministers"
@@ -1149,7 +1144,7 @@
   {
     "canonical": "E.T. Mensah",
     "entity_type": "minister",
-    "role": "Sec. for Youth (1984â€“1993)",
+    "role": "Sec. for Youth (1984–1993)",
     "aliases": [
       "E.T. Mensah",
       "ET Mensah",
@@ -1169,7 +1164,7 @@
   {
     "canonical": "Richard Kwame Peprah",
     "entity_type": "minister",
-    "role": "Min. of Finance (1995â€“2001)",
+    "role": "Min. of Finance (1995–2001)",
     "aliases": [
       "Peprah",
       "Richard Peprah",
@@ -1189,7 +1184,7 @@
   {
     "canonical": "Victor Gbeho",
     "entity_type": "minister",
-    "role": "Min. of Foreign Affairs (1997â€“2001)",
+    "role": "Min. of Foreign Affairs (1997–2001)",
     "aliases": [
       "Gbeho",
       "Victor Gbeho",
@@ -1209,7 +1204,7 @@
   {
     "canonical": "Nii Okaija Adamafio",
     "entity_type": "minister",
-    "role": "Min. of Interior (1993â€“1997)",
+    "role": "Min. of Interior (1993–1997)",
     "aliases": [
       "Nii Okaija",
       "Adamafio",
@@ -1229,7 +1224,7 @@
   {
     "canonical": "Kwamena Ahwoi",
     "entity_type": "minister",
-    "role": "Min. of Local Government (1993â€“2001)",
+    "role": "Min. of Local Government (1993–2001)",
     "aliases": [
       "Kwamena Ahwoi",
       "K. Ahwoi",
@@ -1249,7 +1244,7 @@
   {
     "canonical": "Christine Amoako-Nuama",
     "entity_type": "minister",
-    "role": "Min. of Education (1997â€“2001)",
+    "role": "Min. of Education (1997–2001)",
     "aliases": [
       "Amoako-Nuama",
       "Christine Amoako-Nuama",
@@ -1269,7 +1264,7 @@
   {
     "canonical": "Harry Sawyer",
     "entity_type": "minister",
-    "role": "Attorney General (1993â€“1997)",
+    "role": "Attorney General (1993–1997)",
     "aliases": [
       "Harry Sawyer",
       "H. Sawyer",
@@ -1289,7 +1284,7 @@
   {
     "canonical": "Nana Oye Lithur",
     "entity_type": "minister",
-    "role": "Dep. Attorney General (1997â€“2001)",
+    "role": "Dep. Attorney General (1997–2001)",
     "aliases": [
       "Oye Lithur",
       "Nana Oye Lithur",
@@ -1311,7 +1306,7 @@
   {
     "canonical": "Samuel Sallas-Mensah",
     "entity_type": "minister",
-    "role": "Min. of Interior (1997â€“2001)",
+    "role": "Min. of Interior (1997–2001)",
     "aliases": [
       "Sallas-Mensah",
       "Samuel Sallas-Mensah",
@@ -1331,7 +1326,7 @@
   {
     "canonical": "John Mahama",
     "entity_type": "minister",
-    "role": "Min. of Communications (1997â€“2001)",
+    "role": "Min. of Communications (1997–2001)",
     "aliases": [
       "John Mahama",
       "J.D. Mahama",
@@ -1351,7 +1346,7 @@
   {
     "canonical": "Ibrahim Adam",
     "entity_type": "minister",
-    "role": "Min. of Defence (1997â€“2001)",
+    "role": "Min. of Defence (1997–2001)",
     "aliases": [
       "Ibrahim Adam",
       "I. Adam",
@@ -1371,7 +1366,7 @@
   {
     "canonical": "Kwaku Afriyie",
     "entity_type": "minister",
-    "role": "Min. of Health (1993â€“1997)",
+    "role": "Min. of Health (1993–1997)",
     "aliases": [
       "Kwaku Afriyie",
       "K. Afriyie",
@@ -1391,7 +1386,7 @@
   {
     "canonical": "Mustapha Idris",
     "entity_type": "minister",
-    "role": "Min. of Roads (1993â€“1997)",
+    "role": "Min. of Roads (1993–1997)",
     "aliases": [
       "Mustapha Idris",
       "M. Idris",
@@ -1411,7 +1406,7 @@
   {
     "canonical": "Edward Salia",
     "entity_type": "minister",
-    "role": "Min. of Mines & Energy (1997â€“2001)",
+    "role": "Min. of Mines & Energy (1997–2001)",
     "aliases": [
       "Edward Salia",
       "E. Salia",
@@ -1452,7 +1447,7 @@
   {
     "canonical": "Yaw Osafo-Maafo",
     "entity_type": "minister",
-    "role": "Min. of Finance (2001â€“2005)",
+    "role": "Min. of Finance (2001–2005)",
     "aliases": [
       "Osafo-Maafo",
       "Yaw Osafo-Maafo",
@@ -1472,7 +1467,7 @@
   {
     "canonical": "Kwadwo Baah-Wiredu",
     "entity_type": "minister",
-    "role": "Min. of Finance (2005â€“2008)",
+    "role": "Min. of Finance (2005–2008)",
     "aliases": [
       "Baah-Wiredu",
       "Kwadwo Baah-Wiredu",
@@ -1492,7 +1487,7 @@
   {
     "canonical": "Anthony Akoto Osei",
     "entity_type": "minister",
-    "role": "Min. of Finance (2008â€“2009)",
+    "role": "Min. of Finance (2008–2009)",
     "aliases": [
       "Akoto Osei",
       "Anthony Akoto Osei",
@@ -1512,7 +1507,7 @@
   {
     "canonical": "Hackman Owusu-Agyemang",
     "entity_type": "minister",
-    "role": "Min. of Foreign Affairs (2001â€“03) / Interior (2003â€“05)",
+    "role": "Min. of Foreign Affairs (2001–03) / Interior (2003–05)",
     "aliases": [
       "Hackman Owusu-Agyemang",
       "Hackman",
@@ -1532,7 +1527,7 @@
   {
     "canonical": "Nana Akufo-Addo",
     "entity_type": "minister",
-    "role": "Min. of Foreign Affairs (2003â€“07) / AG (2001â€“03)",
+    "role": "Min. of Foreign Affairs (2003–07) / AG (2001–03)",
     "aliases": [
       "Akufo-Addo",
       "Nana Akufo-Addo",
@@ -1552,7 +1547,7 @@
   {
     "canonical": "Akwasi Osei-Adjei",
     "entity_type": "minister",
-    "role": "Min. of Foreign Affairs (2007â€“2009)",
+    "role": "Min. of Foreign Affairs (2007–2009)",
     "aliases": [
       "Osei-Adjei",
       "Akwasi Osei-Adjei",
@@ -1572,7 +1567,7 @@
   {
     "canonical": "Papa Owusu-Ankomah",
     "entity_type": "minister",
-    "role": "AG (2003â€“05) / Interior (2005â€“07) / Education (2001â€“03)",
+    "role": "AG (2003–05) / Interior (2005–07) / Education (2001–03)",
     "aliases": [
       "Owusu-Ankomah",
       "Papa Owusu-Ankomah",
@@ -1592,7 +1587,7 @@
   {
     "canonical": "Joe Ghartey",
     "entity_type": "minister",
-    "role": "Attorney General (2005â€“2009)",
+    "role": "Attorney General (2005–2009)",
     "aliases": [
       "Joe Ghartey",
       "J. Ghartey",
@@ -1615,7 +1610,7 @@
   {
     "canonical": "Kwamena Bartels",
     "entity_type": "minister",
-    "role": "Min. of Interior (2007â€“09) / Information (2005â€“07)",
+    "role": "Min. of Interior (2007–09) / Information (2005–07)",
     "aliases": [
       "Kwamena Bartels",
       "K. Bartels",
@@ -1635,7 +1630,7 @@
   {
     "canonical": "Kwame Addo-Kufuor",
     "entity_type": "minister",
-    "role": "Min. of Defence (2001â€“2007)",
+    "role": "Min. of Defence (2001–2007)",
     "aliases": [
       "Addo-Kufuor",
       "Kwame Addo-Kufuor",
@@ -1655,7 +1650,7 @@
   {
     "canonical": "Albert Kan-Dapaah",
     "entity_type": "minister",
-    "role": "Min. of Defence (2007â€“09) / Energy (2001â€“03)",
+    "role": "Min. of Defence (2007–09) / Energy (2001–03)",
     "aliases": [
       "Kan-Dapaah",
       "Albert Kan-Dapaah",
@@ -1677,7 +1672,7 @@
   {
     "canonical": "Joseph Yieleh Chireh",
     "entity_type": "minister",
-    "role": "Min. of Health (2007â€“2009)",
+    "role": "Min. of Health (2007–2009)",
     "aliases": [
       "Yieleh Chireh",
       "Joseph Yieleh Chireh",
@@ -1697,7 +1692,7 @@
   {
     "canonical": "Richard Anane",
     "entity_type": "minister",
-    "role": "Min. of Roads (2001â€“2006)",
+    "role": "Min. of Roads (2001–2006)",
     "aliases": [
       "Richard Anane",
       "R. Anane",
@@ -1717,7 +1712,7 @@
   {
     "canonical": "Joe Gidisu",
     "entity_type": "minister",
-    "role": "Min. of Roads (2006â€“2009)",
+    "role": "Min. of Roads (2006–2009)",
     "aliases": [
       "Joe Gidisu",
       "J. Gidisu",
@@ -1737,7 +1732,7 @@
   {
     "canonical": "Joseph Kofi Adda",
     "entity_type": "minister",
-    "role": "Min. of Energy (2006â€“2009)",
+    "role": "Min. of Energy (2006–2009)",
     "aliases": [
       "Kofi Adda",
       "Joseph Kofi Adda",
@@ -1757,7 +1752,7 @@
   {
     "canonical": "Alan Kyerematen",
     "entity_type": "minister",
-    "role": "Min. of Trade (2003â€“2007)",
+    "role": "Min. of Trade (2003–2007)",
     "aliases": [
       "Alan Kyerematen",
       "A. Kyerematen",
@@ -1777,7 +1772,7 @@
   {
     "canonical": "Kofi Konadu Apraku",
     "entity_type": "minister",
-    "role": "Min. of Trade (2001â€“2003)",
+    "role": "Min. of Trade (2001–2003)",
     "aliases": [
       "Kofi Konadu Apraku",
       "K.K. Apraku",
@@ -1797,7 +1792,7 @@
   {
     "canonical": "Kasim Kasanga",
     "entity_type": "minister",
-    "role": "Min. of Lands (2001â€“2005)",
+    "role": "Min. of Lands (2001–2005)",
     "aliases": [
       "Kasim Kasanga",
       "K. Kasanga",
@@ -1817,7 +1812,7 @@
   {
     "canonical": "Dominic Fobih",
     "entity_type": "minister",
-    "role": "Min. of Lands (2005â€“2009)",
+    "role": "Min. of Lands (2005–2009)",
     "aliases": [
       "Dominic Fobih",
       "D. Fobih",
@@ -1837,7 +1832,7 @@
   {
     "canonical": "Jake Obetsebi-Lamptey",
     "entity_type": "minister",
-    "role": "Min. of Information (2001â€“03) / Tourism (2003â€“09)",
+    "role": "Min. of Information (2001–03) / Tourism (2003–09)",
     "aliases": [
       "Jake Obetsebi-Lamptey",
       "Obetsebi-Lamptey",
@@ -1857,7 +1852,7 @@
   {
     "canonical": "Nana Akomea",
     "entity_type": "minister",
-    "role": "Min. of Information (2003â€“2005)",
+    "role": "Min. of Information (2003–2005)",
     "aliases": [
       "Nana Akomea",
       "N. Akomea",
@@ -1877,7 +1872,7 @@
   {
     "canonical": "Alhaji Abubakar Saddique Boniface",
     "entity_type": "minister",
-    "role": "Min. of Works (2001â€“2009)",
+    "role": "Min. of Works (2001–2009)",
     "aliases": [
       "Saddique Boniface",
       "Abubakar Boniface",
@@ -1897,7 +1892,7 @@
   {
     "canonical": "Cecilia Johnson",
     "entity_type": "minister",
-    "role": "Min. of Women & Children (2001â€“2005)",
+    "role": "Min. of Women & Children (2001–2005)",
     "aliases": [
       "Cecilia Johnson",
       "C. Johnson",
@@ -1917,7 +1912,7 @@
   {
     "canonical": "Hajia Alima Mahama",
     "entity_type": "minister",
-    "role": "Min. of Women & Children (2005â€“2009)",
+    "role": "Min. of Women & Children (2005–2009)",
     "aliases": [
       "Alima Mahama",
       "Hajia Alima Mahama",
@@ -1938,7 +1933,7 @@
   {
     "canonical": "Kwadwo Adjei-Darko",
     "entity_type": "minister",
-    "role": "Min. of Local Govt (2001â€“2005)",
+    "role": "Min. of Local Govt (2001–2005)",
     "aliases": [
       "Adjei-Darko",
       "Kwadwo Adjei-Darko",
@@ -1958,7 +1953,7 @@
   {
     "canonical": "Stephen Asamoah Boateng",
     "entity_type": "minister",
-    "role": "Min. of Local Govt (2005â€“2009)",
+    "role": "Min. of Local Govt (2005–2009)",
     "aliases": [
       "Asamoah Boateng",
       "Stephen Asamoah Boateng",
@@ -1978,7 +1973,7 @@
   {
     "canonical": "Kwabena Duffuor",
     "entity_type": "minister",
-    "role": "Min. of Finance (2009â€“2012)",
+    "role": "Min. of Finance (2009–2012)",
     "aliases": [
       "Duffuor",
       "Kwabena Duffuor",
@@ -1998,7 +1993,7 @@
   {
     "canonical": "Seth Terkper",
     "entity_type": "minister",
-    "role": "Min. of Finance (2012â€“2017)",
+    "role": "Min. of Finance (2012–2017)",
     "aliases": [
       "Seth Terkper",
       "S. Terkper",
@@ -2018,7 +2013,7 @@
   {
     "canonical": "Alhaji Muhammad Mumuni",
     "entity_type": "minister",
-    "role": "Min. of Foreign Affairs (2009â€“2013)",
+    "role": "Min. of Foreign Affairs (2009–2013)",
     "aliases": [
       "Muhammad Mumuni",
       "Mumuni",
@@ -2038,7 +2033,7 @@
   {
     "canonical": "Hanna Tetteh",
     "entity_type": "minister",
-    "role": "Min. of Foreign Affairs (2013â€“17) / Trade (2009â€“13)",
+    "role": "Min. of Foreign Affairs (2013–17) / Trade (2009–13)",
     "aliases": [
       "Hanna Tetteh",
       "H. Tetteh",
@@ -2058,7 +2053,7 @@
   {
     "canonical": "Betty Mould-Iddrisu",
     "entity_type": "minister",
-    "role": "AG (2009â€“10) / Education (2010â€“11)",
+    "role": "AG (2009–10) / Education (2010–11)",
     "aliases": [
       "Betty Mould-Iddrisu",
       "Mould-Iddrisu",
@@ -2078,7 +2073,7 @@
   {
     "canonical": "Martin Amidu",
     "entity_type": "minister",
-    "role": "Attorney General (2010â€“2012)",
+    "role": "Attorney General (2010–2012)",
     "aliases": [
       "Martin Amidu",
       "M. Amidu",
@@ -2098,7 +2093,7 @@
   {
     "canonical": "Marietta Brew Appiah-Oppong",
     "entity_type": "minister",
-    "role": "Attorney General (2013â€“2017)",
+    "role": "Attorney General (2013–2017)",
     "aliases": [
       "Marietta Brew",
       "Brew Appiah-Oppong",
@@ -2118,7 +2113,7 @@
   {
     "canonical": "Benjamin Kunbuor",
     "entity_type": "minister",
-    "role": "Min. of Interior (2010â€“12) / Defence (2012â€“13)",
+    "role": "Min. of Interior (2010–12) / Defence (2012–13)",
     "aliases": [
       "Kunbuor",
       "Benjamin Kunbuor",
@@ -2138,7 +2133,7 @@
   {
     "canonical": "Mark Woyongo",
     "entity_type": "minister",
-    "role": "Min. of Interior (2013â€“2017)",
+    "role": "Min. of Interior (2013–2017)",
     "aliases": [
       "Mark Woyongo",
       "M. Woyongo",
@@ -2158,7 +2153,7 @@
   {
     "canonical": "J.E. Smith",
     "entity_type": "minister",
-    "role": "Min. of Defence (2009â€“2011)",
+    "role": "Min. of Defence (2009–2011)",
     "aliases": [
       "J.E. Smith",
       "JE Smith",
@@ -2178,7 +2173,7 @@
   {
     "canonical": "Alex Tettey-Enyo",
     "entity_type": "minister",
-    "role": "Min. of Education (2009â€“2010)",
+    "role": "Min. of Education (2009–2010)",
     "aliases": [
       "Tettey-Enyo",
       "Alex Tettey-Enyo",
@@ -2198,7 +2193,7 @@
   {
     "canonical": "Lee Ocran",
     "entity_type": "minister",
-    "role": "Min. of Education (2011â€“2012)",
+    "role": "Min. of Education (2011–2012)",
     "aliases": [
       "Lee Ocran",
       "L. Ocran",
@@ -2218,7 +2213,7 @@
   {
     "canonical": "Jane Naana Opoku-Agyemang",
     "entity_type": "minister",
-    "role": "Min. of Education (2013â€“2017)",
+    "role": "Min. of Education (2013–2017)",
     "aliases": [
       "Naana Opoku-Agyemang",
       "Jane Naana",
@@ -2238,7 +2233,7 @@
   {
     "canonical": "Sherry Ayittey",
     "entity_type": "minister",
-    "role": "Min. of Health (2010â€“2013)",
+    "role": "Min. of Health (2010–2013)",
     "aliases": [
       "Sherry Ayittey",
       "S. Ayittey",
@@ -2258,7 +2253,7 @@
   {
     "canonical": "Alex Segbefia",
     "entity_type": "minister",
-    "role": "Min. of Health (2013â€“2017)",
+    "role": "Min. of Health (2013–2017)",
     "aliases": [
       "Alex Segbefia",
       "A. Segbefia",
@@ -2278,7 +2273,7 @@
   {
     "canonical": "Inusah Fuseini",
     "entity_type": "minister",
-    "role": "Min. of Roads (2012â€“2013)",
+    "role": "Min. of Roads (2012–2013)",
     "aliases": [
       "Inusah Fuseini",
       "I. Fuseini",
@@ -2298,7 +2293,7 @@
   {
     "canonical": "Alhaji Collins Dauda",
     "entity_type": "minister",
-    "role": "Min. of Roads (2013â€“14) / Lands (2009â€“13) / Works (2013â€“17)",
+    "role": "Min. of Roads (2013–14) / Lands (2009–13) / Works (2013–17)",
     "aliases": [
       "Collins Dauda",
       "Alhaji Collins Dauda",
@@ -2318,7 +2313,7 @@
   {
     "canonical": "Sui Nyantakyi",
     "entity_type": "minister",
-    "role": "Min. of Roads (2014â€“2017)",
+    "role": "Min. of Roads (2014–2017)",
     "aliases": [
       "Sui Nyantakyi",
       "S. Nyantakyi",
@@ -2338,7 +2333,7 @@
   {
     "canonical": "Joe Oteng-Adjei",
     "entity_type": "minister",
-    "role": "Min. of Energy (2009â€“2013)",
+    "role": "Min. of Energy (2009–2013)",
     "aliases": [
       "Oteng-Adjei",
       "Joe Oteng-Adjei",
@@ -2358,7 +2353,7 @@
   {
     "canonical": "Emmanuel Armah-Kofi Buah",
     "entity_type": "minister",
-    "role": "Min. of Energy (2013â€“2017)",
+    "role": "Min. of Energy (2013–2017)",
     "aliases": [
       "Armah-Kofi Buah",
       "Emmanuel Buah",
@@ -2379,7 +2374,7 @@
   {
     "canonical": "Ekwow Spio-Garbrah",
     "entity_type": "minister",
-    "role": "Min. of Trade (2013â€“2017)",
+    "role": "Min. of Trade (2013–2017)",
     "aliases": [
       "Spio-Garbrah",
       "Ekwow Spio-Garbrah",
@@ -2399,7 +2394,7 @@
   {
     "canonical": "Nii Osah Mills",
     "entity_type": "minister",
-    "role": "Min. of Lands (2013â€“2017)",
+    "role": "Min. of Lands (2013–2017)",
     "aliases": [
       "Nii Osah Mills",
       "N. Osah Mills",
@@ -2419,7 +2414,7 @@
   {
     "canonical": "Zita Okaikoi",
     "entity_type": "minister",
-    "role": "Min. of Information (2009â€“11) / Tourism (2011â€“13)",
+    "role": "Min. of Information (2009–11) / Tourism (2011–13)",
     "aliases": [
       "Zita Okaikoi",
       "Z. Okaikoi",
@@ -2439,7 +2434,7 @@
   {
     "canonical": "Fritz Baffour",
     "entity_type": "minister",
-    "role": "Min. of Information (2011â€“2013)",
+    "role": "Min. of Information (2011–2013)",
     "aliases": [
       "Fritz Baffour",
       "F. Baffour",
@@ -2459,7 +2454,7 @@
   {
     "canonical": "Mahama Ayariga",
     "entity_type": "minister",
-    "role": "Min. of Information (2013â€“14) / Youth (2014â€“17)",
+    "role": "Min. of Information (2013–14) / Youth (2014–17)",
     "aliases": [
       "Mahama Ayariga",
       "M. Ayariga",
@@ -2479,7 +2474,7 @@
   {
     "canonical": "Haruna Iddrisu",
     "entity_type": "minister",
-    "role": "Min. of Communications (2009â€“13) / Employment (2014â€“17)",
+    "role": "Min. of Communications (2009–13) / Employment (2014–17)",
     "aliases": [
       "Haruna Iddrisu",
       "H. Iddrisu",
@@ -2503,7 +2498,7 @@
   {
     "canonical": "Edward Omane Boamah",
     "entity_type": "minister",
-    "role": "Min. of Communications (2013â€“2017)",
+    "role": "Min. of Communications (2013–2017)",
     "aliases": [
       "Omane Boamah",
       "Edward Omane Boamah",
@@ -2523,7 +2518,7 @@
   {
     "canonical": "Enoch Teye Mensah",
     "entity_type": "minister",
-    "role": "Min. of Works (2009â€“13) / Employment (2013â€“14)",
+    "role": "Min. of Works (2009–13) / Employment (2013–14)",
     "aliases": [
       "E.T. Mensah",
       "Enoch Teye Mensah",
@@ -2543,7 +2538,7 @@
   {
     "canonical": "Samuel Ofosu-Ampofo",
     "entity_type": "minister",
-    "role": "Min. of Local Govt (2010â€“2013)",
+    "role": "Min. of Local Govt (2010–2013)",
     "aliases": [
       "Ofosu-Ampofo",
       "Samuel Ofosu-Ampofo",
@@ -2563,7 +2558,7 @@
   {
     "canonical": "Julius Debrah",
     "entity_type": "minister",
-    "role": "Min. of Local Govt (2013â€“2017)",
+    "role": "Min. of Local Govt (2013–2017)",
     "aliases": [
       "Julius Debrah",
       "J. Debrah",
@@ -2583,7 +2578,7 @@
   {
     "canonical": "Kwesi Ahwoi",
     "entity_type": "minister",
-    "role": "Min. of Food & Agric (2009â€“2013)",
+    "role": "Min. of Food & Agric (2009–2013)",
     "aliases": [
       "Kwesi Ahwoi",
       "K. Ahwoi",
@@ -2603,7 +2598,7 @@
   {
     "canonical": "Clement Kofi Humado",
     "entity_type": "minister",
-    "role": "Min. of Food & Agric (2013â€“14) / Youth (2009â€“11)",
+    "role": "Min. of Food & Agric (2013–14) / Youth (2009–11)",
     "aliases": [
       "Clement Humado",
       "C. Humado",
@@ -2623,7 +2618,7 @@
   {
     "canonical": "Elizabeth Ofosu-Agyare",
     "entity_type": "minister",
-    "role": "Min. of Tourism (2013â€“2017)",
+    "role": "Min. of Tourism (2013–2017)",
     "aliases": [
       "Ofosu-Agyare",
       "Elizabeth Ofosu-Agyare",
@@ -2643,7 +2638,7 @@
   {
     "canonical": "Juliana Azumah-Mensah",
     "entity_type": "minister",
-    "role": "Min. of Gender (2009â€“2012)",
+    "role": "Min. of Gender (2009–2012)",
     "aliases": [
       "Juliana Azumah-Mensah",
       "Azumah-Mensah",
@@ -2663,7 +2658,7 @@
   {
     "canonical": "Elvis Afriyie-Ankrah",
     "entity_type": "minister",
-    "role": "Min. of Youth (2012â€“2013)",
+    "role": "Min. of Youth (2012–2013)",
     "aliases": [
       "Elvis Afriyie-Ankrah",
       "Afriyie-Ankrah",
@@ -2683,7 +2678,7 @@
   {
     "canonical": "Ken Ofori-Atta",
     "entity_type": "minister",
-    "role": "Min. of Finance (2017â€“2023)",
+    "role": "Min. of Finance (2017–2023)",
     "aliases": [
       "Ken Ofori-Atta",
       "Ofori-Atta",
@@ -2703,7 +2698,7 @@
   {
     "canonical": "Mohammed Amin Adam",
     "entity_type": "minister",
-    "role": "Min. of Finance (2024â€“2025)",
+    "role": "Min. of Finance (2024–2025)",
     "aliases": [
       "Amin Adam",
       "Mohammed Amin Adam",
@@ -2723,7 +2718,7 @@
   {
     "canonical": "Shirley Ayorkor Botchwey",
     "entity_type": "minister",
-    "role": "Min. of Foreign Affairs (2017â€“2025)",
+    "role": "Min. of Foreign Affairs (2017–2025)",
     "aliases": [
       "Shirley Ayorkor Botchwey",
       "Ayorkor Botchwey",
@@ -2743,7 +2738,7 @@
   {
     "canonical": "Gloria Akuffo",
     "entity_type": "minister",
-    "role": "Attorney General (2017â€“2021)",
+    "role": "Attorney General (2017–2021)",
     "aliases": [
       "Gloria Akuffo",
       "G. Akuffo",
@@ -2763,7 +2758,7 @@
   {
     "canonical": "Godfred Yeboah Dame",
     "entity_type": "minister",
-    "role": "Attorney General (2021â€“2025)",
+    "role": "Attorney General (2021–2025)",
     "aliases": [
       "Godfred Dame",
       "G. Dame",
@@ -2783,7 +2778,7 @@
   {
     "canonical": "Ambrose Dery",
     "entity_type": "minister",
-    "role": "Min. of Interior (2017â€“2025)",
+    "role": "Min. of Interior (2017–2025)",
     "aliases": [
       "Ambrose Dery",
       "A. Dery",
@@ -2803,7 +2798,7 @@
   {
     "canonical": "Dominic Nitiwul",
     "entity_type": "minister",
-    "role": "Min. of Defence (2017â€“2025)",
+    "role": "Min. of Defence (2017–2025)",
     "aliases": [
       "Dominic Nitiwul",
       "D. Nitiwul",
@@ -2823,7 +2818,7 @@
   {
     "canonical": "Matthew Opoku Prempeh",
     "entity_type": "minister",
-    "role": "Min. of Education (2017â€“21) / Energy (2021â€“24)",
+    "role": "Min. of Education (2017–21) / Energy (2021–24)",
     "aliases": [
       "Opoku Prempeh",
       "Matthew Opoku Prempeh",
@@ -2831,7 +2826,6 @@
       "NAPO",
       "Dr Opoku Prempeh",
       "Dr. Opoku Prempeh",
-      "Napo",
       "Opoku Prempeh Education",
       "Opoku Prempe",
       "Matthew Opoku",
@@ -2843,7 +2837,7 @@
   {
     "canonical": "Yaw Osei Adutwum",
     "entity_type": "minister",
-    "role": "Min. of Education (2021â€“2025)",
+    "role": "Min. of Education (2021–2025)",
     "aliases": [
       "Osei Adutwum",
       "Yaw Osei Adutwum",
@@ -2863,7 +2857,7 @@
   {
     "canonical": "Kwaku Agyeman-Manu",
     "entity_type": "minister",
-    "role": "Min. of Health (2017â€“2023)",
+    "role": "Min. of Health (2017–2023)",
     "aliases": [
       "Agyeman-Manu",
       "Kwaku Agyeman-Manu",
@@ -2883,7 +2877,7 @@
   {
     "canonical": "Kwasi Amoako-Atta",
     "entity_type": "minister",
-    "role": "Min. of Roads (2017â€“2025)",
+    "role": "Min. of Roads (2017–2025)",
     "aliases": [
       "Amoako-Atta",
       "Kwasi Amoako-Atta",
@@ -2903,7 +2897,7 @@
   {
     "canonical": "Boakye Agyarko",
     "entity_type": "minister",
-    "role": "Min. of Energy (2017â€“2018)",
+    "role": "Min. of Energy (2017–2018)",
     "aliases": [
       "Boakye Agyarko",
       "B. Agyarko",
@@ -2923,7 +2917,7 @@
   {
     "canonical": "John Peter Amewu",
     "entity_type": "minister",
-    "role": "Min. of Energy (2018â€“2021)",
+    "role": "Min. of Energy (2018–2021)",
     "aliases": [
       "John Peter Amewu",
       "J.P. Amewu",
@@ -2943,7 +2937,7 @@
   {
     "canonical": "Kwaku Asomah-Cheremeh",
     "entity_type": "minister",
-    "role": "Min. of Lands (2017â€“2021)",
+    "role": "Min. of Lands (2017–2021)",
     "aliases": [
       "Asomah-Cheremeh",
       "Kwaku Asomah-Cheremeh",
@@ -2963,7 +2957,7 @@
   {
     "canonical": "Samuel Abu Jinapor",
     "entity_type": "minister",
-    "role": "Min. of Lands (2021â€“2025)",
+    "role": "Min. of Lands (2021–2025)",
     "aliases": [
       "Abu Jinapor",
       "Samuel Abu Jinapor",
@@ -2983,7 +2977,7 @@
   {
     "canonical": "Mustapha Abdul-Hamid",
     "entity_type": "minister",
-    "role": "Min. of Information (2017â€“2018)",
+    "role": "Min. of Information (2017–2018)",
     "aliases": [
       "Mustapha Abdul-Hamid",
       "M. Abdul-Hamid",
@@ -3003,7 +2997,7 @@
   {
     "canonical": "Kojo Oppong Nkrumah",
     "entity_type": "minister",
-    "role": "Min. of Information (2018â€“2025)",
+    "role": "Min. of Information (2018–2025)",
     "aliases": [
       "Kojo Oppong Nkrumah",
       "Oppong Nkrumah",
@@ -3023,7 +3017,7 @@
   {
     "canonical": "Ursula Owusu-Ekuful",
     "entity_type": "minister",
-    "role": "Min. of Communications (2017â€“2025)",
+    "role": "Min. of Communications (2017–2025)",
     "aliases": [
       "Ursula Owusu-Ekuful",
       "Owusu-Ekuful",
@@ -3043,7 +3037,7 @@
   {
     "canonical": "Samuel Atta Akyea",
     "entity_type": "minister",
-    "role": "Min. of Works (2017â€“2021)",
+    "role": "Min. of Works (2017–2021)",
     "aliases": [
       "Atta Akyea",
       "Samuel Atta Akyea",
@@ -3063,7 +3057,7 @@
   {
     "canonical": "Francis Asenso-Boakye",
     "entity_type": "minister",
-    "role": "Min. of Works (2021â€“2025)",
+    "role": "Min. of Works (2021–2025)",
     "aliases": [
       "Asenso-Boakye",
       "Francis Asenso-Boakye",
@@ -3083,7 +3077,7 @@
   {
     "canonical": "Ignatius Baffuor Awuah",
     "entity_type": "minister",
-    "role": "Min. of Employment (2017â€“2025)",
+    "role": "Min. of Employment (2017–2025)",
     "aliases": [
       "Ignatius Baffuor Awuah",
       "Baffuor Awuah",
@@ -3103,7 +3097,7 @@
   {
     "canonical": "Dan Botwe",
     "entity_type": "minister",
-    "role": "Min. of Local Govt (2021â€“2025)",
+    "role": "Min. of Local Govt (2021–2025)",
     "aliases": [
       "Dan Botwe",
       "D. Botwe",
@@ -3123,7 +3117,7 @@
   {
     "canonical": "Owusu Afriyie Akoto",
     "entity_type": "minister",
-    "role": "Min. of Food & Agric (2017â€“2023)",
+    "role": "Min. of Food & Agric (2017–2023)",
     "aliases": [
       "Owusu Afriyie Akoto",
       "Dr Afriyie Akoto",
@@ -3143,7 +3137,7 @@
   {
     "canonical": "Bryan Acheampong",
     "entity_type": "minister",
-    "role": "Min. of Food & Agric (2023â€“2025)",
+    "role": "Min. of Food & Agric (2023–2025)",
     "aliases": [
       "Bryan Acheampong",
       "B. Acheampong",
@@ -3163,7 +3157,7 @@
   {
     "canonical": "Catherine Afeku",
     "entity_type": "minister",
-    "role": "Min. of Tourism (2017â€“2019)",
+    "role": "Min. of Tourism (2017–2019)",
     "aliases": [
       "Catherine Afeku",
       "C. Afeku",
@@ -3183,7 +3177,7 @@
   {
     "canonical": "Barbara Oteng-Gyasi",
     "entity_type": "minister",
-    "role": "Min. of Tourism (2019â€“2021)",
+    "role": "Min. of Tourism (2019–2021)",
     "aliases": [
       "Barbara Oteng-Gyasi",
       "Oteng-Gyasi",
@@ -3203,7 +3197,7 @@
   {
     "canonical": "Mohammed Awal",
     "entity_type": "minister",
-    "role": "Min. of Tourism (2021â€“2025)",
+    "role": "Min. of Tourism (2021–2025)",
     "aliases": [
       "Mohammed Awal",
       "M. Awal",
@@ -3223,7 +3217,7 @@
   {
     "canonical": "Otiko Afisa Djaba",
     "entity_type": "minister",
-    "role": "Min. of Gender (2017â€“2018)",
+    "role": "Min. of Gender (2017–2018)",
     "aliases": [
       "Otiko Afisa Djaba",
       "Otiko Djaba",
@@ -3243,7 +3237,7 @@
   {
     "canonical": "Cynthia Morrison",
     "entity_type": "minister",
-    "role": "Min. of Gender (2018â€“2021)",
+    "role": "Min. of Gender (2018–2021)",
     "aliases": [
       "Cynthia Morrison",
       "C. Morrison",
@@ -3263,7 +3257,7 @@
   {
     "canonical": "Sarah Adwoa Safo",
     "entity_type": "minister",
-    "role": "Min. of Gender (2021â€“2023)",
+    "role": "Min. of Gender (2021–2023)",
     "aliases": [
       "Sarah Adwoa Safo",
       "Adwoa Safo",
@@ -3283,7 +3277,7 @@
   {
     "canonical": "Isaac Kwame Asiamah",
     "entity_type": "minister",
-    "role": "Min. of Youth (2017â€“2021)",
+    "role": "Min. of Youth (2017–2021)",
     "aliases": [
       "Isaac Asiamah",
       "Kwame Asiamah",
@@ -3303,7 +3297,7 @@
   {
     "canonical": "Mustapha Ussif",
     "entity_type": "minister",
-    "role": "Min. of Youth (2021â€“2025)",
+    "role": "Min. of Youth (2021–2025)",
     "aliases": [
       "Mustapha Ussif",
       "M. Ussif",
@@ -3323,7 +3317,7 @@
   {
     "canonical": "Kwaku Ofori Asiamah",
     "entity_type": "minister",
-    "role": "Min. of Transport (2017â€“2025)",
+    "role": "Min. of Transport (2017–2025)",
     "aliases": [
       "Kwaku Ofori Asiamah",
       "Ofori Asiamah",
@@ -3343,7 +3337,7 @@
   {
     "canonical": "Elizabeth Afoley Quaye",
     "entity_type": "minister",
-    "role": "Min. of Fisheries (2017â€“2021)",
+    "role": "Min. of Fisheries (2017–2021)",
     "aliases": [
       "Afoley Quaye",
       "Elizabeth Afoley Quaye",
@@ -3363,7 +3357,7 @@
   {
     "canonical": "Mavis Hawa Koomson",
     "entity_type": "minister",
-    "role": "Min. of Fisheries (2021â€“2025)",
+    "role": "Min. of Fisheries (2021–2025)",
     "aliases": [
       "Hawa Koomson",
       "Mavis Hawa Koomson",
@@ -3383,7 +3377,7 @@
   {
     "canonical": "Kwabena Frimpong-Boateng",
     "entity_type": "minister",
-    "role": "Min. of Environment (2017â€“2021)",
+    "role": "Min. of Environment (2017–2021)",
     "aliases": [
       "Frimpong-Boateng",
       "Kwabena Frimpong-Boateng",
@@ -3403,7 +3397,7 @@
   {
     "canonical": "Kofi Dzamesi",
     "entity_type": "minister",
-    "role": "Min. of Chieftaincy (2017â€“2025)",
+    "role": "Min. of Chieftaincy (2017–2025)",
     "aliases": [
       "Kofi Dzamesi",
       "K. Dzamesi",
@@ -3423,7 +3417,7 @@
   {
     "canonical": "Osei Kyei-Mensah-Bonsu",
     "entity_type": "minister",
-    "role": "Majority Leader (2017â€“2025)",
+    "role": "Majority Leader (2017–2025)",
     "aliases": [
       "Kyei-Mensah-Bonsu",
       "Osei Kyei-Mensah-Bonsu",
@@ -3443,7 +3437,7 @@
   {
     "canonical": "Cassiel Ato Forson",
     "entity_type": "minister",
-    "role": "Minority Leader (2023â€“2025)",
+    "role": "Minority Leader (2023–2025)",
     "aliases": [
       "Cassiel Ato Forson",
       "Ato Forson",
@@ -3465,7 +3459,7 @@
   {
     "canonical": "Samuel Nartey George",
     "entity_type": "minister",
-    "role": "Min. of Communications (2025â€“)",
+    "role": "Min. of Communications (2025–)",
     "aliases": [
       "Sam George",
       "Samuel Nartey George",
@@ -3485,7 +3479,7 @@
   {
     "canonical": "John Abdulai Jinapor",
     "entity_type": "minister",
-    "role": "Min. of Energy (2025â€“)",
+    "role": "Min. of Energy (2025–)",
     "aliases": [
       "John Jinapor",
       "Abdulai Jinapor",
@@ -3505,7 +3499,7 @@
   {
     "canonical": "Ibrahim Murtala Mohammed",
     "entity_type": "minister",
-    "role": "Min. of Environment (2025â€“)",
+    "role": "Min. of Environment (2025–)",
     "aliases": [
       "Murtala Mohammed",
       "Ibrahim Murtala Mohammed",
@@ -3525,7 +3519,7 @@
   {
     "canonical": "Emelia Arthur",
     "entity_type": "minister",
-    "role": "Min. of Fisheries (2025â€“)",
+    "role": "Min. of Fisheries (2025–)",
     "aliases": [
       "Emelia Arthur",
       "E. Arthur",
@@ -3545,7 +3539,7 @@
   {
     "canonical": "Eric Opoku",
     "entity_type": "minister",
-    "role": "Min. of Food & Agriculture (2025â€“)",
+    "role": "Min. of Food & Agriculture (2025–)",
     "aliases": [
       "Eric Opoku",
       "E. Opoku",
@@ -3565,7 +3559,7 @@
   {
     "canonical": "Samuel Okudzeto Ablakwa",
     "entity_type": "minister",
-    "role": "Min. of Foreign Affairs (2025â€“)",
+    "role": "Min. of Foreign Affairs (2025–)",
     "aliases": [
       "Okudzeto Ablakwa",
       "Samuel Okudzeto Ablakwa",
@@ -3585,7 +3579,7 @@
   {
     "canonical": "Agnes Naa Momo Lartey",
     "entity_type": "minister",
-    "role": "Min. of Gender (2025â€“)",
+    "role": "Min. of Gender (2025–)",
     "aliases": [
       "Naa Momo Lartey",
       "Agnes Naa Momo Lartey",
@@ -3605,7 +3599,7 @@
   {
     "canonical": "Kwabena Minta Akandoh",
     "entity_type": "minister",
-    "role": "Min. of Health (2025â€“)",
+    "role": "Min. of Health (2025–)",
     "aliases": [
       "Minta Akandoh",
       "Kwabena Minta Akandoh",
@@ -3625,7 +3619,7 @@
   {
     "canonical": "Mohammed Mubarak Muntaka",
     "entity_type": "minister",
-    "role": "Min. of Interior (2025â€“)",
+    "role": "Min. of Interior (2025–)",
     "aliases": [
       "Mubarak Muntaka",
       "Mohammed Mubarak Muntaka",
@@ -3645,7 +3639,7 @@
   {
     "canonical": "Dominic Ayine",
     "entity_type": "minister",
-    "role": "Attorney General (2025â€“)",
+    "role": "Attorney General (2025–)",
     "aliases": [
       "Dominic Ayine",
       "D. Ayine",
@@ -3665,7 +3659,7 @@
   {
     "canonical": "Abdul-Rashid Pelpuo",
     "entity_type": "minister",
-    "role": "Min. of Labor (2025â€“)",
+    "role": "Min. of Labor (2025–)",
     "aliases": [
       "Abdul-Rashid Pelpuo",
       "Pelpuo",
@@ -3685,7 +3679,7 @@
   {
     "canonical": "Ahmed Ibrahim",
     "entity_type": "minister",
-    "role": "Min. of Local Government (2025â€“)",
+    "role": "Min. of Local Government (2025–)",
     "aliases": [
       "Ahmed Ibrahim",
       "A. Ibrahim",
@@ -3705,7 +3699,7 @@
   {
     "canonical": "Governs Kwame Agbodza",
     "entity_type": "minister",
-    "role": "Min. of Roads (2025â€“)",
+    "role": "Min. of Roads (2025–)",
     "aliases": [
       "Governs Agbodza",
       "Kwame Agbodza",
@@ -3725,7 +3719,7 @@
   {
     "canonical": "Abla Dzifa Gomashie",
     "entity_type": "minister",
-    "role": "Min. of Tourism (2025â€“)",
+    "role": "Min. of Tourism (2025–)",
     "aliases": [
       "Dzifa Gomashie",
       "Abla Dzifa Gomashie",
@@ -3745,7 +3739,7 @@
   {
     "canonical": "Elizabeth Ofosu Agyare",
     "entity_type": "minister",
-    "role": "Min. of Trade (2025â€“)",
+    "role": "Min. of Trade (2025–)",
     "aliases": [
       "Ofosu Agyare",
       "Elizabeth Ofosu Agyare",
@@ -3765,7 +3759,7 @@
   {
     "canonical": "Joseph Bukari Nikpe",
     "entity_type": "minister",
-    "role": "Min. of Transportation (2025â€“)",
+    "role": "Min. of Transportation (2025–)",
     "aliases": [
       "Bukari Nikpe",
       "Joseph Bukari Nikpe",
@@ -3785,7 +3779,7 @@
   {
     "canonical": "Kenneth Gilbert Adjei",
     "entity_type": "minister",
-    "role": "Min. of Works & Housing (2025â€“)",
+    "role": "Min. of Works & Housing (2025–)",
     "aliases": [
       "Kenneth Adjei",
       "Kenneth Gilbert Adjei",
@@ -3805,7 +3799,7 @@
   {
     "canonical": "George Opare Addo",
     "entity_type": "minister",
-    "role": "Min. of Youth (2025â€“)",
+    "role": "Min. of Youth (2025–)",
     "aliases": [
       "Opare Addo",
       "George Opare Addo",
@@ -3825,7 +3819,7 @@
   {
     "canonical": "Johnson Asiama",
     "entity_type": "minister",
-    "role": "Bank of Ghana Governor (2025â€“)",
+    "role": "Bank of Ghana Governor (2025–)",
     "aliases": [
       "Johnson Asiama",
       "J. Asiama",
@@ -3845,7 +3839,7 @@
   {
     "canonical": "Kwasi Anin-Yeboah",
     "entity_type": "minister",
-    "role": "Chief Justice (2020â€“2023)",
+    "role": "Chief Justice (2020–2023)",
     "aliases": [
       "Anin-Yeboah",
       "Justice Anin Yeboah"
@@ -3855,7 +3849,7 @@
   {
     "canonical": "Gertrude Sackey Torkornoo",
     "entity_type": "minister",
-    "role": "Chief Justice (2023â€“)",
+    "role": "Chief Justice (2023–)",
     "aliases": [
       "Torkornoo",
       "Justice Torkornoo",
@@ -3877,14 +3871,11 @@
       "Basil Bade Carboo",
       "Basil Carboo",
       "Bade Carboo",
-      "bb kabo",
-      "bb kabu",
       "bibi kabo",
       "bibi kabu",
       "Kibi Kabo",
       "Kibi Kabu",
       "Kibi Carboo",
-      "bb carboo",
       "b.b. carboo",
       "b.b. kabu",
       "b.b. kabo",

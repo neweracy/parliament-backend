@@ -175,6 +175,20 @@ def emit_dataset_refresh_failure() -> None:
     _emit("postprocess.dataset_refresh_failures", 1, "Count")
 
 
+def emit_history_dropped(count: int = 1) -> None:
+    """Emit a count of correction history records dropped on queue overflow.
+
+    Alarm on this: a non-zero value means audit data is being lost because the
+    writer cannot keep up with (or reach) the database.
+    """
+    _emit("postprocess.history_dropped", count, "Count")
+
+
+def emit_db_unavailable() -> None:
+    """Emit a count of readiness probes that failed to reach the database."""
+    _emit("postprocess.db_unavailable", 1, "Count")
+
+
 def emit_llm_chunks_dropped(reason: str, count: int = 1) -> None:
     """Emit count of LLM chunks dropped.
 
