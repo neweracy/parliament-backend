@@ -1,298 +1,198 @@
-# node-transcription
+# AGENTS.md — transcript-end (Backend Gateway)
 
-Node.js transcription app with two AI engines: Deepgram (Speech-to-Text) and Khaya AI (Ghanaian languages), plus a Ghana-focused entity correction post-processing pipeline (rule-based + Amazon Bedrock LLM).
+Operational guide for AI coding agents working in the transcript-end backend submodule.
 
-## Architecture
+## Overview
 
-- **Backend:** Node.js / Express on port 8081 (`server.js`, CommonJS)
-- **Frontend:** React + Vite + TypeScript on port 8080 (`frontend/`, ES modules + JSX/TSX)
-- **API type:** REST
-- **Deepgram API:** Pre-recorded Speech-to-Text (`/v1/listen`) via `@deepgram/sdk`
-- **Khaya AI:** GhanaNLP ASR v3 for African languages (Twi, Ewe, Ga, and more)
-- **Hybrid pipeline:** Deepgram primary + Khaya AI correction for low-confidence segments (`lib/hybrid/`)
-- **Post-processing:** Rule-based Ghana entity correction (`lib/location-correction/`) + optional Amazon Bedrock LLM pass for accuracy beyond the static datasets
-- **Auth:** JWT session tokens via `/api/session`, enforced by `requireSession` middleware
+Express 5 API gateway for the Ghana Parliament Hansard system. Handles JWT authentication, audio file uploads, ASR provider integration (Deepgram + Khaya AI), Hansard CRUD operations, and proxies RAG queries to the Python postprocessing service.
 
-## Key Files
+## Tech Stack
 
-| File | Purpose |
-|------|---------|
-| `server.js` | Main backend — Deepgram routes, session auth, metadata, post-processing wiring |
-| `providers/khaya.js` | Khaya AI ASR provider (transcribe + getLanguages) |
-| `lib/hybrid/` | Hybrid confidence pipeline — Deepgram + Khaya AI correction for low-confidence words |
-| `lib/location-correction/index.js` | Rule-based correction engine — public entry (`correctLocations`, `correctSingle`, `getPartyAbbr`, `isTitle`) |
-| `lib/location-correction/dataset-builder.js` | Dataset construction — canonical/alias/party maps, `SUPPLEMENTARY_LOCATIONS` |
-| `lib/location-correction/normalize.js` | Text normalization utilities — `stripAll`, `levenshtein`, `phoneticKey` |
-| `lib/location-correction/indexes.js` | Phonetic + initials indexes, `STOPWORDS`, `COMMON_BLOCK`, `TITLE_PREFIXES` |
-| `lib/location-correction/matchers.js` | Seven match strategies + `isTitle`, `matchTitlePerson` |
-| `lib/location-correction/word-walk.js` | Word-level n-gram walk — title-aware person detection, 3→2→1 n-gram entity correction on the words array |
-| `lib/location-correction/years/numbers.js` | Number word lookup tables (ONES, TENS, MONTHS, ORDINALS) |
-| `lib/location-correction/years/parsers.js` | Parsing helpers — `parseCenturyPrefix`, `parseTwoDigitSuffix`, `parseDayWords`, `ordinalSuffix` |
-| `lib/location-correction/years/patterns.js` | Seven pattern matchers — `matchTwoThousand`, `matchCenturySuffix`, `matchDecade`, etc. |
-| `lib/location-correction/year-correction.js` | Year/date correction public entry — `correctYears`, `correctYearsInText` (re-exports pattern matchers) |
-| `lib/location-correction/persons-dataset.js` | Presidents, VPs, Speakers, ministers dataset |
-| `lib/location-correction/mps-dataset.js` | Members of Parliament dataset (current + previous parliament) |
-| `lib/location-correction/parties-dataset.js` | Registered + historical Ghana political parties dataset |
-| `lib/location-correction/bedrock-postprocess.js` | Amazon Bedrock (Claude) LLM post-processing — public entry (`postProcessWithBedrock`, `isBedrockConfigured`) |
-| `lib/location-correction/bedrock/client.js` | Bedrock client creation/invocation (accepts injected client for testing) |
-| `lib/location-correction/bedrock/prompt.js` | System prompt building with dataset reference |
-| `lib/location-correction/bedrock/align.js` | LCS alignment and chunk-word splitting |
-| `deepgram.toml` | Metadata, lifecycle commands, tags |
-| `Makefile` | Standardized build/run targets |
-| `sample.env` | Environment variable template |
-| `frontend/src/main.tsx` | React root render |
-| `frontend/src/App.tsx` | App shell — NavBar, Outlet, Footer, ThemeProvider |
-| `frontend/src/router.tsx` | Route definitions with React.lazy pages |
-| `frontend/src/pages/` | Landing, Transcribe, Projects, History, About |
-| `frontend/src/services/` | Pure-JS/TS service layer (transcription, history-repo, project-repo, export) |
-| `frontend/src/components/features/TranscriptViewer.tsx` | Renders transcript with entity correction highlighting (location/person/party/AI icons) |
-| `frontend/src/components/features/ResultsSidebar.tsx` | Entities panel (Locations, People, Political Parties) + correction counts |
-| `frontend/vite.config.ts` | Vite + React plugin, `/api` proxy to backend |
-| `deploy/Dockerfile` | Production container (Caddy + backend) |
-| `deploy/Caddyfile` | Reverse proxy, rate limiting, static serving |
-| `services/postprocess/` | Python Postprocessing Service (FastAPI + Uvicorn) |
-| `lib/postprocess-client.js` | Gateway client for the Postprocessing Service (timeout, retry, circuit breaker) |
+| Layer | Technology |
+|-------|-----------|
+| Runtime | Node.js >= 24 |
+| Framework | Express 5 |
+| Language | JavaScript (CommonJS) |
+| Auth | JSON Web Tokens (jsonwebtoken) |
+| Database | PostgreSQL via `pg` pool |
+| File Upload | Multer |
+| ASR | Deepgram SDK, Khaya AI HTTP |
+| LLM | AWS Bedrock SDK (for JS pipeline mode) |
+| Testing | Node.js test runner + fast-check |
+| Linting | ESLint 9 (flat config) |
+| Package Manager | pnpm 10 |
+| Dev Server | nodemon |
 
-See `frontend/AGENTS.md` for frontend-specific conventions.
-See the **Postprocessing Service** section below for the Python microservice.
+## Project Structure
 
-## Quick Start
+```
+transcript-end/
+├── server.js                    # Express app entry point, route mounting
+├── lib/
+│   ├── db.js                    # PostgreSQL connection pool (pg.Pool)
+│   ├── transcription-pipeline.js  # Audio → transcript orchestration
+│   ├── postprocess-client.js    # Python service HTTP client
+│   ├── postprocess-mode.js      # Mode dispatcher (js/python/off)
+│   ├── location-correction/     # Rule-based Ghana entity correction
+│   └── hybrid/                  # Audio slicing for hybrid pipeline
+├── routes/
+│   ├── sittings.js              # CRUD: GET/POST/PATCH/DELETE sittings
+│   ├── records.js               # CRUD: records within sittings
+│   ├── audio.js                 # Upload/stream audio files
+│   ├── transcription.js         # Start/poll transcription jobs
+│   ├── transcript.js            # Get/update transcript with versioning
+│   ├── search.js                # Proxy to RAG /rag/search
+│   ├── ask.js                   # Proxy to RAG /rag/ask (chatbot Q&A)
+│   ├── dashboard.js             # Aggregated statistics
+│   ├── settings.js              # App settings CRUD
+│   ├── khaya.js                 # Khaya AI routes
+│   └── hybrid.js                # Hybrid confidence pipeline
+├── providers/
+│   └── khaya.js                 # Khaya AI HTTP adapter
+├── services/
+│   └── postprocess/             # Python FastAPI service (see its own AGENTS.md)
+├── test/
+│   ├── routes/                  # Integration tests
+│   └── properties/              # Property-based tests (fast-check)
+├── docs/                        # Architecture docs, research notes
+├── deploy/
+│   ├── Dockerfile               # Multi-stage production build
+│   ├── Caddyfile                # Reverse proxy config
+│   └── start.sh                 # Container entrypoint
+├── uploads/                     # Local audio storage (gitignored)
+├── Makefile                     # Automation commands
+├── sample.env                   # Environment variable template
+└── package.json
+```
+
+## Commands
 
 ```bash
-# Initialize (clone submodules + install deps)
-make init
+pnpm install                # Install dependencies
+pnpm run start-backend      # Start with nodemon (auto-reload)
+pnpm run start              # Start without auto-reload
+pnpm test                   # ESLint + node --test
+pnpm run lint               # ESLint only
 
-# Set up environment
-test -f .env || cp sample.env .env  # then set DEEPGRAM_API_KEY (and KHAYA_API_KEY)
-
-# Start both servers
-make start
-# Backend: http://localhost:8081
-# Frontend: http://localhost:8080
+# Via Makefile (preferred)
+make init                   # Submodules + install
+make start-backend          # Port 8081
+make start-postprocess      # Port 8082
+make postprocess-setup      # DB + migrate + seed (one-time)
+make test-unit              # Backend tests
+make test-python            # Python service tests
+make datasets-generate      # Regenerate dataset exports
+make datasets-validate      # Validate dataset integrity
 ```
 
-## Start / Stop
+## Architecture Patterns
 
-**Start (recommended):** `make start`
+### Route Module Pattern
 
-**Start separately:**
-```bash
-# Terminal 1 — Backend
-node server.js
+Every route file exports a factory function:
 
-# Terminal 2 — Frontend
-cd frontend && corepack pnpm run dev -- --port 8080 --no-open
+```javascript
+module.exports = function routeName(requireSession, db) {
+  const router = express.Router();
+
+  router.get("/api/endpoint", requireSession, async (req, res) => {
+    // implementation
+  });
+
+  return router;
+};
 ```
 
-**Stop all:** `lsof -ti:8080,8081 | xargs kill -9 2>/dev/null`
+The factory receives:
+- `requireSession` — JWT auth middleware
+- `db` — PostgreSQL pool client (`db.query(text, params)`)
 
-**Clean rebuild:**
-```bash
-rm -rf node_modules frontend/node_modules frontend/.vite
-make init
-```
+### Authentication
 
-## Dependencies
+- `GET /api/session` issues a JWT (no auth required)
+- All other `/api/*` routes pass through `requireSession` middleware
+- Token in `Authorization: Bearer <token>` header
+- Token expires in 1 hour
 
-- **Backend:** root `package.json` — managed with `corepack pnpm` (pinned to v10.0.0). Pin exact versions (no `^`/`~`).
-  - Key deps: `@deepgram/sdk`, `@aws-sdk/client-bedrock-runtime` (Bedrock post-processing), `ghana-locations` (base location dataset), `express`, `jsonwebtoken`, `multer`.
-- **Frontend:** `frontend/package.json` — Vite dev server, React, React Router, Framer Motion, daisyUI.
-- **Submodules:** `frontend/` and `contracts/` (conformance tests).
+### Postprocessing Modes
 
-Install: `corepack pnpm install` — Frontend: `cd frontend && corepack pnpm install`
+Controlled by `POSTPROCESS_MODE` env var:
 
-## API Endpoints
+| Mode | Behavior |
+|------|----------|
+| `js` | In-process correction (location, year, Bedrock LLM) |
+| `python` | Proxy to Python service at `POSTPROCESS_URL` |
+| `off` | Return raw transcript |
 
-| Endpoint | Method | Auth | Purpose |
-|----------|--------|------|---------|
-| `/api/session` | GET | None | Issue JWT session token |
-| `/api/metadata` | GET | None | App metadata (useCase, framework, language) |
-| `/api/transcription` | POST | JWT | Transcribe audio file/URL via Deepgram, then run rule-based + Bedrock post-processing |
-| `/api/transcription/hybrid` | POST | JWT | Deepgram primary + Khaya AI correction pipeline for low-confidence segments |
-| `/api/khaya/transcription` | POST | JWT | Transcribe audio via Khaya AI (requires `language` code) |
-| `/api/khaya/languages` | GET | None | List Khaya-supported languages |
-| `/health` | GET | None | Health check — status, uptime, postprocess mode, version (used by Fly.io and Caddy) |
+### RAG Proxy Pattern
 
-## Post-Processing Pipeline
+Routes like `search.js` and `ask.js` proxy requests to the Python service:
+1. Validate input
+2. Map camelCase → snake_case
+3. Forward to `POSTPROCESS_URL/rag/*` with `POSTPROCESS_TOKEN` Bearer header
+4. Map snake_case → camelCase in response
+5. Handle timeouts (30s) and connection errors
 
-Every `/api/transcription` response passes through two correction stages before returning:
+### Database Access
 
-1. **Rule-based correction** (`lib/location-correction/index.js`) — instant, deterministic. Fixes fused/split/hyphenated/misspelled Ghana locations, presidents/ministers/MPs, and political parties (full name ↔ abbreviation). Adds `locationCorrected`, `entityKind` (`location`/`person`/`party`), `entityType` to corrected words, and an `entities` summary array on the response.
-2. **Bedrock LLM post-processing** (`lib/location-correction/bedrock-postprocess.js`, optional) — splits the transcript into ~300-word chunks, runs up to 3 chunks in parallel per wave via Claude on Amazon Bedrock, using the same datasets injected into the system prompt as reference context. Adds `bedrockCorrected: true` to words it fixes. Skipped entirely if `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` are not set; failures are non-fatal (falls back to rule-based result).
-
-When adding new Ghana entities (locations, officials, parties), add them to the relevant dataset file in `lib/location-correction/` — both correction stages read from the same datasets.
-
-## Backend Conventions
-
-- CommonJS (`require`/`module.exports`), Express 5.x, `cors`, Multer memory storage.
-- All protected routes use the `requireSession` JWT middleware.
-- Error responses follow a consistent shape: `{ error: { type, code, message } }`.
-- Add new endpoints after existing routes, before `app.listen`, and log them in the startup banner.
-
-### Khaya AI Notes
-
-- Khaya requires an explicit `language` code per request and does **not** auto-detect language.
-- Supported codes include Twi (`tw`), Ewe (`ee`), Ga (`gaa`), Dagbani (`dag`).
-- Configured via `KHAYA_API_KEY`; endpoints return 500 if unset.
-
-## Environment Variables
-
-| Variable | Required | Default | Purpose |
-|----------|----------|---------|---------|
-| `DEEPGRAM_API_KEY` | Yes | — | Deepgram API key |
-| `KHAYA_API_KEY` | For Khaya | — | Khaya AI (GhanaNLP) subscription key |
-| `KHAYA_ASR_VERSION` | No | `v3` | Khaya ASR version |
-| `HYBRID_CONFIDENCE_THRESHOLD` | No | `0.85` | Confidence below which a Deepgram word is sent to Khaya for correction in the hybrid pipeline |
-| `HYBRID_GAP_TOLERANCE` | No | `0.5` | Max time gap (s) to group adjacent low-confidence words into one hybrid correction segment |
-| `HYBRID_PADDING` | No | `0.25` | Extra audio (s) padded around each hybrid correction segment |
-| `HYBRID_MAX_CALLS_PER_MODEL` | No | `3` | Max Khaya calls per language model per transcription in the hybrid pipeline |
-| `AWS_ACCESS_KEY_ID` | For Bedrock | — | AWS access key for Bedrock LLM post-processing |
-| `AWS_SECRET_ACCESS_KEY` | For Bedrock | — | AWS secret key for Bedrock LLM post-processing |
-| `AWS_REGION` | For Bedrock | `us-east-1` | AWS region for Bedrock (cross-region inference profile IDs are region-prefixed, e.g. `us.anthropic...`) |
-| `BEDROCK_MODEL_ID` | No | `us.anthropic.claude-haiku-4-5-20251001-v1:0` | Bedrock model ID used for post-processing |
-| `PORT` | No | `8081` | Backend server port |
-| `HOST` | No | `0.0.0.0` | Backend bind address |
-| `SESSION_SECRET` | No | — | JWT signing secret (production) |
-
-Bedrock is entirely optional — if the AWS keys are unset, the backend silently skips that stage and returns the rule-based result.
-
-## Specs
-
-Feature specs live in `.kiro/specs/`. Each has `requirements.md`, `design.md`, and `tasks.md`.
-Consult the relevant spec before implementing a feature it covers (e.g. `hybrid-confidence-transcription`).
-
-## Knowledge Graph (graphify)
-
-A local knowledge graph lives in `graphify-out/`. For codebase, architecture, or dependency
-questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or
-`graphify explain "<concept>"` over grepping. Rebuild after code changes with
-`graphify update . --no-cluster` (local AST, no API key needed).
-
-## Conventional Commits
-
-All commits must follow conventional commits format. Never include `Co-Authored-By` lines.
-
-```
-feat(node-transcription): add diarization support
-fix(node-transcription): resolve session handling
-refactor(node-transcription): simplify session endpoint
-chore(deps): update frontend submodule
-```
-
-Scope is typically `node-transcription` or `deps`.
-
-## Postprocessing Service (Python)
-
-A FastAPI microservice at `services/postprocess/` that owns all transcript post-processing: entity correction, year/date correction, and LLM refinement. The Gateway calls it over internal HTTP when `POSTPROCESS_MODE=python`.
-
-### Request Path
-
-```
-Client → Gateway (:8081) → POST /v1/postprocess → Postprocessing Service (:8082) → Bedrock
-                                                 → Dataset_Store (PostgreSQL)
-```
-
-The Gateway is the only public entry point. The Postprocessing Service listens on an internal address only and is authenticated via a shared Bearer token (`SERVICE_TOKEN` / `POSTPROCESS_TOKEN`).
-
-### Startup Command
-
-```bash
-cd services/postprocess
-uvicorn app.main:app --host 0.0.0.0 --port 8082 --workers ${UVICORN_WORKERS:-2} --timeout-graceful-shutdown ${DRAIN_TIMEOUT_SECONDS:-15}
-```
-
-Or via Docker:
-
-```bash
-cd services/postprocess
-docker compose up        # Gateway + Postprocess + PostgreSQL
-docker compose down -v   # Tear down and remove volumes
-```
-
-### Key Files
-
-| File | Purpose |
-|------|---------|
-| `services/postprocess/app/main.py` | FastAPI app, lifespan, signal/drain handling |
-| `services/postprocess/app/config.py` | Settings via pydantic-settings, defaults, validation |
-| `services/postprocess/app/pipeline.py` | Stage orchestrator: Correction_Engine → Year_Corrector → LLM_Refiner |
-| `services/postprocess/app/correction/engine.py` | Rule-based Ghana entity correction — `correct_single`, `correct_text`, `correct_words`, scoring, party display |
-| `services/postprocess/app/correction/text_walk.py` | Re-exports `correct_text` (structural parity with JS split) |
-| `services/postprocess/app/correction/word_walk.py` | Re-exports `correct_words` (structural parity with JS split) |
-| `services/postprocess/app/years/corrector.py` | Year/date/decade conversion |
-| `services/postprocess/app/years/numbers.py` | Number word lookup tables |
-| `services/postprocess/app/years/parsers.py` | Parsing helpers for year/date patterns |
-| `services/postprocess/app/years/patterns.py` | Seven year/date pattern matchers |
-| `services/postprocess/app/llm/refiner.py` | Bedrock LLM refinement (chunking, waves, alignment) |
-| `services/postprocess/app/datasets/cache.py` | Dataset_Cache — periodic refresh from PostgreSQL |
-| `services/postprocess/app/datasets/index.py` | Match_Index build (canonical, fused, phonetic, BK-tree) |
-| `services/postprocess/Dockerfile` | Multi-stage production image |
-| `services/postprocess/docker-compose.yml` | Local dev: Gateway + Service + PostgreSQL |
-| `services/postprocess/deploy/ecs-task-definition.json` | ECS Fargate task definition fragment |
-| `services/postprocess/deploy/iam-policy.json` | IAM policy for bedrock:InvokeModel |
-| `services/postprocess/sample.env` | All configuration variables with defaults |
-
-### Postprocessing Service Configuration
-
-| Variable | Required | Default | Purpose |
-|----------|----------|---------|---------|
-| `SERVICE_TOKEN` | Yes | — | Bearer token for Gateway → Service auth |
-| `DATABASE_URL` | Yes | — | PostgreSQL connection (format: `postgresql+psycopg://user:pass@host:port/db`) |
-| `HOST` | No | `0.0.0.0` | Bind address |
-| `PORT` | No | `8082` | HTTP port |
-| `UVICORN_WORKERS` | No | `2` | Worker processes (size to vCPU count) |
-| `DRAIN_TIMEOUT_SECONDS` | No | `15` | Graceful shutdown drain period |
-| `DATASET_REFRESH_SECONDS` | No | `300` | Interval between Dataset_Store refreshes |
-| `DATASET_LOAD_RETRY_SECONDS` | No | `30` | Retry interval on failed startup load |
-| `MIN_CONFIDENCE` | No | `0.75` | Minimum word confidence for correction |
-| `WORD_ACCEPT_THRESHOLD` | No | `0.90` | Minimum match score to accept a correction |
-| `FUZZY_SCORE_CUTOFF` | No | `0.70` | Minimum rapidfuzz similarity |
-| `MIN_CANDIDATE_LENGTH` | No | `4` | Min token length for fuzzy/phonetic |
-| `AWS_REGION` | No | `us-east-1` | AWS region for Bedrock |
-| `BEDROCK_MODEL_ID` | No | `us.anthropic.claude-haiku-4-5-20251001-v1:0` | Bedrock model ID |
-| `LLM_ENABLED` | No | `true` | Enable/disable LLM refinement stage |
-| `LLM_CHUNK_SIZE` | No | `300` | Words per LLM chunk |
-| `LLM_MAX_PARALLEL` | No | `3` | Concurrent Bedrock invocations per wave |
-| `LLM_CHUNK_TIMEOUT_MS` | No | `15000` | Per-chunk timeout |
-| `LLM_RETRIEVAL_MODE` | No | `dataset_store` | `dataset_store` or `knowledge_base` |
-| `LLM_MAX_PROMPT_RECORDS` | No | `50` | Max entity records per prompt |
-| `KNOWLEDGE_BASE_ID` | No | — | Bedrock KB ID (if retrieval mode = knowledge_base) |
-| `HISTORY_ENABLED` | No | `true` | Persist correction history |
-| `LOG_LEVEL` | No | `info` | Minimum log level |
-
-### Gateway-Side Variables (for calling the Postprocessing Service)
-
-| Variable | Required | Default | Purpose |
-|----------|----------|---------|---------|
-| `POSTPROCESS_MODE` | No | `js` | `js` / `python` / `off` |
-| `POSTPROCESS_URL` | No | `http://localhost:8082` | Service base URL |
-| `POSTPROCESS_TOKEN` | No | — | Bearer token (must match `SERVICE_TOKEN`) |
-| `POSTPROCESS_TIMEOUT_MS` | No | `20000` | Request timeout |
-| `POSTPROCESS_BREAKER_THRESHOLD` | No | `5` | Consecutive failures to open circuit |
-| `POSTPROCESS_BREAKER_COOLDOWN_MS` | No | `30000` | Cool-down before half-open probe |
-
-### Running Tests
-
-```bash
-cd services/postprocess
-pip install -e ".[dev]"
-ruff check app tests && pytest   # Lint + all tests (sequenced)
-pytest                           # All tests
-pytest tests/unit/               # Unit tests only
-pytest tests/property/           # Property-based tests only
-pytest tests/integration/        # Integration tests (requires PostgreSQL)
-```
+- Pool module: `lib/db.js` (exports `query(text, params)`)
+- Connection via `DATABASE_URL` env var
+- Used directly in route handlers for Hansard CRUD (sittings, records, transcripts)
+- Python service has its own pool for RAG/correction tables
 
 ## Testing
 
+### Node.js Tests
+
 ```bash
-# Backend unit tests
-corepack pnpm test
-
-# Conformance tests (requires app running)
-make test
-
-# Manual endpoint check
-curl -sf http://localhost:8081/api/metadata | python3 -m json.tool
-curl -sf http://localhost:8081/api/session | python3 -m json.tool
+pnpm test                        # ESLint + all tests
+node --test test/routes/*.test.js  # Integration tests only
+node --test test/properties/*.property.test.js  # Property tests only
 ```
+
+- **Integration tests**: `test/routes/*.test.js` — test route handlers with supertest
+- **Property tests**: `test/properties/*.property.test.js` — fast-check generators for invariants
+- **Naming**: `*.test.js` for integration, `*.property.test.js` for properties
+
+### Python Tests
+
+```bash
+cd services/postprocess
+.venv/Scripts/python.exe -m pytest -v
+```
+
+See `services/postprocess/AGENTS.md` for details.
+
+## Environment Variables
+
+Key variables (see `sample.env` for full list):
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `DEEPGRAM_API_KEY` | Yes | Deepgram ASR API key |
+| `POSTPROCESS_MODE` | No | `js`/`python`/`off` (default: `js`) |
+| `POSTPROCESS_URL` | No | Python service URL (default: `http://localhost:8082`) |
+| `POSTPROCESS_TOKEN` | No | Shared auth token for Python service |
+| `DATABASE_URL` | No | PostgreSQL connection (for Hansard CRUD) |
+| `PORT` | No | Server port (default: `8081`) |
+| `SESSION_SECRET` | No | JWT signing key (auto-generated if absent) |
+
+## Security
+
+- Never hardcode AWS credentials in docker-compose or config files
+- `uploads/` is gitignored — never commit audio files
+- MIME type validation on uploads: `audio/mpeg`, `audio/wav`, `audio/ogg`, `audio/webm`, `audio/mp4`
+- 500MB max file size for audio uploads
+- 30s timeout on RAG proxy calls
+
+## Agent Instructions
+
+1. **Route factories**: always export `function(requireSession, db)` returning `express.Router()`
+2. **Register routes in server.js**: import and mount with `app.use(routeFactory(requireSession, db))`
+3. **camelCase in JS, snake_case to Python**: always map when proxying to/from postprocess service
+4. **Validate input early**: return 400 with `{ error: { type, code, message } }` envelope
+5. **Error envelope**: all errors use `{ error: { type: string, code: string, message: string } }`
+6. **CommonJS**: this is not an ES module — use `require()` and `module.exports`
+7. **No TypeScript**: this codebase is plain JavaScript
+8. **Test new routes**: add both `test/routes/*.test.js` and `test/properties/*.property.test.js`
+9. **Makefile**: update `transcript-end/Makefile` if adding new automation targets
