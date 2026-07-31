@@ -53,6 +53,9 @@ tmp_*
 transcripts/
 test_audio/
 
+# User uploads (audio files stored locally during dev)
+uploads/
+
 # Local Deepgram working directory
 .deepgram/
 
