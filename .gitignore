@@ -71,6 +71,14 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Python virtual environments
+.venv/
+venv/
+services/postprocess/.venv/
+
+# pytest cache
+.pytest_cache/
+
 # Windows reserved device names — accidental artifacts from `> nul` redirects
 nul
 NUL

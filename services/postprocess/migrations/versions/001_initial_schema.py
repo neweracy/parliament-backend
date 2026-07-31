@@ -31,8 +31,30 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Enable pg_trgm extension for GIN trigram indexes
-    op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    # Enable pg_trgm extension for GIN trigram indexes.
+    #
+    # CREATE EXTENSION needs elevated privileges. On managed Postgres (RDS,
+    # Cloud SQL, Azure) the application role usually cannot run it, so a
+    # migration that hard-fails here blocks the whole deploy. The extension is
+    # commonly pre-installed or installable only by an administrator, so treat
+    # "already present" as success and a privilege error as a clear instruction
+    # rather than a stack trace.
+    conn = op.get_bind()
+    already_present = conn.exec_driver_sql(
+        "SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'"
+    ).scalar()
+
+    if not already_present:
+        try:
+            op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+        except Exception as exc:  # pragma: no cover - environment dependent
+            raise RuntimeError(
+                "pg_trgm is required for fuzzy matching but could not be created "
+                "automatically, most likely because the migration role lacks "
+                "privileges. Have an administrator run "
+                "'CREATE EXTENSION pg_trgm;' in this database, then re-run the "
+                f"migration. Underlying error: {exc}"
+            ) from exc
 
     # --- entity_record ---
     op.create_table(

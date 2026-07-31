@@ -20,6 +20,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.routes_datasets import router as datasets_router
 from app.api.routes_health import router as health_router
 from app.api.routes_postprocess import router as postprocess_router
+from app.rag.router import router as rag_router
 from app.config import get_settings
 from app.datasets.cache import DatasetCache
 from app.datasets.store import make_engine, make_session_factory
@@ -158,20 +159,34 @@ async def lifespan(app: FastAPI):
 
     configure_logging(settings)
 
-    # Initialize and start the Dataset_Cache
+    # ONE engine for the whole process. Previously the dataset cache, pg_trgm
+    # retrieval, and the history writer each built their own, so a single
+    # instance held three independent pools (up to 30 server-side connections)
+    # and instance count had to be divided by three when sizing against the
+    # server's max_connections. They share one pool now.
+    engine = make_engine(
+        settings.database_url,  # type: ignore[arg-type]
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_recycle_seconds=settings.db_pool_recycle_seconds,
+        pool_timeout_seconds=settings.db_pool_timeout_seconds,
+        connect_timeout_seconds=settings.db_connect_timeout_seconds,
+        statement_timeout_ms=settings.db_statement_timeout_ms,
+        sslmode=settings.db_sslmode,
+    )
+    session_factory = make_session_factory(engine)
+    app.state.engine = engine
+    app.state.session_factory = session_factory
+
+    # Initialize and start the Dataset_Cache on the shared pool
     cache = DatasetCache(
-        database_url=settings.database_url,  # type: ignore[arg-type]
+        session_factory=session_factory,
         refresh_seconds=settings.dataset_refresh_seconds,
         load_retry_seconds=settings.dataset_load_retry_seconds,
     )
     app.state.dataset_cache = cache
 
     await cache.start()
-
-    # Create a shared session factory for pg_trgm retrieval (Req 12.6, 17.5)
-    retrieval_engine = make_engine(settings.database_url)  # type: ignore[arg-type]
-    retrieval_session_factory = make_session_factory(retrieval_engine)
-    app.state.session_factory = retrieval_session_factory
 
     # Construct BedrockClient if LLM refinement is enabled
     bedrock_client: BedrockClient | None = None
@@ -187,9 +202,12 @@ async def lifespan(app: FastAPI):
     history_writer: CorrectionHistoryWriter | None = None
     if settings.history_enabled:
         try:
-            history_engine = make_engine(settings.database_url)  # type: ignore[arg-type]
-            history_session_factory = make_session_factory(history_engine)
-            history_writer = CorrectionHistoryWriter(history_session_factory)
+            history_writer = CorrectionHistoryWriter(
+                session_factory,
+                max_queue_size=settings.history_queue_size,
+                retention_days=settings.history_retention_days,
+                retention_interval_seconds=settings.history_retention_interval_seconds,
+            )
             history_writer.start()
         except Exception:
             logger.error("history.writer.init_failed", exc_info=True)
@@ -202,6 +220,8 @@ async def lifespan(app: FastAPI):
         port=settings.port,
         llm_enabled=settings.llm_enabled,
         bedrock_configured=bedrock_client.is_configured if bedrock_client else False,
+        db_max_connections=settings.db_pool_size + settings.db_max_overflow,
+        db_sslmode=settings.db_sslmode or "unset",
     )
 
     yield
@@ -210,21 +230,19 @@ async def lifespan(app: FastAPI):
     if history_writer is not None:
         await history_writer.stop()
 
-    # Shutdown: stop the cache (cancel refresh tasks, dispose engine)
+    # Shutdown: stop the RAG ingestion worker if it was started
+    ingestion_worker = getattr(app.state, "ingestion_worker", None)
+    if ingestion_worker is not None:
+        await ingestion_worker.stop()
+
+    # Shutdown: stop the cache (cancels refresh tasks; it does not own the engine)
     await cache.stop()
 
-    # Dispose the retrieval engine
+    # Dispose the single shared engine last, once nothing else can use it.
     try:
-        await retrieval_engine.dispose()
+        await engine.dispose()
     except Exception:
-        pass
-
-    # Dispose the history engine
-    if history_writer is not None:
-        try:
-            await history_engine.dispose()
-        except Exception:
-            pass
+        logger.error("db.engine_dispose_failed", exc_info=True)
 
     logger.info("service.stopped")
 
@@ -252,3 +270,4 @@ app.add_middleware(RequestLoggingMiddleware)
 app.include_router(postprocess_router)
 app.include_router(health_router)
 app.include_router(datasets_router)
+app.include_router(rag_router)

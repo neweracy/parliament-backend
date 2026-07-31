@@ -59,9 +59,37 @@ class Settings(BaseSettings):
     service_token: str | None = None
     database_url: str | None = None
 
+    # --- Database connection pool ---
+    # One shared pool serves the dataset cache, pg_trgm retrieval, and the
+    # history writer. Total server-side connections per instance is
+    # db_pool_size + db_max_overflow, which must be multiplied by the instance
+    # count when sizing against the server's max_connections.
+    db_pool_size: int = 5
+    db_max_overflow: int = 5
+    # Retire connections before an upstream idle reaper can close them.
+    db_pool_recycle_seconds: int = 1800
+    # Bound the wait for a free pool slot so exhaustion surfaces as an error.
+    db_pool_timeout_seconds: int = 10
+    # Bound TCP connection establishment.
+    db_connect_timeout_seconds: int = 10
+    # Server-side per-connection cap so a runaway query cannot pin a slot.
+    db_statement_timeout_ms: int = 15000
+    # Set to "require" (or stricter, e.g. "verify-full") for managed Postgres.
+    # Ignored when DATABASE_URL already contains an sslmode parameter.
+    db_sslmode: str | None = None
+
     # --- Dataset ---
     dataset_refresh_seconds: int = 300
     dataset_load_retry_seconds: int = 30
+
+    # --- Correction history ---
+    # Bounded queue for async history writes. Overflow is dropped rather than
+    # blocking the request path.
+    history_queue_size: int = 1000
+    # Rows older than this are deleted by the retention sweeper. 0 disables it.
+    history_retention_days: int = 90
+    # How often the retention sweeper runs.
+    history_retention_interval_seconds: int = 86400
 
     # --- Correction thresholds ---
     min_confidence: float = 0.75
@@ -113,6 +141,15 @@ class Settings(BaseSettings):
             "LLM_MAX_PARALLEL": 3,
             "LLM_CHUNK_TIMEOUT_MS": 15000,
             "LLM_MAX_PROMPT_RECORDS": 50,
+            "DB_POOL_SIZE": 5,
+            "DB_MAX_OVERFLOW": 5,
+            "DB_POOL_RECYCLE_SECONDS": 1800,
+            "DB_POOL_TIMEOUT_SECONDS": 10,
+            "DB_CONNECT_TIMEOUT_SECONDS": 10,
+            "DB_STATEMENT_TIMEOUT_MS": 15000,
+            "HISTORY_QUEUE_SIZE": 1000,
+            "HISTORY_RETENTION_DAYS": 90,
+            "HISTORY_RETENTION_INTERVAL_SECONDS": 86400,
         }
         numeric_float_fields: dict[str, float] = {
             "MIN_CONFIDENCE": 0.75,
