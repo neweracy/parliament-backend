@@ -44,7 +44,7 @@ module.exports = function askRoutes(requireSession, _db) {
    */
   router.post("/api/ask", requireSession, express.json(), async (req, res) => {
     try {
-      const { question, entityFilter, dateFrom, dateTo, speaker } = req.body;
+      const { question, entityFilter, dateFrom, dateTo, speaker, conversationHistory } = req.body;
 
       if (!question || typeof question !== "string" || question.trim().length === 0) {
         return res.status(400).json({
@@ -65,6 +65,15 @@ module.exports = function askRoutes(requireSession, _db) {
       if (dateFrom) askBody.date_from = dateFrom;
       if (dateTo) askBody.date_to = dateTo;
       if (speaker) askBody.speaker = speaker;
+
+      // Forward conversation history for multi-turn context
+      if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
+        // Limit to last 20 messages and validate shape
+        askBody.conversation_history = conversationHistory
+          .slice(-20)
+          .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+          .map((m) => ({ role: m.role, content: m.content }));
+      }
 
       // Proxy to Postprocessing Service with 30s timeout
       const controller = new AbortController();
@@ -116,6 +125,10 @@ module.exports = function askRoutes(requireSession, _db) {
             startS: c.start_s,
             endS: c.end_s,
             relevanceScore: c.relevance_score,
+          })),
+          recommendations: (raw.recommendations || []).map((r) => ({
+            text: r.text,
+            reason: r.reason,
           })),
           latencyMs: raw.latency_ms ?? raw.latencyMs ?? 0,
         };
