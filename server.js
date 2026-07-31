@@ -43,9 +43,21 @@ const { correctYears, correctYearsInText } = require("./lib/location-correction/
 const { postprocess } = require("./lib/postprocess-client");
 const { degradedResponse, mergeSuccess, logDegraded } = require("./lib/postprocess-mode");
 
+// --- Local: database ---
+const db = require("./lib/db");
+
 // --- Local: routes and providers ---
 const khayaRoutes = require("./routes/khaya");
 const hybridRoutes = require("./routes/hybrid");
+const sittingsRoutes = require("./routes/sittings");
+const recordsRoutes = require("./routes/records");
+const audioRoutes = require("./routes/audio");
+const transcriptionRoutes = require("./routes/transcription");
+const transcriptRoutes = require("./routes/transcript");
+const searchRoutes = require("./routes/search");
+const askRoutes = require("./routes/ask");
+const dashboardRoutes = require("./routes/dashboard");
+const settingsRoutes = require("./routes/settings");
 const khayaProvider = require("./providers/khaya");
 const { sliceAndConcatAudio } = require("./lib/hybrid/audio-slicer");
 
@@ -585,6 +597,20 @@ const hybridDeps = {
 };
 
 app.use("/api/transcription/hybrid", hybridRoutes(requireSession, upload, hybridDeps));
+
+// ============================================================================
+// HANSARD CRUD ROUTES — Sittings, Records, and Audio
+// ============================================================================
+
+app.use(sittingsRoutes(requireSession, db));
+app.use(recordsRoutes(requireSession, db));
+app.use(audioRoutes(requireSession, db));
+app.use(transcriptionRoutes(requireSession, db));
+app.use(transcriptRoutes(requireSession, db));
+app.use(searchRoutes(requireSession, db));
+app.use(askRoutes(requireSession, db));
+app.use(dashboardRoutes(requireSession, db));
+app.use(settingsRoutes(requireSession, db));
 
 // ============================================================================
 // AUDIO PROXY — allows the frontend WaveformPlayer to load remote audio
