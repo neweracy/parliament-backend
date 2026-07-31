@@ -107,8 +107,9 @@ def main(argv: list[str] | None = None) -> int:
 
     host = args.host or os.environ.get("HOST", "0.0.0.0")
     port = args.port or int(os.environ.get("PORT", "8082"))
+    workers = int(os.environ.get("UVICORN_WORKERS", "1"))
 
-    print(f"[run_local] starting uvicorn on {host}:{port}")
+    print(f"[run_local] starting uvicorn on {host}:{port} (workers={workers})")
 
     # loop="asyncio" keeps Uvicorn on the policy installed above instead of
     # selecting its own platform default.
@@ -116,6 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         "app.main:app",
         host=host,
         port=port,
+        workers=workers if workers > 1 else None,
         reload=args.reload,
         loop="asyncio",
         log_config=None,
