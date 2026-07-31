@@ -81,6 +81,13 @@ class SearchResponse(BaseModel):
     latency_ms: float = 0.0
 
 
+class ChatMessage(BaseModel):
+    """A single message in a conversation (user question or assistant answer)."""
+
+    role: str = Field(..., pattern="^(user|assistant)$", description="Message role")
+    content: str = Field(..., min_length=1, description="Message content")
+
+
 class AskRequest(BaseModel):
     """Request body for POST /rag/ask."""
 
@@ -96,6 +103,10 @@ class AskRequest(BaseModel):
     )
     speaker: Optional[str] = Field(
         default=None, description="Filter by speaker label"
+    )
+    conversation_history: Optional[list[ChatMessage]] = Field(
+        default=None,
+        description="Prior conversation messages for multi-turn context (max 20)",
     )
 
 
@@ -123,12 +134,23 @@ class SourceChunkItem(BaseModel):
     matched_entities: list[str]
 
 
+class Recommendation(BaseModel):
+    """A suggested follow-up question or topic based on the current answer."""
+
+    text: str = Field(..., description="Suggested follow-up question")
+    reason: str = Field(..., description="Why this is relevant")
+
+
 class AskResponse(BaseModel):
     """Response body for POST /rag/ask."""
 
     answer: str
     citations: list[CitationItem]
     source_chunks: list[SourceChunkItem]
+    recommendations: list[Recommendation] = Field(
+        default_factory=list,
+        description="Suggested follow-up questions based on the transcript context",
+    )
     latency_ms: float
 
 
@@ -241,9 +263,20 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
 
     chunks = await retriever.retrieve(query=body.question, filters=filters, limit=10)
 
-    # Generate grounded answer
+    # Build conversation history for the answerer
+    conversation_history: list[tuple[str, str]] | None = None
+    if body.conversation_history:
+        # Limit to last 20 messages to avoid exceeding context window
+        recent = body.conversation_history[-20:]
+        conversation_history = [(m.role, m.content) for m in recent]
+
+    # Generate grounded answer with conversation context
     answerer = GroundedAnswerer(bedrock_client, settings)
-    answer_response = await answerer.answer(question=body.question, chunks=chunks)
+    answer_response = await answerer.answer(
+        question=body.question,
+        chunks=chunks,
+        conversation_history=conversation_history,
+    )
 
     # Map to response models
     citations = [
@@ -276,6 +309,10 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
         answer=answer_response.answer,
         citations=citations,
         source_chunks=source_chunks,
+        recommendations=[
+            Recommendation(text=r.text, reason=r.reason)
+            for r in answer_response.recommendations
+        ],
         latency_ms=round(answer_response.latency_ms, 1),
     )
 

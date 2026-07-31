@@ -35,8 +35,8 @@ _DEFAULT_ANSWERING_MODEL = "anthropic.claude-3-sonnet-20240229-v1:0"
 # Maximum number of chunks to include in the prompt context
 _MAX_CONTEXT_CHUNKS = 10
 
-# System prompt instructing Claude to produce cited answers
-_SYSTEM_PROMPT = """You are a parliamentary research assistant. Your task is to answer questions using ONLY the provided transcript chunks. Follow these rules strictly:
+# System prompt instructing Claude to produce cited answers with recommendations
+_SYSTEM_PROMPT = """You are a parliamentary research assistant chatbot. Your task is to answer questions using ONLY the provided transcript chunks. Follow these rules strictly:
 
 1. Answer the question using ONLY information from the provided chunks.
 2. Cite your sources using [chunk_id] notation (e.g., [42]) immediately after the relevant statement.
@@ -44,7 +44,16 @@ _SYSTEM_PROMPT = """You are a parliamentary research assistant. Your task is to 
 4. Do NOT invent or infer information not present in the chunks.
 5. If the chunks do not contain enough information to answer the question, say so explicitly.
 6. Keep your answer concise and factual.
-7. When quoting speakers, attribute the quote to the speaker mentioned in the chunk metadata."""
+7. When quoting speakers, attribute the quote to the speaker mentioned in the chunk metadata.
+8. If conversation history is provided, use it to understand context and resolve pronouns/references from prior exchanges.
+9. After your answer, ALWAYS include a RECOMMENDATIONS section with exactly 3 suggested follow-up questions. Format them as:
+
+RECOMMENDATIONS:
+- [question text] | [brief reason why this is relevant]
+- [question text] | [brief reason why this is relevant]
+- [question text] | [brief reason why this is relevant]
+
+Base recommendations on topics, speakers, or themes mentioned in the source chunks that the user hasn't asked about yet."""
 
 
 @dataclass(frozen=True)
@@ -69,6 +78,14 @@ class Citation:
 
 
 @dataclass
+class RecommendationItem:
+    """A suggested follow-up question derived from the transcript context."""
+
+    text: str
+    reason: str
+
+
+@dataclass
 class AnswerResponse:
     """Structured response from the grounded answering engine.
 
@@ -76,12 +93,14 @@ class AnswerResponse:
         answer: The generated answer text with inline citation markers.
         citations: List of validated Citation objects referenced in the answer.
         source_chunks: The retrieved chunks used as context for generation.
+        recommendations: Suggested follow-up questions based on the context.
         latency_ms: Total time from request to response in milliseconds.
     """
 
     answer: str
     citations: list[Citation] = field(default_factory=list)
     source_chunks: list[RetrievedChunk] = field(default_factory=list)
+    recommendations: list[RecommendationItem] = field(default_factory=list)
     latency_ms: float = 0.0
 
 
@@ -117,25 +136,28 @@ class GroundedAnswerer:
         self,
         question: str,
         chunks: list[RetrievedChunk],
+        conversation_history: list[tuple[str, str]] | None = None,
     ) -> AnswerResponse:
         """Generate a grounded answer with citations from retrieved chunks.
 
         Steps:
             1. Filter chunks by relevance threshold.
             2. If no chunks meet threshold, return "no supporting evidence".
-            3. Build prompt with chunk context and citation instructions.
+            3. Build prompt with chunk context, conversation history, and citation instructions.
             4. Call Claude via BedrockClient (in thread executor).
             5. Parse citation markers [chunk_id] from response.
             6. Validate each citation references an actual source chunk.
-            7. Return AnswerResponse with answer, citations, chunks, latency.
+            7. Parse recommendations from response.
+            8. Return AnswerResponse with answer, citations, chunks, recommendations, latency.
 
         Args:
             question: The natural language question to answer.
             chunks: Retrieved chunks from the HybridRetriever.
+            conversation_history: Optional list of (role, content) tuples for multi-turn context.
 
         Returns:
             An AnswerResponse containing the answer, citations, source
-            chunks, and latency in milliseconds.
+            chunks, recommendations, and latency in milliseconds.
         """
         start_time = time.perf_counter()
 
@@ -170,7 +192,7 @@ class GroundedAnswerer:
         context_chunks = relevant_chunks[: self._max_context_chunks]
 
         # Step 3: Build prompt
-        user_content = self._build_user_prompt(question, context_chunks)
+        user_content = self._build_user_prompt(question, context_chunks, conversation_history)
 
         # Step 4: Call Claude via Bedrock
         try:
@@ -186,11 +208,14 @@ class GroundedAnswerer:
                 answer="Unable to generate an answer at this time. Please try again later.",
                 citations=[],
                 source_chunks=context_chunks,
+                recommendations=[],
                 latency_ms=latency_ms,
             )
 
         # Step 5: Parse citation markers from response
-        cited_chunk_ids = self._parse_citations(raw_answer)
+        # Split answer text from recommendations section
+        answer_text, recommendations = self._split_recommendations(raw_answer)
+        cited_chunk_ids = self._parse_citations(answer_text)
 
         # Step 6: Validate citations against source chunks
         chunk_map = {c.chunk_id: c for c in context_chunks}
@@ -202,15 +227,17 @@ class GroundedAnswerer:
         logger.info(
             "rag.answering.complete",
             question_preview=question[:80],
-            answer_length=len(raw_answer),
+            answer_length=len(answer_text),
             citation_count=len(citations),
+            recommendation_count=len(recommendations),
             latency_ms=round(latency_ms, 1),
         )
 
         return AnswerResponse(
-            answer=raw_answer,
+            answer=answer_text,
             citations=citations,
             source_chunks=context_chunks,
+            recommendations=recommendations,
             latency_ms=latency_ms,
         )
 
@@ -222,13 +249,26 @@ class GroundedAnswerer:
     def _build_user_prompt(
         question: str,
         chunks: list[RetrievedChunk],
+        conversation_history: list[tuple[str, str]] | None = None,
     ) -> str:
         """Build the user message with chunk context for Claude.
 
         Lists each chunk with its ID, speaker, timestamps, and text,
-        then poses the question.
+        includes conversation history if available, then poses the question.
         """
         lines: list[str] = []
+
+        # Include conversation history for multi-turn context
+        if conversation_history:
+            lines.append("## Conversation History\n")
+            for role, content in conversation_history[-10:]:  # Last 10 exchanges
+                label = "User" if role == "user" else "Assistant"
+                # Truncate long prior answers to save context window
+                truncated = content[:500] + "..." if len(content) > 500 else content
+                lines.append(f"**{label}:** {truncated}")
+                lines.append("")
+            lines.append("---\n")
+
         lines.append("## Source Chunks\n")
 
         for chunk in chunks:
@@ -247,7 +287,8 @@ class GroundedAnswerer:
         lines.append("")
         lines.append(
             "Please answer the question using ONLY the source chunks above. "
-            "Cite each claim using [chunk_id] notation."
+            "Cite each claim using [chunk_id] notation. "
+            "Then provide 3 recommended follow-up questions in the RECOMMENDATIONS section."
         )
 
         return "\n".join(lines)
@@ -334,3 +375,47 @@ class GroundedAnswerer:
             )
 
         return citations
+
+    # ------------------------------------------------------------------
+    # Recommendation parsing
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _split_recommendations(raw_answer: str) -> tuple[str, list[RecommendationItem]]:
+        """Split the raw Claude response into answer text and recommendations.
+
+        Looks for a RECOMMENDATIONS: section at the end of the response.
+        Returns the answer text (without the recommendations section) and
+        a list of parsed RecommendationItem objects.
+        """
+        recommendations: list[RecommendationItem] = []
+
+        # Find the RECOMMENDATIONS section (case-insensitive)
+        rec_pattern = re.compile(
+            r"\n*(?:#{0,3}\s*)?RECOMMENDATIONS\s*:?\s*\n",
+            re.IGNORECASE,
+        )
+        match = rec_pattern.search(raw_answer)
+
+        if not match:
+            return raw_answer.strip(), recommendations
+
+        # Everything before the marker is the answer
+        answer_text = raw_answer[: match.start()].strip()
+
+        # Everything after is the recommendations block
+        rec_block = raw_answer[match.end():]
+
+        # Parse individual recommendation lines
+        # Format: "- [question] | [reason]" or "- [question]"
+        line_pattern = re.compile(r"^[-•*]\s*(.+?)(?:\s*\|\s*(.+))?$", re.MULTILINE)
+
+        for line_match in line_pattern.finditer(rec_block):
+            text = line_match.group(1).strip()
+            reason = (line_match.group(2) or "Related to the current discussion").strip()
+
+            if text:
+                recommendations.append(RecommendationItem(text=text, reason=reason))
+
+        # Limit to 3 recommendations
+        return answer_text, recommendations[:3]
