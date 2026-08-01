@@ -37,11 +37,11 @@ def _make_worker() -> TranscriptIngestionWorker:
     mock_settings = MagicMock()
     mock_settings.aws_region = "us-east-1"
 
-    # Patch the bedrock client builder to avoid real AWS calls
-    original_build = TranscriptIngestionWorker._build_bedrock_client
-    TranscriptIngestionWorker._build_bedrock_client = staticmethod(lambda s: MagicMock())
-    worker = TranscriptIngestionWorker(mock_session_factory, mock_settings)
-    TranscriptIngestionWorker._build_bedrock_client = original_build
+    # Pass a mock embeddings client to avoid real AWS calls
+    mock_embeddings = MagicMock()
+    worker = TranscriptIngestionWorker(
+        mock_session_factory, mock_settings, embeddings=mock_embeddings
+    )
 
     return worker
 
