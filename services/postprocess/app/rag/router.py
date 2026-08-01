@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.deps import verify_service_token
-from app.rag.answerer import GroundedAnsweringChain
+from app.rag.agent import HansardChatAgent
 from app.rag.ingestion import TranscriptIngestionWorker
 from app.rag.recommendations import fetch_corpus_hints
 from app.rag.retriever import HybridRetriever, RetrievalFilters
@@ -240,9 +240,9 @@ async def rag_search(body: SearchRequest, request: Request) -> SearchResponse:
 
 @router.post("/ask", response_model=AskResponse)
 async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
-    """Answer a question using retrieved chunks and Claude.
+    """Answer a question via the conversational HansardChatAgent.
 
-    Calls HybridRetriever.retrieve() then GroundedAnswerer.answer(),
+    The agent decides for itself whether the turn needs a search_hansard call,
     returning the answer with citations, source chunks, and latency.
     """
     session_factory = request.app.state.session_factory
@@ -274,13 +274,10 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
             speaker=body.speaker,
         )
 
-    chunks = await retriever.retrieve(query=body.question, filters=filters, limit=10)
-
-    # Fetch corpus hints only when retrieval returned nothing — the hot path
-    # with results should not pay for an extra DB query (Requirement 3.3, 8.6)
-    corpus_hints = None
-    if not chunks:
-        corpus_hints = await fetch_corpus_hints(session_factory)
+    # The agent decides whether to search, so the router cannot know in advance
+    # whether hints will be needed. The lookup is two indexed DISTINCT queries
+    # and it never fails the answer, so it is fetched up front.
+    corpus_hints = await fetch_corpus_hints(session_factory)
 
     # Build conversation history for the answerer
     conversation_history: list[tuple[str, str]] | None = None
@@ -289,11 +286,11 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
         recent = body.conversation_history[-20:]
         conversation_history = [(m.role, m.content) for m in recent]
 
-    # Generate grounded answer with conversation context
-    chain = GroundedAnsweringChain(chat_model, settings)
-    answer_response = await chain.answer(
+    # Generate a conversational, tool-driven answer with conversation context
+    agent = HansardChatAgent(chat_model, retriever, settings)
+    answer_response = await agent.chat(
         question=body.question,
-        chunks=chunks,
+        filters=filters,
         conversation_history=conversation_history,
         corpus_hints=corpus_hints,
     )
