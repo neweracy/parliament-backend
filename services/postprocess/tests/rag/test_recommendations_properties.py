@@ -1,6 +1,6 @@
-"""Property tests for RecommendationBuilder suggestion grounding.
+"""Property tests for RecommendationBuilder suggestions and related records.
 
-Validates: Requirements 3.1, 3.3
+Validates: Requirements 3.1, 3.3, 4.1, 4.2, 4.3, 4.4, 4.9
 
 Property 3: Builder suggestions are grounded in available data.
 
@@ -15,6 +15,21 @@ a name that is absent from the data.
 Generators produce chunk lists with `None` speakers and dates, blank and
 whitespace-only entity values, empty `matched_entities`, and the empty list,
 paired with `CorpusHints` both with and without values.
+
+Property 4: Related records are deduplicated, labelled, and bounded.
+
+For any chunk list, `related_records()` returns at most `MAX_RELATED_RECORDS`
+items, at most one per distinct `transcript_id`, in the relevance order the
+chunks were given, so the highest-scoring chunk wins its id. Every label is
+non-empty and is the first non-empty value among `sitting_title`,
+`record_title`, `speaker`, and `date`, falling back to
+`Transcript {transcript_id}`. `start_s` is carried through when the source
+chunk has one and is `None` when it does not. The empty chunk list yields an
+empty collection.
+
+Generators produce chunk lists drawing `transcript_id` from a narrow pool so
+ids repeat, `None` and present `start_s` values, chunks whose label-bearing
+fields are all absent or blank, and the empty list.
 """
 
 from __future__ import annotations
@@ -26,6 +41,7 @@ from hypothesis import strategies as st
 
 from app.rag.recommendations import (
     _STATIC_SUGGESTIONS,
+    MAX_RELATED_RECORDS,
     CorpusHints,
     RecommendationBuilder,
     normalise_question,
@@ -83,9 +99,35 @@ def _entity_value(pool: list[str]) -> st.SearchStrategy[str]:
 
 
 @st.composite
-def retrieved_chunks(draw: st.DrawFn, min_size: int = 0, max_size: int = 4) -> list[RetrievedChunk]:
-    """Generate a relevance-ordered chunk list with sparse metadata."""
+def retrieved_chunks(
+    draw: st.DrawFn,
+    min_size: int = 0,
+    max_size: int = 4,
+    transcript_id_pool: list[int] | None = None,
+    blank_labels: bool = False,
+) -> list[RetrievedChunk]:
+    """Generate a relevance-ordered chunk list with sparse metadata.
+
+    `relevance_score` is strictly descending, matching the retriever's output
+    order, so "the first chunk with a given id" is also the highest-scoring one.
+
+    Args:
+        min_size: Smallest list length to generate.
+        max_size: Largest list length to generate.
+        transcript_id_pool: When given, `transcript_id` values are drawn from
+            this narrow pool so a generated list repeats them — this is what
+            exercises related-record deduplication.
+        blank_labels: When true, every label-bearing field (`sitting_title`,
+            `record_title`, `speaker`, `date`) is absent or whitespace-only, so
+            the `Transcript {transcript_id}` label fallback is reached.
+    """
     size = draw(st.integers(min_value=min_size, max_value=max_size))
+    blank = st.one_of(st.none(), st.just(""), st.just("   "))
+    id_st = (
+        st.sampled_from(transcript_id_pool)
+        if transcript_id_pool
+        else st.integers(min_value=1, max_value=500)
+    )
     chunks: list[RetrievedChunk] = []
     for index in range(size):
         start_s = draw(
@@ -99,14 +141,14 @@ def retrieved_chunks(draw: st.DrawFn, min_size: int = 0, max_size: int = 4) -> l
                 chunk_id=draw(st.integers(min_value=1, max_value=10_000)),
                 text=draw(st.sampled_from(["The House resolved.", "Debate continued."])),
                 relevance_score=1.0 / (index + 1),
-                transcript_id=draw(st.integers(min_value=1, max_value=500)),
-                speaker=draw(_optional_value(_SPEAKERS)),
+                transcript_id=draw(id_st),
+                speaker=draw(blank if blank_labels else _optional_value(_SPEAKERS)),
                 start_s=start_s,
                 end_s=None if start_s is None else start_s + 5.0,
                 matched_entities=draw(st.lists(_entity_value(_ENTITIES), max_size=3)),
-                record_title=draw(_optional_value(_RECORD_TITLES)),
-                sitting_title=draw(_optional_value(_SITTING_TITLES)),
-                date=draw(_optional_value(_DATES)),
+                record_title=draw(blank if blank_labels else _optional_value(_RECORD_TITLES)),
+                sitting_title=draw(blank if blank_labels else _optional_value(_SITTING_TITLES)),
+                date=draw(blank if blank_labels else _optional_value(_DATES)),
             )
         )
     return chunks
@@ -152,6 +194,16 @@ _exclude_st = st.lists(
 )
 _count_st = st.integers(min_value=1, max_value=5)
 
+# Narrow enough that any list of two or more chunks very often repeats an id,
+# which is what makes the deduplication assertions bite.
+_TRANSCRIPT_ID_POOL = [7, 11, 42]
+
+_related_chunks_st = st.one_of(
+    retrieved_chunks(max_size=6, transcript_id_pool=_TRANSCRIPT_ID_POOL),
+    retrieved_chunks(max_size=6, transcript_id_pool=_TRANSCRIPT_ID_POOL, blank_labels=True),
+)
+_limit_st = st.integers(min_value=1, max_value=5)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -194,6 +246,30 @@ def _is_general(text: str) -> bool:
     """True when the text belongs to the static set or the generic filler stream."""
     key = normalise_question(text)
     return key in _STATIC_KEYS or _FILLER_PATTERN.match(key) is not None
+
+
+def _expected_label(chunk: RetrievedChunk) -> str:
+    """Re-derive the required label independently of the builder's own helper.
+
+    Precedence per Requirement 4.2: `sitting_title` → `record_title` →
+    `speaker` → `date`, first non-empty winning, with
+    `Transcript {transcript_id}` as the guaranteed non-empty fallback.
+    """
+    for value in (chunk.sitting_title, chunk.record_title, chunk.speaker, chunk.date):
+        if value is None:
+            continue
+        collapsed = re.sub(r"\s+", " ", value).strip()
+        if collapsed:
+            return collapsed
+    return f"Transcript {chunk.transcript_id}"
+
+
+def _first_chunk_by_transcript_id(chunks: list[RetrievedChunk]) -> dict[int, RetrievedChunk]:
+    """Map each transcript_id to the earliest — highest-scoring — chunk carrying it."""
+    first: dict[int, RetrievedChunk] = {}
+    for chunk in chunks:
+        first.setdefault(chunk.transcript_id, chunk)
+    return first
 
 
 # ---------------------------------------------------------------------------
@@ -328,3 +404,99 @@ def test_general_suggestions_when_no_values_available(
             assert _is_general(item.text), (
                 f"Expected a general suggestion with no data available, got {item.text!r}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Property 4: Related records are deduplicated, labelled, and bounded
+# ---------------------------------------------------------------------------
+
+
+@given(chunks=_related_chunks_st)
+@settings(max_examples=300)
+def test_related_records_are_deduplicated_labelled_and_bounded(
+    chunks: list[RetrievedChunk],
+) -> None:
+    """Records are capped, one per transcript, labelled, and carry `start_s`.
+
+    For ANY chunk list, `related_records()` returns at most
+    `MAX_RELATED_RECORDS` items with distinct `transcript_id` values, taken in
+    the relevance order given so the highest-scoring chunk wins its id. Each
+    label is non-empty and follows the required precedence, and each `start_s`
+    is exactly the source chunk's value — present when the chunk has one, None
+    when it does not.
+
+    **Validates: Requirements 4.1, 4.2, 4.3, 4.4**
+    """
+    builder = RecommendationBuilder()
+
+    records = builder.related_records(chunks=chunks)
+
+    assert len(records) <= MAX_RELATED_RECORDS, (
+        f"Expected at most {MAX_RELATED_RECORDS} records, got {len(records)}"
+    )
+
+    transcript_ids = [record.transcript_id for record in records]
+    assert len(set(transcript_ids)) == len(transcript_ids), (
+        f"Duplicate transcript_id in related records: {transcript_ids}"
+    )
+
+    first_by_id = _first_chunk_by_transcript_id(chunks)
+    expected_ids = list(first_by_id)[:MAX_RELATED_RECORDS]
+    assert transcript_ids == expected_ids, (
+        f"Records not in relevance order of first appearance: {transcript_ids} != {expected_ids}"
+    )
+    assert len(records) == min(MAX_RELATED_RECORDS, len(first_by_id))
+
+    for record in records:
+        source = first_by_id[record.transcript_id]
+
+        assert record.chunk_id == source.chunk_id, (
+            f"Record for transcript {record.transcript_id} was derived from chunk "
+            f"{record.chunk_id}, not the highest-scoring chunk {source.chunk_id}"
+        )
+        assert record.label.strip(), f"Empty label on record {record}"
+        assert record.label == _expected_label(source), (
+            f"Label {record.label!r} does not follow the required precedence, "
+            f"expected {_expected_label(source)!r}"
+        )
+        assert record.start_s == source.start_s, (
+            f"start_s {record.start_s!r} does not match source chunk {source.start_s!r}"
+        )
+        if source.start_s is None:
+            assert record.start_s is None
+        else:
+            assert record.start_s is not None
+
+
+@given(chunks=_related_chunks_st, limit=_limit_st)
+@settings(max_examples=300)
+def test_related_records_respect_an_explicit_limit(
+    chunks: list[RetrievedChunk],
+    limit: int,
+) -> None:
+    """An explicit `limit` bounds the result to the distinct transcripts available.
+
+    **Validates: Requirements 4.1, 4.4**
+    """
+    builder = RecommendationBuilder()
+
+    records = builder.related_records(chunks=chunks, limit=limit)
+
+    distinct_ids = len({chunk.transcript_id for chunk in chunks})
+    assert len(records) == min(limit, distinct_ids), (
+        f"Expected {min(limit, distinct_ids)} records for limit {limit} over "
+        f"{distinct_ids} distinct transcripts, got {len(records)}"
+    )
+
+
+@given(limit=_limit_st)
+@settings(max_examples=100)
+def test_empty_chunk_list_yields_no_related_records(limit: int) -> None:
+    """WHERE no chunks are available, the related-record collection is empty.
+
+    **Validates: Requirements 4.9**
+    """
+    builder = RecommendationBuilder()
+
+    assert builder.related_records(chunks=[]) == []
+    assert builder.related_records(chunks=[], limit=limit) == []
