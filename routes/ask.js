@@ -23,12 +23,59 @@ const POSTPROCESS_URL = process.env.POSTPROCESS_URL || "http://localhost:8082";
 const POSTPROCESS_TOKEN = process.env.POSTPROCESS_TOKEN || "";
 
 /**
+ * Map raw Python postprocess response to camelCase gateway response.
+ * @param {object} raw - The raw response from the postprocess service
+ * @returns {object} The mapped response with camelCase keys
+ */
+function mapAskResponse(raw) {
+  return {
+    answer: raw.answer || "",
+    citations: (raw.citations || []).map((c) => ({
+      transcriptId: c.transcript_id,
+      chunkId: c.chunk_id,
+      speaker: c.speaker || null,
+      startS: c.start_s ?? null,
+      endS: c.end_s ?? null,
+      excerpt: c.excerpt || "",
+    })),
+    sourceChunks: (raw.source_chunks || []).map((c) => ({
+      chunkId: c.chunk_id,
+      text: c.text || "",
+      relevanceScore: c.relevance_score ?? 0,
+      transcriptId: c.transcript_id,
+      speaker: c.speaker || null,
+      startS: c.start_s ?? null,
+      endS: c.end_s ?? null,
+      matchedEntities: c.matched_entities || [],
+      recordTitle: c.record_title || null,
+      sittingTitle: c.sitting_title || null,
+      date: c.date || null,
+    })),
+    recommendations: (raw.recommendations || []).map((r) => ({
+      text: r.text || "",
+      reason: r.reason || "",
+    })),
+    relatedRecords: (raw.related_records || []).map((r) => ({
+      transcriptId: r.transcript_id,
+      label: r.label || "",
+      chunkId: r.chunk_id,
+      speaker: r.speaker || null,
+      sittingTitle: r.sitting_title || null,
+      recordTitle: r.record_title || null,
+      date: r.date || null,
+      startS: r.start_s ?? null,
+    })),
+    latencyMs: raw.latency_ms ?? raw.latencyMs ?? 0,
+  };
+}
+
+/**
  * Creates the Ask router.
  * @param {Function} requireSession - JWT auth middleware
  * @param {Object} db - Database client with query(text, params) helper
  * @returns {express.Router}
  */
-module.exports = function askRoutes(requireSession, _db) {
+function askRoutes(requireSession, _db) {
   const router = express.Router();
 
   /**
@@ -105,35 +152,7 @@ module.exports = function askRoutes(requireSession, _db) {
         }
 
         const raw = await upstream.json();
-
-        // Map snake_case from the Python service to camelCase for the frontend.
-        const result = {
-          answer: raw.answer,
-          citations: (raw.citations || []).map((c) => ({
-            transcriptId: c.transcript_id,
-            chunkId: c.chunk_id,
-            speaker: c.speaker,
-            startS: c.start_s,
-            endS: c.end_s,
-            excerpt: c.excerpt,
-          })),
-          sourceChunks: (raw.source_chunks || []).map((c) => ({
-            chunkId: c.chunk_id,
-            transcriptId: c.transcript_id,
-            text: c.text,
-            speaker: c.speaker,
-            startS: c.start_s,
-            endS: c.end_s,
-            relevanceScore: c.relevance_score,
-          })),
-          recommendations: (raw.recommendations || []).map((r) => ({
-            text: r.text,
-            reason: r.reason,
-          })),
-          latencyMs: raw.latency_ms ?? raw.latencyMs ?? 0,
-        };
-
-        res.json(result);
+        res.json(mapAskResponse(raw));
       } catch (fetchErr) {
         clearTimeout(timeout);
         if (fetchErr.name === "AbortError") {
@@ -175,4 +194,7 @@ module.exports = function askRoutes(requireSession, _db) {
   });
 
   return router;
-};
+}
+
+module.exports = askRoutes;
+module.exports.mapAskResponse = mapAskResponse;
