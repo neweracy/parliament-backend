@@ -141,6 +141,19 @@ class Recommendation(BaseModel):
     reason: str = Field(..., description="Why this is relevant")
 
 
+class RelatedRecord(BaseModel):
+    """A sitting, record, or speaker behind the answer."""
+
+    transcript_id: int
+    label: str
+    chunk_id: int
+    speaker: Optional[str] = None
+    sitting_title: Optional[str] = None
+    record_title: Optional[str] = None
+    date: Optional[str] = None
+    start_s: Optional[float] = None
+
+
 class AskResponse(BaseModel):
     """Response body for POST /rag/ask."""
 
@@ -150,6 +163,10 @@ class AskResponse(BaseModel):
     recommendations: list[Recommendation] = Field(
         default_factory=list,
         description="Suggested follow-up questions based on the transcript context",
+    )
+    related_records: list[RelatedRecord] = Field(
+        default_factory=list,
+        description="Sittings, records, or speakers behind the answer",
     )
     latency_ms: float
 
@@ -305,6 +322,20 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
         for c in answer_response.source_chunks
     ]
 
+    related_records = [
+        RelatedRecord(
+            transcript_id=r.transcript_id,
+            label=r.label,
+            chunk_id=r.chunk_id,
+            speaker=r.speaker,
+            sitting_title=r.sitting_title,
+            record_title=r.record_title,
+            date=r.date,
+            start_s=r.start_s,
+        )
+        for r in answer_response.related_records
+    ]
+
     return AskResponse(
         answer=answer_response.answer,
         citations=citations,
@@ -313,6 +344,7 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
             Recommendation(text=r.text, reason=r.reason)
             for r in answer_response.recommendations
         ],
+        related_records=related_records,
         latency_ms=round(answer_response.latency_ms, 1),
     )
 
