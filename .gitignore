@@ -47,6 +47,7 @@ test-results/
 # Temporary files
 *.tmp
 tmp_*
+f.txt
 .cache/
 
 # Generated transcripts and local audio samples
