@@ -20,7 +20,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.routes_datasets import router as datasets_router
 from app.api.routes_health import router as health_router
 from app.api.routes_postprocess import router as postprocess_router
-from app.rag.router import router as rag_router
 from app.config import get_settings
 from app.datasets.cache import DatasetCache
 from app.datasets.store import make_engine, make_session_factory
@@ -28,6 +27,8 @@ from app.history.writer import CorrectionHistoryWriter
 from app.llm.bedrock import BedrockClient
 from app.middleware import RequestLoggingMiddleware
 from app.obs.metrics import emit_error
+from app.rag.clients import create_chat_model, create_embeddings, probe_credentials
+from app.rag.router import router as rag_router
 
 logger = structlog.get_logger("main")
 
@@ -188,7 +189,7 @@ async def lifespan(app: FastAPI):
 
     await cache.start()
 
-    # Construct BedrockClient if LLM refinement is enabled
+    # Construct BedrockClient if LLM refinement is enabled (for correction pipeline)
     bedrock_client: BedrockClient | None = None
     if settings.llm_enabled:
         try:
@@ -197,6 +198,18 @@ async def lifespan(app: FastAPI):
             logger.error("llm.bedrock.init_failed", exc_info=True)
             bedrock_client = None
     app.state.bedrock_client = bedrock_client
+
+    # Create LangChain clients for the RAG pipeline
+    chat_model = None
+    embeddings = None
+    if settings.llm_enabled and probe_credentials():
+        try:
+            chat_model = create_chat_model(settings)
+            embeddings = create_embeddings(settings)
+        except Exception:
+            logger.error("rag.clients.init_failed", exc_info=True)
+    app.state.chat_model = chat_model
+    app.state.embeddings = embeddings
 
     # Construct CorrectionHistoryWriter if history is enabled (Req 13.9, 17.3)
     history_writer: CorrectionHistoryWriter | None = None
@@ -220,6 +233,8 @@ async def lifespan(app: FastAPI):
         port=settings.port,
         llm_enabled=settings.llm_enabled,
         bedrock_configured=bedrock_client.is_configured if bedrock_client else False,
+        rag_chat_model=chat_model is not None,
+        rag_embeddings=embeddings is not None,
         db_max_connections=settings.db_pool_size + settings.db_max_overflow,
         db_sslmode=settings.db_sslmode or "unset",
     )
