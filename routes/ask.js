@@ -30,19 +30,19 @@ const POSTPROCESS_TOKEN = process.env.POSTPROCESS_TOKEN || "";
 function mapAskResponse(raw) {
   return {
     answer: raw.answer || "",
-    citations: (raw.citations || []).map((c) => ({
-      transcriptId: c.transcript_id,
-      chunkId: c.chunk_id,
+    citations: (raw.citations || []).filter(Boolean).map((c) => ({
+      transcriptId: c.transcript_id ?? 0,
+      chunkId: c.chunk_id ?? 0,
       speaker: c.speaker || null,
       startS: c.start_s ?? null,
       endS: c.end_s ?? null,
       excerpt: c.excerpt || "",
     })),
-    sourceChunks: (raw.source_chunks || []).map((c) => ({
-      chunkId: c.chunk_id,
+    sourceChunks: (raw.source_chunks || []).filter(Boolean).map((c) => ({
+      chunkId: c.chunk_id ?? 0,
       text: c.text || "",
       relevanceScore: c.relevance_score ?? 0,
-      transcriptId: c.transcript_id,
+      transcriptId: c.transcript_id ?? 0,
       speaker: c.speaker || null,
       startS: c.start_s ?? null,
       endS: c.end_s ?? null,
@@ -51,14 +51,14 @@ function mapAskResponse(raw) {
       sittingTitle: c.sitting_title || null,
       date: c.date || null,
     })),
-    recommendations: (raw.recommendations || []).map((r) => ({
+    recommendations: (raw.recommendations || []).filter(Boolean).map((r) => ({
       text: r.text || "",
       reason: r.reason || "",
     })),
-    relatedRecords: (raw.related_records || []).map((r) => ({
-      transcriptId: r.transcript_id,
+    relatedRecords: (raw.related_records || []).filter(Boolean).map((r) => ({
+      transcriptId: r.transcript_id ?? 0,
       label: r.label || "",
-      chunkId: r.chunk_id,
+      chunkId: r.chunk_id ?? 0,
       speaker: r.speaker || null,
       sittingTitle: r.sitting_title || null,
       recordTitle: r.record_title || null,
