@@ -708,3 +708,121 @@ def test_property2_suggestions_never_restate_prior_user_question(
             f"Suggestion {rec.text!r} (normalised: {rec_key!r}) restates a prior "
             f"user question from history: {history_qs}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Property tests: Zero-context path and invocation count (Properties 10, 5)
+# ---------------------------------------------------------------------------
+
+import re
+
+# Strategy: bodies containing [n] citation markers that should be stripped
+
+
+@st.composite
+def body_with_markers(draw: st.DrawFn) -> str:
+    """Generate bodies containing [n] citation markers that should be stripped on zero-context."""
+    base = draw(st.sampled_from([
+        "The Minister presented the review [42]. Spending rose [15][7].",
+        "Budget [1] increased. Education [2] benefited [3].",
+        "No evidence found [99].",
+        "The debate [10] covered fiscal [20] and social [30] matters.",
+    ]))
+    return base
+
+
+# Strategy: zero-context chunk scenarios only (empty or all sub-threshold)
+
+
+@st.composite
+def zero_context_chunk_scenario(draw: st.DrawFn) -> list[RetrievedChunk]:
+    """Generate chunk lists that produce zero-context: empty or all sub-threshold."""
+    case = draw(st.sampled_from(["empty", "sub_threshold"]))
+
+    if case == "empty":
+        return []
+
+    # All sub-threshold: every chunk has relevance_score < 0.01
+    size = draw(st.integers(min_value=1, max_value=4))
+    return [
+        _make_chunk(
+            chunk_id=i + 1,
+            relevance_score=draw(
+                st.floats(min_value=0.0001, max_value=0.009, allow_nan=False)
+            ),
+            transcript_id=100 + i,
+            speaker=draw(st.sampled_from(["Hon. Smith", "Mr Speaker", None])),
+        )
+        for i in range(size)
+    ]
+
+
+# Property 10
+
+
+@given(body=body_with_markers(), chunks=zero_context_chunk_scenario())
+@settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+def test_property10_replies_without_evidence_carry_no_citations(
+    body: str,
+    chunks: list[RetrievedChunk],
+) -> None:
+    """Replies without evidence carry no citations.
+
+    Validates: Requirements 8.2
+
+    When chunks are empty OR all below threshold (relevance_score < 0.01),
+    the answer carries citations == [] and no [digits] markers remain in
+    the answer text. The stub returns bodies CONTAINING citation markers
+    like [42] and [15] — this test proves they are stripped.
+    """
+    answerer = _make_answerer()
+    answerer._bedrock_client.invoke.return_value = body
+
+    result: AnswerResponse = asyncio.get_event_loop().run_until_complete(
+        answerer.answer("What about the budget?", chunks=chunks)
+    )
+
+    # No citations on zero-context path
+    assert result.citations == [], (
+        f"Expected empty citations on zero-context path, got {result.citations}"
+    )
+
+    # No [digits] markers remain in the answer text
+    assert re.search(r"\[\d+\]", result.answer) is None, (
+        f"Citation markers not stripped from answer: {result.answer!r}"
+    )
+
+
+# Property 5
+
+
+@given(body=recommendation_body(), chunks=chunk_scenario(), raises=st.booleans())
+@settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+def test_property5_one_model_invocation_per_answer_at_most(
+    body: str,
+    chunks: list[RetrievedChunk],
+    raises: bool,
+) -> None:
+    """One model invocation per answer at most.
+
+    Validates: Requirements 2.6
+
+    For any chunk scenario (empty, sub-threshold, relevant) and any stub body,
+    the bedrock mock's invoke method is called exactly once. This includes the
+    raising path (mock with side_effect=RuntimeError).
+    """
+    answerer = _make_answerer()
+
+    if raises:
+        answerer._bedrock_client.invoke.side_effect = RuntimeError("Bedrock unavailable")
+    else:
+        answerer._bedrock_client.invoke.return_value = body
+
+    asyncio.get_event_loop().run_until_complete(
+        answerer.answer("What was discussed about the budget?", chunks=chunks)
+    )
+
+    # Exactly one invocation on every path
+    assert answerer._bedrock_client.invoke.call_count == 1, (
+        f"Expected exactly 1 invoke call, got {answerer._bedrock_client.invoke.call_count}"
+    )
