@@ -9,7 +9,6 @@ Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
 
 from __future__ import annotations
 
-import re
 import time
 
 import structlog
@@ -17,6 +16,13 @@ from langchain_aws import ChatBedrock
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.config import Settings
+from app.rag.parsing import (
+    GENERATION_FAILURE_TEXT,
+    parse_citations,
+    split_recommendations,
+    strip_citation_markers,
+    validate_citations,
+)
 from app.rag.recommendations import (
     AnswerResponse,
     Citation,
@@ -35,15 +41,8 @@ _DEFAULT_RELEVANCE_THRESHOLD = 0.01
 # Maximum number of chunks to include in the prompt context
 _MAX_CONTEXT_CHUNKS = 10
 
-# Deterministic text returned when the model invocation raises
-_GENERATION_FAILURE_TEXT = "Unable to generate an answer at this time. Please try again later."
-
 # Placeholder emitted in the prompt's context block when no chunk is citable
 _NO_SOURCE_CHUNKS_TEXT = "(NO SOURCE CHUNKS AVAILABLE FOR THIS QUESTION)"
-
-# Citation markers, e.g. "[42]" — stripped from the answer on the zero-context
-# path, where nothing is citable and a marker could only be a dead reference
-_CITATION_MARKER_RE = re.compile(r"\[\d+\]")
 
 # System prompt instructing Claude to produce cited answers with recommendations
 _SYSTEM_PROMPT = (
@@ -222,7 +221,7 @@ class GroundedAnsweringChain:
                 exc_info=True,
             )
             return self._finalise(
-                answer=_GENERATION_FAILURE_TEXT,
+                answer=GENERATION_FAILURE_TEXT,
                 citations=[],
                 context_chunks=context_chunks,
                 parsed=[],
@@ -235,16 +234,16 @@ class GroundedAnsweringChain:
 
         # Step 4: Parse citation markers from response
         # Split answer text from recommendations section
-        answer_text, parsed = self._split_recommendations(raw_answer)
+        answer_text, parsed = split_recommendations(raw_answer)
 
         # Step 5: Resolve citations
         if grounded:
             chunk_map = {c.chunk_id: c for c in context_chunks}
-            citations = self._validate_citations(self._parse_citations(answer_text), chunk_map)
+            citations = validate_citations(parse_citations(answer_text), chunk_map)
         else:
             # Zero-context path: nothing is citable, so citations are empty by
             # construction and any marker the model emitted is stripped
-            answer_text = self._strip_citation_markers(answer_text)
+            answer_text = strip_citation_markers(answer_text)
             citations = []
 
         # Step 6: Return structured response
@@ -372,125 +371,3 @@ class GroundedAnsweringChain:
             SystemMessage(content=_SYSTEM_PROMPT),
             HumanMessage(content=human_content),
         ]
-
-    # ------------------------------------------------------------------
-    # Citation parsing and validation
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _parse_citations(answer_text: str) -> list[int]:
-        """Extract chunk_id integers from [chunk_id] citation markers.
-
-        Returns a deduplicated list of chunk IDs in order of first appearance.
-        """
-        pattern = re.compile(r"\[(\d+)\]")
-        matches = pattern.findall(answer_text)
-
-        seen: set[int] = set()
-        chunk_ids: list[int] = []
-
-        for match in matches:
-            chunk_id = int(match)
-            if chunk_id not in seen:
-                seen.add(chunk_id)
-                chunk_ids.append(chunk_id)
-
-        return chunk_ids
-
-    @staticmethod
-    def _strip_citation_markers(answer_text: str) -> str:
-        """Remove every [digits] marker and tidy the whitespace it leaves behind.
-
-        Used on the zero-context path only, where no chunk is citable.
-        """
-        stripped = _CITATION_MARKER_RE.sub("", answer_text)
-        # A marker sitting before punctuation or between words leaves a gap
-        stripped = re.sub(r"[ \t]+([.,;:!?])", r"\1", stripped)
-        stripped = re.sub(r"[ \t]{2,}", " ", stripped)
-        return stripped.strip()
-
-    @staticmethod
-    def _validate_citations(
-        cited_chunk_ids: list[int],
-        chunk_map: dict[int, RetrievedChunk],
-    ) -> list[Citation]:
-        """Validate cited chunk IDs against the source chunk map.
-
-        Only citations referencing an actual chunk in the context are
-        included. Invalid references are logged and dropped.
-        """
-        citations: list[Citation] = []
-
-        for chunk_id in cited_chunk_ids:
-            chunk = chunk_map.get(chunk_id)
-            if chunk is None:
-                logger.warning(
-                    "rag.answerer.invalid_citation",
-                    chunk_id=chunk_id,
-                    available_ids=list(chunk_map.keys()),
-                )
-                continue
-
-            # Build excerpt (first 150 characters of chunk text)
-            excerpt = chunk.text[:150]
-            if len(chunk.text) > 150:
-                excerpt += "..."
-
-            citations.append(
-                Citation(
-                    transcript_id=chunk.transcript_id,
-                    chunk_id=chunk.chunk_id,
-                    speaker=chunk.speaker,
-                    start_s=chunk.start_s,
-                    end_s=chunk.end_s,
-                    excerpt=excerpt,
-                )
-            )
-
-        return citations
-
-    # ------------------------------------------------------------------
-    # Recommendation parsing
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _split_recommendations(
-        raw_answer: str,
-    ) -> tuple[str, list[RecommendationItem]]:
-        """Split the raw Claude response into answer text and recommendations.
-
-        Looks for a RECOMMENDATIONS: section at the end of the response.
-        Returns the answer text (without the recommendations section) and
-        a list of parsed RecommendationItem objects.
-        """
-        recommendations: list[RecommendationItem] = []
-
-        # Find the RECOMMENDATIONS section (case-insensitive)
-        rec_pattern = re.compile(
-            r"\n*(?:#{0,3}\s*)?RECOMMENDATIONS\s*:?\s*\n",
-            re.IGNORECASE,
-        )
-        match = rec_pattern.search(raw_answer)
-
-        if not match:
-            return raw_answer.strip(), recommendations
-
-        # Everything before the marker is the answer
-        answer_text = raw_answer[: match.start()].strip()
-
-        # Everything after is the recommendations block
-        rec_block = raw_answer[match.end() :]
-
-        # Parse individual recommendation lines
-        # Format: "- [question] | [reason]" or "- [question]"
-        line_pattern = re.compile(r"^[-•*]\s*(.+?)(?:\s*\|\s*(.+))?$", re.MULTILINE)
-
-        for line_match in line_pattern.finditer(rec_block):
-            text = line_match.group(1).strip()
-            reason = (line_match.group(2) or "Related to the current discussion").strip()
-
-            if text:
-                recommendations.append(RecommendationItem(text=text, reason=reason))
-
-        # Limit to 3 recommendations
-        return answer_text, recommendations[:3]
