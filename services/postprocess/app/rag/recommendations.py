@@ -23,7 +23,7 @@ import structlog
 from langchain_core.documents import Document
 from sqlalchemy import text
 
-from app.rag.retrieval import RetrievedChunk
+from app.rag.retriever import RetrievedChunk
 
 logger = structlog.get_logger("rag.recommendations")
 
