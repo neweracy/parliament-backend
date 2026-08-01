@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import time
 from datetime import date
-from typing import Optional
 
 import structlog
 from fastapi import APIRouter, Depends, Request
@@ -41,19 +40,17 @@ class SearchRequest(BaseModel):
     """Request body for POST /rag/search."""
 
     query: str = Field(..., min_length=1, description="Natural language search query")
-    entity_filter: Optional[list[str]] = Field(
+    entity_filter: list[str] | None = Field(
         default=None, description="Filter by entity names (array overlap)"
     )
-    date_from: Optional[date] = Field(
+    date_from: date | None = Field(
         default=None, description="Include only chunks from sittings on or after this date"
     )
-    date_to: Optional[date] = Field(
+    date_to: date | None = Field(
         default=None, description="Include only chunks from sittings on or before this date"
     )
-    speaker: Optional[str] = Field(
-        default=None, description="Filter by speaker label"
-    )
-    limit: Optional[int] = Field(
+    speaker: str | None = Field(default=None, description="Filter by speaker label")
+    limit: int | None = Field(
         default=10, ge=1, le=50, description="Max results (default 10, max 50)"
     )
 
@@ -65,13 +62,13 @@ class SearchResultItem(BaseModel):
     chunk_text: str
     relevance_score: float
     transcript_id: int
-    speaker: Optional[str]
-    start_s: Optional[float]
-    end_s: Optional[float]
+    speaker: str | None
+    start_s: float | None
+    end_s: float | None
     matched_entities: list[str]
-    record_title: Optional[str]
-    sitting_title: Optional[str]
-    date: Optional[str]
+    record_title: str | None
+    sitting_title: str | None
+    date: str | None
 
 
 class SearchResponse(BaseModel):
@@ -93,19 +90,15 @@ class AskRequest(BaseModel):
     """Request body for POST /rag/ask."""
 
     question: str = Field(..., min_length=1, description="Natural language question")
-    entity_filter: Optional[list[str]] = Field(
-        default=None, description="Filter by entity names"
-    )
-    date_from: Optional[date] = Field(
+    entity_filter: list[str] | None = Field(default=None, description="Filter by entity names")
+    date_from: date | None = Field(
         default=None, description="Include only chunks from sittings on or after this date"
     )
-    date_to: Optional[date] = Field(
+    date_to: date | None = Field(
         default=None, description="Include only chunks from sittings on or before this date"
     )
-    speaker: Optional[str] = Field(
-        default=None, description="Filter by speaker label"
-    )
-    conversation_history: Optional[list[ChatMessage]] = Field(
+    speaker: str | None = Field(default=None, description="Filter by speaker label")
+    conversation_history: list[ChatMessage] | None = Field(
         default=None,
         description="Prior conversation messages for multi-turn context (max 20)",
     )
@@ -116,9 +109,9 @@ class CitationItem(BaseModel):
 
     transcript_id: int
     chunk_id: int
-    speaker: Optional[str]
-    start_s: Optional[float]
-    end_s: Optional[float]
+    speaker: str | None
+    start_s: float | None
+    end_s: float | None
     excerpt: str
 
 
@@ -129,9 +122,9 @@ class SourceChunkItem(BaseModel):
     text: str
     relevance_score: float
     transcript_id: int
-    speaker: Optional[str]
-    start_s: Optional[float]
-    end_s: Optional[float]
+    speaker: str | None
+    start_s: float | None
+    end_s: float | None
     matched_entities: list[str]
 
 
@@ -148,11 +141,11 @@ class RelatedRecord(BaseModel):
     transcript_id: int
     label: str
     chunk_id: int
-    speaker: Optional[str] = None
-    sitting_title: Optional[str] = None
-    record_title: Optional[str] = None
-    date: Optional[str] = None
-    start_s: Optional[float] = None
+    speaker: str | None = None
+    sitting_title: str | None = None
+    record_title: str | None = None
+    date: str | None = None
+    start_s: float | None = None
 
 
 class AskResponse(BaseModel):
@@ -351,8 +344,7 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
         citations=citations,
         source_chunks=source_chunks,
         recommendations=[
-            Recommendation(text=r.text, reason=r.reason)
-            for r in answer_response.recommendations
+            Recommendation(text=r.text, reason=r.reason) for r in answer_response.recommendations
         ],
         related_records=related_records,
         latency_ms=round(answer_response.latency_ms, 1),

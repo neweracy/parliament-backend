@@ -148,9 +148,7 @@ class FulltextRetriever(BaseRetriever):
         run_manager: CallbackManagerForRetrieverRun | None = None,
     ) -> list[Document]:
         """Sync retrieval — not supported (async-only service)."""
-        raise NotImplementedError(
-            "FulltextRetriever is async-only. Use _aget_relevant_documents."
-        )
+        raise NotImplementedError("FulltextRetriever is async-only. Use _aget_relevant_documents.")
 
     async def _aget_relevant_documents(
         self,
@@ -252,9 +250,7 @@ class VectorRetriever(BaseRetriever):
         run_manager: CallbackManagerForRetrieverRun | None = None,
     ) -> list[Document]:
         """Sync retrieval — not supported (async-only service)."""
-        raise NotImplementedError(
-            "VectorRetriever is async-only. Use _aget_relevant_documents."
-        )
+        raise NotImplementedError("VectorRetriever is async-only. Use _aget_relevant_documents.")
 
     async def _aget_relevant_documents(
         self,
@@ -576,9 +572,7 @@ class HybridRetriever:
 
         try:
             async with self._session_factory() as session:
-                result = await session.execute(
-                    text(sql), {"chunk_ids": chunk_ids}
-                )
+                result = await session.execute(text(sql), {"chunk_ids": chunk_ids})
                 rows = result.fetchall()
 
                 metadata_map: dict[int, dict] = {}

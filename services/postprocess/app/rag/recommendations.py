@@ -217,11 +217,7 @@ def _chunk_candidates(chunks: Iterable[Document]) -> Iterator[tuple[str, str]]:
     for chunk in chunks:
         meta = chunk.metadata
         speaker = _clean(meta.get("speaker"))
-        entities = [
-            e
-            for e in (_clean(v) for v in (meta.get("entity_names") or []))
-            if e
-        ]
+        entities = [e for e in (_clean(v) for v in (meta.get("entity_names") or [])) if e]
         date = _clean(meta.get("date"))
         sitting_title = _clean(meta.get("sitting_title"))
 

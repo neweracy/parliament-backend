@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 from datetime import date
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.documents import Document
 
 from app.rag.retriever import (
-    HybridRetriever,
-    RRFRetriever,
-    RetrievalFilters,
-    RetrievedChunk,
-    _build_filter_clauses,
     _RRF_K,
+    HybridRetriever,
+    RetrievalFilters,
+    RRFRetriever,
+    _build_filter_clauses,
 )
 
 
@@ -57,9 +56,7 @@ class TestBuildFilterClauses:
 
     def test_date_range(self):
         """Both date_from and date_to produce two clauses."""
-        filters = RetrievalFilters(
-            date_from=date(2024, 1, 1), date_to=date(2024, 6, 30)
-        )
+        filters = RetrievalFilters(date_from=date(2024, 1, 1), date_to=date(2024, 6, 30))
         clauses, params = _build_filter_clauses(filters)
         assert len(clauses) == 2
         assert params["date_from"] == "2024-01-01"

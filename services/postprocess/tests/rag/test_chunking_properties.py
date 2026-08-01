@@ -16,11 +16,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from hypothesis import given, settings, assume, HealthCheck
+from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
-from app.rag.ingestion import TranscriptIngestionWorker, _MIN_CHUNK_WORDS, _MAX_CHUNK_WORDS
-
+from app.rag.ingestion import _MAX_CHUNK_WORDS, _MIN_CHUNK_WORDS, TranscriptIngestionWorker
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -55,20 +54,65 @@ _SPEAKERS = ["Speaker A", "Speaker B", "Speaker C", "Speaker D", "Speaker E"]
 
 # Word pool for generating realistic transcript text
 _WORD_POOL = [
-    "the", "honourable", "member", "for", "constituency", "raised",
-    "an", "important", "point", "about", "fiscal", "policy",
-    "in", "this", "parliament", "we", "must", "consider",
-    "economic", "growth", "and", "development", "of", "our",
-    "nation", "Mr", "Speaker", "I", "would", "like", "to",
-    "address", "budget", "allocation", "committee", "report",
-    "minister", "finance", "education", "health", "agriculture",
-    "infrastructure", "regional", "national", "local", "government",
-    "president", "house", "session", "debate", "motion", "bill",
+    "the",
+    "honourable",
+    "member",
+    "for",
+    "constituency",
+    "raised",
+    "an",
+    "important",
+    "point",
+    "about",
+    "fiscal",
+    "policy",
+    "in",
+    "this",
+    "parliament",
+    "we",
+    "must",
+    "consider",
+    "economic",
+    "growth",
+    "and",
+    "development",
+    "of",
+    "our",
+    "nation",
+    "Mr",
+    "Speaker",
+    "I",
+    "would",
+    "like",
+    "to",
+    "address",
+    "budget",
+    "allocation",
+    "committee",
+    "report",
+    "minister",
+    "finance",
+    "education",
+    "health",
+    "agriculture",
+    "infrastructure",
+    "regional",
+    "national",
+    "local",
+    "government",
+    "president",
+    "house",
+    "session",
+    "debate",
+    "motion",
+    "bill",
 ]
 
 
 @st.composite
-def speaker_turn_words(draw: st.DrawFn, speaker: str, min_words: int = 50, max_words: int = 500) -> list[dict]:
+def speaker_turn_words(
+    draw: st.DrawFn, speaker: str, min_words: int = 50, max_words: int = 500
+) -> list[dict]:
     """Generate a list of word-timing dicts for a single speaker turn.
 
     Each word dict has: word, start, end, speaker.
@@ -86,12 +130,14 @@ def speaker_turn_words(draw: st.DrawFn, speaker: str, min_words: int = 50, max_w
         end = start + duration
         cursor = end
 
-        words.append({
-            "word": word_text,
-            "start": round(start, 3),
-            "end": round(end, 3),
-            "speaker": speaker,
-        })
+        words.append(
+            {
+                "word": word_text,
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "speaker": speaker,
+            }
+        )
 
     return words
 
@@ -132,12 +178,14 @@ def multi_speaker_transcript(draw: st.DrawFn) -> tuple[str, list[dict], list[dic
             end = start + duration
             cursor = end
 
-            all_words.append({
-                "word": word_text,
-                "start": round(start, 3),
-                "end": round(end, 3),
-                "speaker": speaker,
-            })
+            all_words.append(
+                {
+                    "word": word_text,
+                    "start": round(start, 3),
+                    "end": round(end, 3),
+                    "speaker": speaker,
+                }
+            )
 
     # Build text from words
     text_content = " ".join(w["word"] for w in all_words)
@@ -152,7 +200,6 @@ def multi_speaker_transcript(draw: st.DrawFn) -> tuple[str, list[dict], list[dic
         entities.append({"name": name, "start": e_start, "end": e_end})
 
     return text_content, all_words, entities
-
 
 
 # ---------------------------------------------------------------------------
@@ -240,8 +287,7 @@ def test_chunk_speaker_boundary_integrity(data: tuple[str, list[dict], list[dict
     # Each chunk should have a single speaker assigned
     for i, chunk in enumerate(chunks):
         assert chunk.speaker is not None, (
-            f"Chunk {i} has no speaker assigned. "
-            f"Text preview: {chunk.text[:80]}..."
+            f"Chunk {i} has no speaker assigned. Text preview: {chunk.text[:80]}..."
         )
 
     # Verify by reconstructing: the words in each chunk should all come from

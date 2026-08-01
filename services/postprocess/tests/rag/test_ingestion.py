@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock
-
 import pytest
 
-from app.rag.ingestion import Chunk, TranscriptIngestionWorker
+from app.rag.ingestion import TranscriptIngestionWorker
 
 
 @pytest.fixture
@@ -90,9 +87,7 @@ class TestChunkSpeakerTurn:
             if i == 110:
                 start = words[-1]["end"] + 3.0
                 end = start + 0.5
-            words.append(
-                {"word": f"word{i}", "start": start, "end": end, "speaker": "A"}
-            )
+            words.append({"word": f"word{i}", "start": start, "end": end, "speaker": "A"})
         chunks = worker._chunk_speaker_turn(words, [])
         assert len(chunks) >= 2
         # The first chunk should end around the pause point (110 words)
@@ -139,9 +134,7 @@ class TestGenerateEmbedding:
     @pytest.mark.asyncio
     async def test_no_embeddings_raises(self, mock_settings, mock_session_factory):
         """_generate_embedding raises when embeddings not configured."""
-        worker = TranscriptIngestionWorker(
-            mock_session_factory, mock_settings, embeddings=None
-        )
+        worker = TranscriptIngestionWorker(mock_session_factory, mock_settings, embeddings=None)
         with pytest.raises(RuntimeError, match="not configured"):
             await worker._generate_embedding("test")
 

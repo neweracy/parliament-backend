@@ -11,18 +11,12 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
-
 from app.rag.router import (
     AskRequest,
     AskResponse,
     ChatMessage,
-    CitationItem,
-    Recommendation,
     RelatedRecord,
-    SourceChunkItem,
 )
-
 
 # ---------------------------------------------------------------------------
 # AskResponse contract: related_records serialisation (Requirement 4.5)
@@ -75,7 +69,9 @@ class TestAskResponseContract:
         assert dump["related_records"][0]["label"] == "Second Sitting"
         assert dump["related_records"][0]["chunk_id"] == 7
         assert dump["related_records"][0]["speaker"] == "Hon. Mensah"
-        assert dump["related_records"][0]["sitting_title"] == "Second Sitting of the Eighth Parliament"
+        assert (
+            dump["related_records"][0]["sitting_title"] == "Second Sitting of the Eighth Parliament"
+        )
         assert dump["related_records"][0]["start_s"] == 120.5
         # Null fields preserved
         assert dump["related_records"][1]["speaker"] is None
@@ -201,9 +197,7 @@ class TestHistoryCap:
 
         **Validates: Requirement 8.6**
         """
-        messages = [
-            ChatMessage(role="user", content=f"msg {i}") for i in range(5)
-        ]
+        messages = [ChatMessage(role="user", content=f"msg {i}") for i in range(5)]
         req = AskRequest(question="Hi?", conversation_history=messages)
 
         recent = req.conversation_history[-20:]
@@ -244,7 +238,7 @@ class TestHintsOnlyWhenEmpty:
         chunks = [{"chunk_id": 1}]  # simulated non-empty result
         # In the router: `if not chunks:` → False → hints NOT fetched
         assert bool(chunks) is True
-        assert not chunks is False  # noqa: E712
+        assert chunks is not False  # noqa: E712
 
     def test_empty_chunk_list_is_falsy(self) -> None:
         """An empty chunk list evaluates as falsy — hints ARE fetched.
@@ -254,4 +248,4 @@ class TestHintsOnlyWhenEmpty:
         chunks: list = []
         # In the router: `if not chunks:` → True → hints fetched
         assert bool(chunks) is False
-        assert not chunks is True  # noqa: E712
+        assert chunks is not True  # noqa: E712

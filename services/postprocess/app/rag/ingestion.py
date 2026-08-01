@@ -95,9 +95,7 @@ class TranscriptIngestionWorker:
 
     def start(self) -> None:
         """Launch the background ingestion worker task."""
-        self._task = asyncio.create_task(
-            self._worker_loop(), name="rag-ingestion-worker"
-        )
+        self._task = asyncio.create_task(self._worker_loop(), name="rag-ingestion-worker")
 
     async def stop(self) -> None:
         """Cancel the background task gracefully, draining remaining items."""
@@ -276,9 +274,7 @@ class TranscriptIngestionWorker:
         result = await self._embeddings.aembed_documents([text_content])
         return result[0]
 
-    def _group_speaker_turns(
-        self, words: list[dict]
-    ) -> list[list[dict]]:
+    def _group_speaker_turns(self, words: list[dict]) -> list[list[dict]]:
         """Group consecutive words by speaker into turns.
 
         A new turn starts whenever the speaker label changes.
@@ -379,9 +375,7 @@ class TranscriptIngestionWorker:
         end_s = chunk_words[-1].get("end")
 
         # Find entities that overlap with this chunk's time range
-        entity_names = self._find_overlapping_entities(
-            start_s, end_s, entity_lookup
-        )
+        entity_names = self._find_overlapping_entities(start_s, end_s, entity_lookup)
 
         return {
             "text": text_content,
@@ -397,11 +391,13 @@ class TranscriptIngestionWorker:
         lookup = []
         for entity in entities:
             if "name" in entity:
-                lookup.append({
-                    "name": entity["name"],
-                    "start": entity.get("start", 0.0),
-                    "end": entity.get("end", 0.0),
-                })
+                lookup.append(
+                    {
+                        "name": entity["name"],
+                        "start": entity.get("start", 0.0),
+                        "end": entity.get("end", 0.0),
+                    }
+                )
         # Sort by start time for efficient range checks
         lookup.sort(key=lambda e: e["start"])
         return lookup
@@ -433,9 +429,7 @@ class TranscriptIngestionWorker:
 
         return names
 
-    def _chunk_text_only(
-        self, text_content: str, entities: list[dict]
-    ) -> list[Chunk]:
+    def _chunk_text_only(self, text_content: str, entities: list[dict]) -> list[Chunk]:
         """Fallback chunking when no word timings are available.
 
         Uses RecursiveCharacterTextSplitter for intelligent splitting
@@ -504,10 +498,7 @@ class TranscriptIngestionWorker:
         try:
             async with self._session_factory() as session, session.begin():
                 await session.execute(
-                    text(
-                        "DELETE FROM transcript_chunk "
-                        "WHERE transcript_id = :transcript_id"
-                    ),
+                    text("DELETE FROM transcript_chunk WHERE transcript_id = :transcript_id"),
                     {"transcript_id": transcript_id},
                 )
         except Exception:
@@ -531,13 +522,9 @@ class TranscriptIngestionWorker:
         try:
             async with self._session_factory() as session, session.begin():
                 for chunk, embedding in zip(chunks, embeddings, strict=True):
-                    indexed_at = (
-                        datetime.now(UTC) if embedding else None
-                    )
+                    indexed_at = datetime.now(UTC) if embedding else None
                     # Format embedding as pgvector literal or NULL
-                    embedding_value = (
-                        str(embedding) if embedding else None
-                    )
+                    embedding_value = str(embedding) if embedding else None
 
                     await session.execute(
                         text(

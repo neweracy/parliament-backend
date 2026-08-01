@@ -1,12 +1,13 @@
 """Tests for app/rag/answerer.py — GroundedAnsweringChain."""
+
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.rag.answerer import GroundedAnsweringChain, _GENERATION_FAILURE_TEXT
+from app.rag.answerer import _GENERATION_FAILURE_TEXT, GroundedAnsweringChain
 from app.rag.recommendations import RecommendationItem
 
 
@@ -71,9 +72,7 @@ class TestBuildMessages:
         assert "budget" in messages[1].content.lower()
 
     def test_ungrounded_messages(self):
-        messages = GroundedAnsweringChain._build_messages(
-            "Hello!", [], grounded=False
-        )
+        messages = GroundedAnsweringChain._build_messages("Hello!", [], grounded=False)
         assert "NO SOURCE CHUNKS AVAILABLE" in messages[1].content
 
 

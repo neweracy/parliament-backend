@@ -55,9 +55,7 @@ def mock_embeddings():
 def mock_session_factory():
     """Mock async session factory for DB operations."""
     session = AsyncMock()
-    session.execute = AsyncMock(
-        return_value=MagicMock(fetchall=lambda: [], fetchone=lambda: None)
-    )
+    session.execute = AsyncMock(return_value=MagicMock(fetchall=lambda: [], fetchone=lambda: None))
 
     context_manager = AsyncMock()
     context_manager.__aenter__ = AsyncMock(return_value=session)
