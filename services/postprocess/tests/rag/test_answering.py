@@ -76,20 +76,42 @@ def _make_answerer(
 class TestRelevanceFiltering:
     """Tests for relevance threshold filtering behavior."""
 
-    def test_no_chunks_returns_no_evidence(self) -> None:
-        """Empty chunk list returns 'no supporting evidence' response."""
+    def test_no_chunks_still_invokes_model(self) -> None:
+        """Empty chunk list still makes the single model call (Requirements 8.1, 2.6)."""
         answerer = _make_answerer()
-        result = asyncio.get_event_loop().run_until_complete(
-            answerer.answer("What about the budget?", chunks=[])
+        answerer._bedrock_client.invoke.return_value = (
+            "I can search debates and answer questions about the parliamentary record."
         )
-        assert "No supporting evidence" in result.answer
+
+        result = asyncio.get_event_loop().run_until_complete(
+            answerer.answer("Hello, what can you do?", chunks=[])
+        )
+
+        assert answerer._bedrock_client.invoke.call_count == 1
+        assert "search debates" in result.answer
         assert result.citations == []
         assert result.source_chunks == []
         assert result.latency_ms > 0
 
-    def test_chunks_below_threshold_returns_no_evidence(self) -> None:
-        """All chunks below threshold returns 'no supporting evidence'."""
+    def test_no_chunks_prompt_carries_no_source_chunks_marker(self) -> None:
+        """The zero-context prompt announces that no chunks are available."""
+        answerer = _make_answerer()
+        answerer._bedrock_client.invoke.return_value = "Nothing in the supplied record."
+
+        asyncio.get_event_loop().run_until_complete(
+            answerer.answer("What about the budget?", chunks=[])
+        )
+
+        user_content = answerer._bedrock_client.invoke.call_args[0][1]
+        assert "(NO SOURCE CHUNKS AVAILABLE FOR THIS QUESTION)" in user_content
+        assert "[Chunk ID:" not in user_content
+
+    def test_chunks_below_threshold_produce_no_citations(self) -> None:
+        """Sub-threshold chunks are not evidence: one call, no citations, no sources."""
         answerer = _make_answerer(relevance_threshold=0.5)
+        answerer._bedrock_client.invoke.return_value = (
+            "The record supplied contains no supporting evidence for this question."
+        )
         chunks = [
             _make_chunk(chunk_id=1, relevance_score=0.01),
             _make_chunk(chunk_id=2, relevance_score=0.1),
@@ -98,9 +120,42 @@ class TestRelevanceFiltering:
         result = asyncio.get_event_loop().run_until_complete(
             answerer.answer("What about the budget?", chunks=chunks)
         )
-        assert "No supporting evidence" in result.answer
+        assert answerer._bedrock_client.invoke.call_count == 1
+        assert "no supporting evidence" in result.answer
         assert result.citations == []
         assert result.source_chunks == []
+        assert result.related_records == []
+
+    def test_zero_context_path_strips_citation_markers(self) -> None:
+        """Markers emitted without evidence are stripped, not left dead (Req 8.2)."""
+        answerer = _make_answerer(relevance_threshold=0.5)
+        answerer._bedrock_client.invoke.return_value = (
+            "The Minister presented the review [42]. Spending rose [15][7]."
+        )
+        chunks = [_make_chunk(chunk_id=42, relevance_score=0.01)]
+
+        result = asyncio.get_event_loop().run_until_complete(
+            answerer.answer("What about the budget?", chunks=chunks)
+        )
+
+        assert "[42]" not in result.answer
+        assert "[15]" not in result.answer
+        assert result.answer == "The Minister presented the review. Spending rose."
+        assert result.citations == []
+
+    def test_zero_context_generation_failure_returns_failure_text(self) -> None:
+        """A raising stub on the zero-context path yields the failure text (Req 2.3)."""
+        answerer = _make_answerer()
+        answerer._bedrock_client.invoke.side_effect = RuntimeError("Bedrock unavailable")
+
+        result = asyncio.get_event_loop().run_until_complete(
+            answerer.answer("Hello there", chunks=[])
+        )
+
+        assert "Unable to generate an answer" in result.answer
+        assert result.citations == []
+        assert result.source_chunks == []
+        assert result.related_records == []
 
     def test_some_chunks_above_threshold_passes_only_relevant(self) -> None:
         """Only chunks above threshold are used as context."""
@@ -183,6 +238,14 @@ class TestPromptBuilding:
         )
 
         assert "What was the budget allocation?" in prompt
+
+    def test_prompt_ungrounded_replaces_chunk_list_with_marker(self) -> None:
+        """grounded=False emits the no-source-chunks marker in the context block."""
+        prompt = GroundedAnswerer._build_user_prompt("Hello?", [], grounded=False)
+
+        assert "## Source Chunks\n\n(NO SOURCE CHUNKS AVAILABLE FOR THIS QUESTION)" in prompt
+        assert "### [Chunk ID:" not in prompt
+        assert "Hello?" in prompt
 
     def test_prompt_includes_citation_instruction(self) -> None:
         """Prompt instructs the model to cite using [chunk_id] notation."""

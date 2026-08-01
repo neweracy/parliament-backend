@@ -44,6 +44,13 @@ _MAX_CONTEXT_CHUNKS = 10
 # Deterministic text returned when the Bedrock invocation raises
 _GENERATION_FAILURE_TEXT = "Unable to generate an answer at this time. Please try again later."
 
+# Placeholder emitted in the prompt's context block when no chunk is citable
+_NO_SOURCE_CHUNKS_TEXT = "(NO SOURCE CHUNKS AVAILABLE FOR THIS QUESTION)"
+
+# Citation markers, e.g. "[42]" — stripped from the answer on the zero-context
+# path, where nothing is citable and a marker could only be a dead reference
+_CITATION_MARKER_RE = re.compile(r"\[\d+\]")
+
 # System prompt instructing Claude to produce cited answers with recommendations
 _SYSTEM_PROMPT = """You are a parliamentary research assistant chatbot. Your task is to answer questions using ONLY the provided transcript chunks. Follow these rules strictly:
 
@@ -184,13 +191,16 @@ class GroundedAnswerer:
 
         Steps:
             1. Filter chunks by relevance threshold.
-            2. If no chunks meet threshold, return "no supporting evidence".
-            3. Build prompt with chunk context, conversation history, and citation instructions.
-            4. Call Claude via BedrockClient (in thread executor).
-            5. Parse citation markers [chunk_id] from response.
-            6. Validate each citation references an actual source chunk.
-            7. Parse recommendations from response.
-            8. Return AnswerResponse with answer, citations, chunks, recommendations, latency.
+            2. Build prompt with chunk context, conversation history, and citation
+               instructions. When no chunk met the threshold the context block
+               carries the no-source-chunks marker instead of a chunk list.
+            3. Call Claude via BedrockClient (in thread executor) — exactly one
+               invocation on every path, including the zero-context path.
+            4. Parse citation markers [chunk_id] from response.
+            5. Validate each citation references an actual source chunk, or, on
+               the zero-context path, strip stray markers and return no citations.
+            6. Parse recommendations from response.
+            7. Return AnswerResponse with answer, citations, chunks, recommendations, latency.
 
         Every return path goes through `_finalise`, which is the single place
         recommendations and related records are assembled, so no path can
@@ -228,36 +238,28 @@ class GroundedAnswerer:
             if c.relevance_score >= self._relevance_threshold
         ]
 
-        # Step 2: If no chunks meet threshold, return early
-        if not relevant_chunks:
+        # Limit to max context chunks (already sorted by relevance from retriever)
+        context_chunks = relevant_chunks[: self._max_context_chunks]
+        grounded = bool(context_chunks)
+
+        if not grounded:
+            # No evidence, but the branch is not terminal: a conversational
+            # message (greeting, capability question, clarification request) has
+            # nothing to retrieve, so it still needs the model to answer it
+            # (Requirements 8.1, 8.4). The prompt carries an explicit
+            # no-source-chunks marker in place of the chunk list.
             logger.info(
                 "rag.answering.no_relevant_chunks",
                 question_preview=question[:80],
                 threshold=self._relevance_threshold,
             )
-            return self._finalise(
-                answer="No supporting evidence found in the parliamentary record for this question.",
-                citations=[],
-                context_chunks=[],
-                parsed=[],
-                # Sub-threshold chunks are not evidence, but they carry real
-                # entity and speaker names, so they remain a legitimate hint
-                # source for suggestion text.
-                hint_chunks=chunks,
-                corpus_hints=corpus_hints,
-                history_questions=history_questions,
-                grounded=False,
-                start_time=start_time,
-            )
 
-        # Limit to max context chunks (already sorted by relevance from retriever)
-        context_chunks = relevant_chunks[: self._max_context_chunks]
-        grounded = bool(context_chunks)
+        # Step 2: Build prompt
+        user_content = self._build_user_prompt(
+            question, context_chunks, conversation_history, grounded=grounded
+        )
 
-        # Step 3: Build prompt
-        user_content = self._build_user_prompt(question, context_chunks, conversation_history)
-
-        # Step 4: Call Claude via Bedrock
+        # Step 3: Call Claude via Bedrock — one invocation on every path
         try:
             raw_answer = await self._invoke_claude(user_content)
         except Exception:
@@ -271,6 +273,9 @@ class GroundedAnswerer:
                 citations=[],
                 context_chunks=context_chunks,
                 parsed=[],
+                # Sub-threshold chunks are not evidence, but they carry real
+                # entity and speaker names, so they remain a legitimate hint
+                # source for suggestion text.
                 hint_chunks=context_chunks or chunks,
                 corpus_hints=corpus_hints,
                 history_questions=history_questions,
@@ -278,22 +283,29 @@ class GroundedAnswerer:
                 start_time=start_time,
             )
 
-        # Step 5: Parse citation markers from response
+        # Step 4: Parse citation markers from response
         # Split answer text from recommendations section
         answer_text, parsed = self._split_recommendations(raw_answer)
-        cited_chunk_ids = self._parse_citations(answer_text)
 
-        # Step 6: Validate citations against source chunks
-        chunk_map = {c.chunk_id: c for c in context_chunks}
-        citations = self._validate_citations(cited_chunk_ids, chunk_map)
+        # Step 5: Resolve citations
+        if grounded:
+            chunk_map = {c.chunk_id: c for c in context_chunks}
+            citations = self._validate_citations(self._parse_citations(answer_text), chunk_map)
+        else:
+            # Zero-context path: nothing is citable, so citations are empty by
+            # construction and any marker the model emitted anyway is stripped
+            # so an ignored instruction reads as prose (Requirement 8.2).
+            answer_text = self._strip_citation_markers(answer_text)
+            citations = []
 
-        # Step 7: Return structured response
+        # Step 6: Return structured response
         logger.info(
             "rag.answering.complete",
             question_preview=question[:80],
             answer_length=len(answer_text),
             citation_count=len(citations),
             parsed_recommendation_count=len(parsed),
+            grounded=grounded,
         )
 
         return self._finalise(
@@ -416,11 +428,25 @@ class GroundedAnswerer:
         question: str,
         chunks: list[RetrievedChunk],
         conversation_history: list[tuple[str, str]] | None = None,
+        *,
+        grounded: bool = True,
     ) -> str:
         """Build the user message with chunk context for Claude.
 
         Lists each chunk with its ID, speaker, timestamps, and text,
         includes conversation history if available, then poses the question.
+
+        Args:
+            question: The natural language question to answer.
+            chunks: Chunks to present as citable evidence. Empty when
+                `grounded` is false.
+            conversation_history: Optional (role, content) tuples for multi-turn
+                context.
+            grounded: Whether citable evidence is available. When false the
+                Source Chunks section carries the no-source-chunks marker in
+                place of a chunk list, which is the signal the system prompt
+                keys its no-evidence behaviour on. The conversation history and
+                question blocks are identical either way.
         """
         lines: list[str] = []
 
@@ -437,16 +463,20 @@ class GroundedAnswerer:
 
         lines.append("## Source Chunks\n")
 
-        for chunk in chunks:
-            speaker_label = chunk.speaker or "Unknown Speaker"
-            start_s = f"{chunk.start_s:.1f}s" if chunk.start_s is not None else "N/A"
-            end_s = f"{chunk.end_s:.1f}s" if chunk.end_s is not None else "N/A"
-
-            lines.append(f"### [Chunk ID: {chunk.chunk_id}]")
-            lines.append(f"- Speaker: {speaker_label}")
-            lines.append(f"- Timestamps: {start_s} – {end_s}")
-            lines.append(f"- Text: {chunk.text}")
+        if not grounded:
+            lines.append(_NO_SOURCE_CHUNKS_TEXT)
             lines.append("")
+        else:
+            for chunk in chunks:
+                speaker_label = chunk.speaker or "Unknown Speaker"
+                start_s = f"{chunk.start_s:.1f}s" if chunk.start_s is not None else "N/A"
+                end_s = f"{chunk.end_s:.1f}s" if chunk.end_s is not None else "N/A"
+
+                lines.append(f"### [Chunk ID: {chunk.chunk_id}]")
+                lines.append(f"- Speaker: {speaker_label}")
+                lines.append(f"- Timestamps: {start_s} – {end_s}")
+                lines.append(f"- Text: {chunk.text}")
+                lines.append("")
 
         lines.append("## Question\n")
         lines.append(question)
@@ -501,6 +531,20 @@ class GroundedAnswerer:
                 chunk_ids.append(chunk_id)
 
         return chunk_ids
+
+    @staticmethod
+    def _strip_citation_markers(answer_text: str) -> str:
+        """Remove every [digits] marker and tidy the whitespace it leaves behind.
+
+        Used on the zero-context path only, where no chunk is citable, so a
+        marker can only be a dead reference. Removing it leaves clean prose
+        rather than a broken link (Requirement 8.2).
+        """
+        stripped = _CITATION_MARKER_RE.sub("", answer_text)
+        # A marker sitting before punctuation or between words leaves a gap
+        stripped = re.sub(r"[ \t]+([.,;:!?])", r"\1", stripped)
+        stripped = re.sub(r"[ \t]{2,}", " ", stripped)
+        return stripped.strip()
 
     @staticmethod
     def _validate_citations(
