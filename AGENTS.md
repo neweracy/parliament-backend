@@ -8,20 +8,21 @@ Express 5 API gateway for the Ghana Parliament Hansard system. Handles JWT authe
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Runtime | Node.js >= 24 |
-| Framework | Express 5 |
-| Language | JavaScript (CommonJS) |
-| Auth | JSON Web Tokens (jsonwebtoken) |
-| Database | PostgreSQL via `pg` pool |
-| File Upload | Multer |
-| ASR | Deepgram SDK, Khaya AI HTTP |
-| LLM | AWS Bedrock SDK (for JS pipeline mode) |
-| Testing | Node.js test runner + fast-check |
-| Linting | ESLint 9 (flat config) |
-| Package Manager | pnpm 10 |
-| Dev Server | nodemon |
+| Layer | Technology | Version |
+|-------|-----------|---------|
+| Runtime | Node.js | >= 24.0.0 |
+| Framework | Express | 5.x |
+| Language | JavaScript (CommonJS) | ES2024 |
+| Auth | JSON Web Tokens (jsonwebtoken) | 9.x |
+| Database | PostgreSQL via `pg` pool | 8.x |
+| File Upload | Multer | 2.x |
+| ASR | Deepgram SDK, Khaya AI HTTP | 4.x |
+| LLM | AWS Bedrock SDK (for JS pipeline mode) | 3.x |
+| Audio | ffmpeg-static (audio format conversion) | 5.x |
+| Testing | Node.js test runner + fast-check + supertest | — |
+| Linting | ESLint 9 (flat config) | 9.x |
+| Package Manager | pnpm | >= 10.0.0 |
+| Dev Server | nodemon | 3.x |
 
 ## Project Structure
 
@@ -51,8 +52,9 @@ transcript-end/
 │   └── khaya.js                 # Khaya AI HTTP adapter
 ├── services/
 │   └── postprocess/             # Python FastAPI service (see its own AGENTS.md)
+├── frontend/                    # Embedded frontend (see frontend/AGENTS.md)
 ├── test/
-│   ├── routes/                  # Integration tests
+│   ├── routes/                  # Integration tests (supertest)
 │   └── properties/              # Property-based tests (fast-check)
 ├── docs/                        # Architecture docs, research notes
 ├── deploy/
@@ -62,27 +64,43 @@ transcript-end/
 ├── uploads/                     # Local audio storage (gitignored)
 ├── Makefile                     # Automation commands
 ├── sample.env                   # Environment variable template
-└── package.json
+├── eslint.config.js             # ESLint flat config
+└── package.json                 # Dependencies and scripts
 ```
 
 ## Commands
 
 ```bash
+# Package management
 pnpm install                # Install dependencies
-pnpm run start-backend      # Start with nodemon (auto-reload)
+
+# Development
+pnpm run start-backend      # Start with nodemon (auto-reload, port 8081)
 pnpm run start              # Start without auto-reload
-pnpm test                   # ESLint + node --test
+
+# Testing & Linting
+pnpm test                   # ESLint + node --test (all tests)
 pnpm run lint               # ESLint only
 
-# Via Makefile (preferred)
-make init                   # Submodules + install
-make start-backend          # Port 8081
-make start-postprocess      # Port 8082
+# Individual test suites
+node --test test/routes/*.test.js           # Integration tests only
+node --test test/properties/*.property.test.js  # Property tests only
+
+# Via Makefile
+make init                   # Submodules + install all deps
+make start-backend          # Backend on port 8081
+make start-frontend         # Frontend on port 8080
+make start-postprocess      # Python service on port 8082
 make postprocess-setup      # DB + migrate + seed (one-time)
-make test-unit              # Backend tests
+make test-unit              # Backend unit tests
 make test-python            # Python service tests
+make test-contracts         # Contract conformance (app must be running)
+make lint                   # ESLint
+make bench                  # Benchmark harness
 make datasets-generate      # Regenerate dataset exports
 make datasets-validate      # Validate dataset integrity
+make clean                  # Remove node_modules and build artifacts
+make status                 # Git + submodule status
 ```
 
 ## Architecture Patterns
@@ -113,6 +131,7 @@ The factory receives:
 - All other `/api/*` routes pass through `requireSession` middleware
 - Token in `Authorization: Bearer <token>` header
 - Token expires in 1 hour
+- `SESSION_SECRET` env var (auto-generated if absent in dev)
 
 ### Postprocessing Modes
 
@@ -122,77 +141,210 @@ Controlled by `POSTPROCESS_MODE` env var:
 |------|----------|
 | `js` | In-process correction (location, year, Bedrock LLM) |
 | `python` | Proxy to Python service at `POSTPROCESS_URL` |
-| `off` | Return raw transcript |
+| `off` | Return raw transcript without corrections |
 
 ### RAG Proxy Pattern
 
 Routes like `search.js` and `ask.js` proxy requests to the Python service:
-1. Validate input
-2. Map camelCase → snake_case
+1. Validate input parameters
+2. Map camelCase → snake_case for Python
 3. Forward to `POSTPROCESS_URL/rag/*` with `POSTPROCESS_TOKEN` Bearer header
 4. Map snake_case → camelCase in response
-5. Handle timeouts (30s) and connection errors
+5. Handle timeouts (30s) and connection errors gracefully
 
 ### Database Access
 
 - Pool module: `lib/db.js` (exports `query(text, params)`)
 - Connection via `DATABASE_URL` env var
+- **Parameterized queries only** — use `$1, $2` placeholders, never string interpolation
 - Used directly in route handlers for Hansard CRUD (sittings, records, transcripts)
 - Python service has its own pool for RAG/correction tables
 
+### Error Response Envelope
+
+All errors follow a consistent shape:
+
+```json
+{
+  "error": {
+    "type": "validation_error",
+    "code": "INVALID_SITTING_ID",
+    "message": "Sitting ID must be a positive integer"
+  }
+}
+```
+
 ## Testing
 
-### Node.js Tests
+### Running Tests
 
 ```bash
-pnpm test                        # ESLint + all tests
+pnpm test                        # Full suite (lint + tests)
 node --test test/routes/*.test.js  # Integration tests only
 node --test test/properties/*.property.test.js  # Property tests only
 ```
 
+### Test Conventions
+
 - **Integration tests**: `test/routes/*.test.js` — test route handlers with supertest
 - **Property tests**: `test/properties/*.property.test.js` — fast-check generators for invariants
 - **Naming**: `*.test.js` for integration, `*.property.test.js` for properties
+- **No real services in tests**: mock Deepgram, Khaya, and Bedrock calls
+- **No real database in unit tests**: mock `db.query` responses
 
-### Python Tests
+### Writing New Tests
 
-```bash
-cd services/postprocess
-.venv/Scripts/python.exe -m pytest -v
-```
-
-See `services/postprocess/AGENTS.md` for details.
+For a new route `routes/myroute.js`:
+1. Create `test/routes/myroute.test.js` with supertest
+2. Create `test/properties/myroute.property.test.js` for invariants (if applicable)
+3. Test happy path, validation errors, auth failures, and edge cases
 
 ## Environment Variables
 
 Key variables (see `sample.env` for full list):
 
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `DEEPGRAM_API_KEY` | Yes | Deepgram ASR API key |
-| `POSTPROCESS_MODE` | No | `js`/`python`/`off` (default: `js`) |
-| `POSTPROCESS_URL` | No | Python service URL (default: `http://localhost:8082`) |
-| `POSTPROCESS_TOKEN` | No | Shared auth token for Python service |
-| `DATABASE_URL` | No | PostgreSQL connection (for Hansard CRUD) |
-| `PORT` | No | Server port (default: `8081`) |
-| `SESSION_SECRET` | No | JWT signing key (auto-generated if absent) |
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `DEEPGRAM_API_KEY` | Yes | — | Deepgram ASR API key |
+| `POSTPROCESS_MODE` | No | `js` | `js`/`python`/`off` |
+| `POSTPROCESS_URL` | No | `http://localhost:8082` | Python service URL |
+| `POSTPROCESS_TOKEN` | No | — | Shared auth token for Python service |
+| `DATABASE_URL` | No | — | PostgreSQL connection (for Hansard CRUD) |
+| `PORT` | No | `8081` | Server port |
+| `SESSION_SECRET` | No | auto-generated | JWT signing key |
+| `KHAYA_API_KEY` | No | — | Khaya AI API key (Ghanaian languages) |
 
 ## Security
 
-- Never hardcode AWS credentials in docker-compose or config files
-- `uploads/` is gitignored — never commit audio files
-- MIME type validation on uploads: `audio/mpeg`, `audio/wav`, `audio/ogg`, `audio/webm`, `audio/mp4`
-- 500MB max file size for audio uploads
-- 30s timeout on RAG proxy calls
+### Secrets Management
 
-## Agent Instructions
+- Never hardcode AWS credentials in docker-compose or config files
+- Never commit `.env` files — only `sample.env` (with placeholder values)
+- `DEEPGRAM_API_KEY` and `POSTPROCESS_TOKEN` are the most sensitive values
+- `SESSION_SECRET` should be a strong random string in production
+
+### File Upload Security
+
+- `uploads/` is gitignored — never commit audio files
+- MIME type validation: `audio/mpeg`, `audio/wav`, `audio/ogg`, `audio/webm`, `audio/mp4`
+- 500MB max file size for audio uploads
+- Files stored locally in dev, cloud storage in production
+
+### API Security
+
+- 30s timeout on RAG proxy calls (prevents resource exhaustion)
+- Rate limiting handled by Caddy in production
+- CORS configured for frontend origin only
+- SQL injection prevention: parameterized queries only (`$1`, `$2`)
+
+## Deployment
+
+### Docker Build
+
+```bash
+# Build from transcript-end/deploy/Dockerfile
+docker build -f deploy/Dockerfile -t transcript-end .
+```
+
+The Dockerfile is a multi-stage build:
+1. Install Node.js dependencies
+2. Copy application code
+3. Caddy reverse proxy as entrypoint
+
+### Production Configuration
+
+- **Caddy** handles TLS termination, rate limiting, and static asset serving
+- **start.sh** is the container entrypoint (starts Caddy + Node.js)
+- Environment variables injected at runtime (never baked into image)
+- Health check: `GET /api/health` (no auth required)
+
+### Files in deploy/
+
+| File | Purpose | Modify with caution |
+|------|---------|-------------------|
+| `Dockerfile` | Multi-stage production build | Yes — affects prod |
+| `Caddyfile` | Reverse proxy, TLS, rate limits | Yes — affects prod traffic |
+| `start.sh` | Container entrypoint script | Yes — affects startup |
+
+## Agent Workflow Instructions
+
+### Before Making Changes
+
+1. Read `server.js` to understand route mounting and middleware order
+2. Check `lib/` for existing utilities before creating new ones
+3. Identify if the change touches the Python service boundary (case mapping)
+4. Review `sample.env` if adding new configuration
+
+### Creating a New Route
+
+1. Create `routes/<name>.js` exporting `function(requireSession, db)`
+2. Import and mount in `server.js`: `app.use(routeFactory(requireSession, db))`
+3. Add integration test: `test/routes/<name>.test.js`
+4. Add property test if the route has complex invariants
+5. Update `sample.env` if new env vars are needed
+6. Update the Makefile if new automation targets are needed
+
+### Safe Refactoring
+
+- Changes to `lib/db.js` affect every route — test thoroughly
+- Changes to `server.js` affect middleware ordering — verify auth still works
+- When modifying the postprocess proxy, verify both camelCase→snake_case and back
+- When updating Multer config, verify upload size limits and MIME types still enforced
+
+### Areas Requiring Extra Caution
+
+| Area | Risk | Mitigation |
+|------|------|-----------|
+| `lib/db.js` | Shared pool, all routes depend on it | Test connection handling, error recovery |
+| `server.js` | Route ordering, middleware chain | Verify auth middleware applied correctly |
+| `routes/audio.js` | File uploads, memory, disk usage | Check MIME validation, size limits |
+| `lib/transcription-pipeline.js` | Core business logic, ASR orchestration | Test with mock providers |
+| `lib/postprocess-client.js` | Python service boundary | Verify timeout, error handling |
+| `deploy/*` | Production infrastructure | Never modify without deployment plan |
+
+### Files That Should Not Be Modified Without Good Reason
+
+- `deploy/Caddyfile` — production reverse proxy (affects live traffic)
+- `deploy/Dockerfile` — production build (test locally first)
+- `pnpm-lock.yaml` — only via `pnpm install` or `pnpm add`
+- `eslint.config.js` — team-shared lint rules
+- Dataset files in `services/postprocess/datasets/` — generated, not hand-edited
+
+## Git & Commit Guidelines
+
+### Commit Format
+
+```
+<type>(<scope>): <short description>
+```
+
+Scopes for this submodule: `routes`, `lib`, `auth`, `upload`, `rag`, `khaya`, `config`, `test`, `deploy`, `deps`
+
+Examples:
+- `feat(routes): add PATCH /api/sittings/:id endpoint`
+- `fix(rag): handle timeout on Python service unavailable`
+- `test(properties): add fast-check generators for search params`
+- `chore(deps): update @deepgram/sdk to 4.11.3`
+
+### What Not to Commit
+
+- `.env` files (only `sample.env`)
+- `uploads/` directory
+- `node_modules/`
+- `*.log` files
+- Temporary test audio files
+
+## Agent Instructions (Quick Reference)
 
 1. **Route factories**: always export `function(requireSession, db)` returning `express.Router()`
 2. **Register routes in server.js**: import and mount with `app.use(routeFactory(requireSession, db))`
 3. **camelCase in JS, snake_case to Python**: always map when proxying to/from postprocess service
 4. **Validate input early**: return 400 with `{ error: { type, code, message } }` envelope
-5. **Error envelope**: all errors use `{ error: { type: string, code: string, message: string } }`
-6. **CommonJS**: this is not an ES module — use `require()` and `module.exports`
-7. **No TypeScript**: this codebase is plain JavaScript
-8. **Test new routes**: add both `test/routes/*.test.js` and `test/properties/*.property.test.js`
-9. **Makefile**: update `transcript-end/Makefile` if adding new automation targets
+5. **CommonJS**: this is not an ES module — use `require()` and `module.exports`
+6. **No TypeScript**: this codebase is plain JavaScript
+7. **Parameterized queries**: always use `$1, $2` — never interpolate SQL
+8. **Test new routes**: add both integration (`test/routes/`) and property tests (`test/properties/`)
+9. **Makefile**: update `Makefile` if adding new automation targets
+10. **Pin versions**: use exact versions in package.json (no `^`/`~` for primary deps)
+11. **Error handling**: wrap async route handlers, catch and return proper error envelope
+12. **No global state**: route modules receive deps via factory args, not globals
