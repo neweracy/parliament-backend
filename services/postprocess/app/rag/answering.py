@@ -22,6 +22,7 @@ import structlog
 
 from app.config import Settings
 from app.llm.bedrock import BedrockClient
+from app.rag.recommendations import CorpusHints, RecommendationBuilder
 from app.rag.retrieval import RetrievedChunk
 
 logger = structlog.get_logger("rag.answering")
@@ -86,6 +87,34 @@ class RecommendationItem:
 
 
 @dataclass
+class RelatedRecordItem:
+    """A sitting, record, or speaker behind the answer, linked to its transcript.
+
+    Derived deterministically from the retrieved chunks by the
+    RecommendationBuilder — no language model involved.
+
+    Attributes:
+        transcript_id: The transcript the record belongs to.
+        label: Display label drawn from the source chunk metadata.
+        chunk_id: The chunk the record was derived from.
+        speaker: Speaker attributed to the source chunk (if available).
+        sitting_title: Sitting title of the source chunk (if available).
+        record_title: Record title of the source chunk (if available).
+        date: Date of the source chunk (if available).
+        start_s: Start timestamp of the source chunk in seconds (if available).
+    """
+
+    transcript_id: int
+    label: str
+    chunk_id: int
+    speaker: str | None = None
+    sitting_title: str | None = None
+    record_title: str | None = None
+    date: str | None = None
+    start_s: float | None = None
+
+
+@dataclass
 class AnswerResponse:
     """Structured response from the grounded answering engine.
 
@@ -94,6 +123,7 @@ class AnswerResponse:
         citations: List of validated Citation objects referenced in the answer.
         source_chunks: The retrieved chunks used as context for generation.
         recommendations: Suggested follow-up questions based on the context.
+        related_records: Sittings, records, or speakers behind the answer.
         latency_ms: Total time from request to response in milliseconds.
     """
 
@@ -101,6 +131,7 @@ class AnswerResponse:
     citations: list[Citation] = field(default_factory=list)
     source_chunks: list[RetrievedChunk] = field(default_factory=list)
     recommendations: list[RecommendationItem] = field(default_factory=list)
+    related_records: list[RelatedRecordItem] = field(default_factory=list)
     latency_ms: float = 0.0
 
 
@@ -131,12 +162,15 @@ class GroundedAnswerer:
         self._settings = settings
         self._relevance_threshold = relevance_threshold
         self._max_context_chunks = max_context_chunks
+        # Deterministic recommendation derivation — no I/O, no model call
+        self._builder = RecommendationBuilder()
 
     async def answer(
         self,
         question: str,
         chunks: list[RetrievedChunk],
         conversation_history: list[tuple[str, str]] | None = None,
+        corpus_hints: CorpusHints | None = None,
     ) -> AnswerResponse:
         """Generate a grounded answer with citations from retrieved chunks.
 
@@ -154,6 +188,9 @@ class GroundedAnswerer:
             question: The natural language question to answer.
             chunks: Retrieved chunks from the HybridRetriever.
             conversation_history: Optional list of (role, content) tuples for multi-turn context.
+            corpus_hints: Optional corpus-wide entity and speaker names, supplied by
+                RAG_Router when retrieval came back empty, used as a recommendation
+                source of last resort before the static set.
 
         Returns:
             An AnswerResponse containing the answer, citations, source
