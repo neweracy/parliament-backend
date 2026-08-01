@@ -1,14 +1,15 @@
 """Deterministic recommendation derivation — no language model involved.
 
-Derives Suggested_Question items from data the retriever already returned, so a
-recommendation set costs nothing extra and stays grounded in the corpus.
+Derives Suggested_Question and Related_Record items from data the retriever
+already returned, so a recommendation set costs nothing extra and stays
+grounded in the corpus.
 
 `RecommendationBuilder` is pure: no I/O, no model call, deterministic for a
 given input. The one piece of data it needs that is not already in hand —
 corpus-wide entity and speaker names for the no-chunk case — is supplied by the
 caller as a `CorpusHints` value.
 
-Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6
+Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 4.1, 4.2, 4.3, 4.4
 """
 
 from __future__ import annotations
@@ -19,13 +20,24 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import structlog
+from sqlalchemy import text
+
 from app.rag.retrieval import RetrievedChunk
 
 if TYPE_CHECKING:
-    from app.rag.answering import RecommendationItem
+    from app.rag.answering import RecommendationItem, RelatedRecordItem
+
+logger = structlog.get_logger("rag.recommendations")
 
 TARGET_SUGGESTION_COUNT = 3
 MAX_RELATED_RECORDS = 3
+
+# Hint lookup bounds. Only a handful of candidates are ever consumed — the
+# builder stops as soon as it has `count` distinct suggestions — so these are
+# kept far below the typeahead limits the suggestions endpoint uses.
+_HINT_ENTITY_LIMIT = 25
+_HINT_SPEAKER_LIMIT = 25
 
 
 @dataclass(frozen=True)
@@ -84,6 +96,41 @@ def _make_item(text: str, reason: str) -> RecommendationItem:
     from app.rag.answering import RecommendationItem
 
     return RecommendationItem(text=text, reason=reason)
+
+
+def _make_related_record(chunk: RetrievedChunk, label: str) -> RelatedRecordItem:
+    """Build a `RelatedRecordItem` from a chunk and its resolved label.
+
+    The import is deferred to call time for the same reason as `_make_item`:
+    `app.rag.answering` imports this module, so a module-level import here
+    would create a circular import at startup.
+    """
+    from app.rag.answering import RelatedRecordItem
+
+    return RelatedRecordItem(
+        transcript_id=chunk.transcript_id,
+        label=label,
+        chunk_id=chunk.chunk_id,
+        speaker=_clean(chunk.speaker),
+        sitting_title=_clean(chunk.sitting_title),
+        record_title=_clean(chunk.record_title),
+        date=_clean(chunk.date),
+        start_s=chunk.start_s,
+    )
+
+
+def _record_label(chunk: RetrievedChunk) -> str:
+    """Resolve the display label for a chunk, first non-empty value winning.
+
+    Precedence: `sitting_title` → `record_title` → `speaker` → `date`. The
+    `Transcript {transcript_id}` fallback guarantees a non-empty label even for
+    a chunk carrying no metadata at all.
+    """
+    for value in (chunk.sitting_title, chunk.record_title, chunk.speaker, chunk.date):
+        cleaned = _clean(value)
+        if cleaned:
+            return cleaned
+    return f"Transcript {chunk.transcript_id}"
 
 
 def _chunk_candidates(chunks: Iterable[RetrievedChunk]) -> Iterator[tuple[str, str]]:
@@ -179,7 +226,7 @@ def _filler_candidates() -> Iterator[tuple[str, str]]:
 
 
 class RecommendationBuilder:
-    """Derives Suggested_Question items from retrieval data.
+    """Derives Suggested_Question and Related_Record items from retrieval data.
 
     Pure: no I/O, no model call, deterministic for a given input. All ranking
     inputs (entities, speakers, dates, titles) are already present on the
@@ -219,7 +266,7 @@ class RecommendationBuilder:
         if count <= 0:
             return []
 
-        seen: set[str] = {normalise_question(text) for text in (exclude or [])}
+        seen: set[str] = {normalise_question(value) for value in (exclude or [])}
 
         candidates = itertools.chain(
             _chunk_candidates(chunks or []),
@@ -229,13 +276,113 @@ class RecommendationBuilder:
         )
 
         picked: list[RecommendationItem] = []
-        for text, reason in candidates:
-            key = normalise_question(text)
+        for candidate_text, reason in candidates:
+            key = normalise_question(candidate_text)
             if not key or key in seen:
                 continue
             seen.add(key)
-            picked.append(_make_item(text, reason))
+            picked.append(_make_item(candidate_text, reason))
             if len(picked) == count:
                 break
 
         return picked
+
+    def related_records(
+        self,
+        *,
+        chunks: list[RetrievedChunk],
+        limit: int = MAX_RELATED_RECORDS,
+    ) -> list[RelatedRecordItem]:
+        """Return at most `limit` records, at most one per transcript_id.
+
+        Chunks are consumed in the order given (relevance order from the
+        retriever), so the highest-scoring chunk wins its transcript_id.
+
+        The label of each record is the first non-empty value among the source
+        chunk's `sitting_title`, `record_title`, `speaker`, and `date`, falling
+        back to `Transcript {transcript_id}` so the label is never empty.
+        `start_s` is carried through whenever the source chunk has one.
+
+        Args:
+            chunks: Retrieved chunks in relevance order. May be empty.
+            limit: Maximum number of records to return. Zero or negative yields
+                an empty list.
+
+        Returns:
+            At most `limit` RelatedRecordItem objects, one per distinct
+            transcript_id, in the order their source chunks were given.
+        """
+        if limit <= 0:
+            return []
+
+        seen: set[int] = set()
+        records: list[RelatedRecordItem] = []
+
+        for chunk in chunks or []:
+            if chunk.transcript_id in seen:
+                continue
+            seen.add(chunk.transcript_id)
+            records.append(_make_related_record(chunk, _record_label(chunk)))
+            if len(records) == limit:
+                break
+
+        return records
+
+
+async def fetch_corpus_hints(session_factory) -> CorpusHints:
+    """Read distinct entity names and speaker labels from `transcript_chunk`.
+
+    Reads the same two columns that back `GET /api/search/suggestions`, so the
+    hints name values the user could also have reached through the filter
+    dropdowns.
+
+    This is the only I/O in the module and it is deliberately kept outside
+    `RecommendationBuilder`, which stays pure and directly reachable by
+    property tests.
+
+    Args:
+        session_factory: Async SQLAlchemy session factory.
+
+    Returns:
+        Populated `CorpusHints`, or empty hints when the corpus is empty or the
+        lookup fails. A failed hint lookup must never fail the answer, so every
+        error is logged and swallowed.
+    """
+    entity_sql = """
+        SELECT DISTINCT unnest(entity_names) AS name
+        FROM transcript_chunk
+        WHERE entity_names IS NOT NULL AND entity_names != '{}'
+        ORDER BY name
+        LIMIT :limit
+    """
+
+    speaker_sql = """
+        SELECT DISTINCT speaker
+        FROM transcript_chunk
+        WHERE speaker IS NOT NULL
+        ORDER BY speaker
+        LIMIT :limit
+    """
+
+    try:
+        async with session_factory() as session:
+            entity_rows = (
+                await session.execute(text(entity_sql), {"limit": _HINT_ENTITY_LIMIT})
+            ).fetchall()
+            speaker_rows = (
+                await session.execute(text(speaker_sql), {"limit": _HINT_SPEAKER_LIMIT})
+            ).fetchall()
+    except Exception:
+        logger.warning("rag.recommendations.hint_lookup_failed", exc_info=True)
+        return CorpusHints()
+
+    entities = [value for value in (_clean(row[0]) for row in entity_rows) if value]
+    speakers = [value for value in (_clean(row[0]) for row in speaker_rows) if value]
+
+    logger.debug(
+        "rag.recommendations.hints_loaded",
+        entity_count=len(entities),
+        speaker_count=len(speakers),
+    )
+
+    return CorpusHints(entities=entities, speakers=speakers)
