@@ -9,6 +9,7 @@ Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 2.1, 2.4
 from __future__ import annotations
 
 import botocore.session
+from botocore.config import Config as BotoConfig
 from langchain_aws import BedrockEmbeddings, ChatBedrock
 
 from app.config import Settings
@@ -26,11 +27,15 @@ def create_chat_model(settings: Settings) -> ChatBedrock:
     Returns:
         A ChatBedrock instance configured with retries and timeout.
     """
+    timeout_s = int(settings.llm_chunk_timeout_ms / 1000)
     return ChatBedrock(
         model_id=settings.bedrock_model_id,
         region_name=settings.aws_region,
-        max_retries=2,
-        timeout=settings.llm_chunk_timeout_ms / 1000,
+        config=BotoConfig(
+            retries={"max_attempts": 2, "mode": "standard"},
+            read_timeout=timeout_s,
+            connect_timeout=timeout_s,
+        ),
     )
 
 
