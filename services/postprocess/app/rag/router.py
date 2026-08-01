@@ -22,10 +22,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.deps import verify_service_token
-from app.rag.answering import GroundedAnswerer
+from app.rag.answerer import GroundedAnsweringChain
 from app.rag.ingestion import TranscriptIngestionWorker
 from app.rag.recommendations import fetch_corpus_hints
-from app.rag.retrieval import HybridRetriever, RetrievalFilters
+from app.rag.retriever import HybridRetriever, RetrievalFilters
 
 logger = structlog.get_logger("rag.router")
 
@@ -202,7 +202,8 @@ async def rag_search(body: SearchRequest, request: Request) -> SearchResponse:
     session_factory = request.app.state.session_factory
     settings = request.app.state.settings
 
-    retriever = HybridRetriever(session_factory, settings)
+    embeddings = request.app.state.embeddings
+    retriever = HybridRetriever(session_factory, embeddings, settings)
 
     # Build filters
     filters: RetrievalFilters | None = None
@@ -253,22 +254,23 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
     """
     session_factory = request.app.state.session_factory
     settings = request.app.state.settings
-    bedrock_client = request.app.state.bedrock_client
+    chat_model = request.app.state.chat_model
 
-    if bedrock_client is None:
+    if chat_model is None:
         return JSONResponse(  # type: ignore[return-value]
             status_code=503,
             content={
                 "error": {
                     "type": "ServiceUnavailable",
                     "code": "LLM_NOT_CONFIGURED",
-                    "message": "Bedrock client is not available for answering",
+                    "message": "Chat model is not available for answering",
                 }
             },
         )
 
     # Retrieve relevant chunks
-    retriever = HybridRetriever(session_factory, settings)
+    embeddings = request.app.state.embeddings
+    retriever = HybridRetriever(session_factory, embeddings, settings)
 
     filters: RetrievalFilters | None = None
     if any([body.entity_filter, body.date_from, body.date_to, body.speaker]):
@@ -295,8 +297,8 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
         conversation_history = [(m.role, m.content) for m in recent]
 
     # Generate grounded answer with conversation context
-    answerer = GroundedAnswerer(bedrock_client, settings)
-    answer_response = await answerer.answer(
+    chain = GroundedAnsweringChain(chat_model, settings)
+    answer_response = await chain.answer(
         question=body.question,
         chunks=chunks,
         conversation_history=conversation_history,
@@ -374,7 +376,10 @@ async def rag_ingest(body: IngestRequest, request: Request) -> IngestResponse:
 
     if ingestion_worker is None:
         # Lazily initialize and start the worker on first use
-        ingestion_worker = TranscriptIngestionWorker(session_factory, settings)
+        embeddings = request.app.state.embeddings
+        ingestion_worker = TranscriptIngestionWorker(
+            session_factory, settings, embeddings=embeddings
+        )
         ingestion_worker.start()
         request.app.state.ingestion_worker = ingestion_worker
 
