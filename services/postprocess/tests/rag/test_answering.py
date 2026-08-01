@@ -3,21 +3,29 @@
 Tests core logic: relevance filtering, prompt building, citation parsing,
 and citation validation — all without mocking external services for the
 pure functions, and with minimal mocking for the async answer() flow.
+
+Also holds the property tests for the recommendation invariant that must hold
+on every answer path (Properties 1 and 2 of the design). The Bedrock client is
+always a stub: a MagicMock whose `invoke(system, user)` records its call count
+and either returns a generated body or raises. No test reaches AWS.
 """
 
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
+from hypothesis import given, settings, HealthCheck
+from hypothesis import strategies as st
 
 from app.rag.answering import (
+    _DEFAULT_RELEVANCE_THRESHOLD,
     AnswerResponse,
     Citation,
     GroundedAnswerer,
-    _DEFAULT_RELEVANCE_THRESHOLD,
+    RecommendationItem,
 )
+from app.rag.recommendations import TARGET_SUGGESTION_COUNT, normalise_question
 from app.rag.retrieval import RetrievedChunk
 
 
@@ -458,3 +466,245 @@ class TestAnswerFlow:
         assert resp.citations[0].chunk_id == 42
         assert len(resp.source_chunks) == 1
         assert resp.latency_ms == 123.4
+
+
+# ---------------------------------------------------------------------------
+# Property tests: Recommendation invariant across all answer paths
+# ---------------------------------------------------------------------------
+
+# Strategies
+
+
+@st.composite
+def recommendation_body(draw: st.DrawFn) -> str:
+    """Generate a Claude-like response body with varying recommendation formats.
+
+    Produces bodies that cover:
+    - Valid RECOMMENDATIONS: blocks with 0-5 lines like "- What about X? | reason"
+    - Missing RECOMMENDATIONS section entirely
+    - Malformed sections (e.g., RECOMMENDATIONS without colon, wrong formatting)
+    """
+    answer_part = draw(
+        st.sampled_from([
+            "The budget was discussed.",
+            "Hello, I can help with parliamentary research.",
+            "The Minister presented the fiscal review.",
+            "Several members contributed to the debate on education.",
+            "No relevant information was found in the record.",
+        ])
+    )
+
+    rec_style = draw(st.sampled_from(["valid", "missing", "malformed_no_colon", "malformed_lines"]))
+
+    if rec_style == "missing":
+        return answer_part
+
+    if rec_style == "malformed_no_colon":
+        # RECOMMENDATIONS without the colon — parser should not match
+        return f"{answer_part}\n\nRECOMMENDATIONS\n- Something here | a reason"
+
+    if rec_style == "malformed_lines":
+        # Has the header but lines don't follow "- text | reason" format
+        malformed = draw(
+            st.sampled_from([
+                f"{answer_part}\n\nRECOMMENDATIONS:\n",
+                f"{answer_part}\n\nRECOMMENDATIONS:\nno dash here\nalso no dash",
+                f"{answer_part}\n\nRECOMMENDATIONS:\n1. numbered not dashed | reason",
+            ])
+        )
+        return malformed
+
+    # valid: 0 to 5 properly formatted recommendation lines
+    num_recs = draw(st.integers(min_value=0, max_value=5))
+    topics = draw(
+        st.lists(
+            st.sampled_from([
+                "What about the education budget?",
+                "Who spoke on healthcare?",
+                "When was the motion tabled?",
+                "What did the Minister say about taxes?",
+                "How many members voted?",
+                "What was the final resolution on housing?",
+                "Which committee reviewed the bill?",
+            ]),
+            min_size=num_recs,
+            max_size=num_recs,
+        )
+    )
+    reasons = draw(
+        st.lists(
+            st.sampled_from([
+                "Related to the fiscal debate",
+                "Speaker contributed to this topic",
+                "Recent sitting covered this",
+                "Connected to the current question",
+                "Builds on the discussion above",
+            ]),
+            min_size=num_recs,
+            max_size=num_recs,
+        )
+    )
+
+    if num_recs == 0:
+        return f"{answer_part}\n\nRECOMMENDATIONS:\n"
+
+    lines = [f"- {topic} | {reason}" for topic, reason in zip(topics, reasons)]
+    return f"{answer_part}\n\nRECOMMENDATIONS:\n" + "\n".join(lines)
+
+
+@st.composite
+def chunk_scenario(draw: st.DrawFn) -> list[RetrievedChunk]:
+    """Generate chunk lists: empty, all sub-threshold, or relevant.
+
+    Three cases:
+    - Empty list []
+    - All sub-threshold: all chunks have relevance_score < 0.01
+    - Relevant: at least one chunk with relevance_score >= 0.01, distinct transcript_ids
+    """
+    case = draw(st.sampled_from(["empty", "sub_threshold", "relevant"]))
+
+    if case == "empty":
+        return []
+
+    if case == "sub_threshold":
+        size = draw(st.integers(min_value=1, max_value=4))
+        return [
+            _make_chunk(
+                chunk_id=i + 1,
+                relevance_score=draw(
+                    st.floats(min_value=0.0001, max_value=0.009, allow_nan=False)
+                ),
+                transcript_id=100 + i,
+                speaker=draw(st.sampled_from(["Hon. Smith", "Mr Speaker", None])),
+            )
+            for i in range(size)
+        ]
+
+    # relevant: at least one chunk with score >= 0.01
+    size = draw(st.integers(min_value=1, max_value=5))
+    chunks = []
+    for i in range(size):
+        score = draw(
+            st.floats(min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False)
+        )
+        chunks.append(
+            _make_chunk(
+                chunk_id=i + 1,
+                relevance_score=score,
+                transcript_id=200 + i,  # distinct transcript_ids
+                speaker=draw(st.sampled_from(["Hon. Mensah", "Minister for Finance", None])),
+            )
+        )
+    return chunks
+
+
+# Property 1
+
+
+@given(body=recommendation_body(), chunks=chunk_scenario(), raises=st.booleans())
+@settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+def test_property1_every_answer_carries_exactly_three_suggestions(
+    body: str,
+    chunks: list[RetrievedChunk],
+    raises: bool,
+) -> None:
+    """Every answer carries exactly TARGET_SUGGESTION_COUNT well-formed suggestions.
+
+    Validates: Requirements 2.1, 2.2, 2.3, 2.4, 2.5, 3.2, 3.5, 4.9
+
+    For ANY stub response body (0-5 recommendation lines, missing/malformed
+    RECOMMENDATIONS: blocks) and ANY chunk list (empty, sub-threshold, relevant),
+    the AnswerResponse carries exactly TARGET_SUGGESTION_COUNT (3) well-formed
+    suggestions. Each suggestion has non-empty .text and .reason. Suggestions are
+    distinct under normalise_question. When grounded: related_records is non-empty.
+    When not grounded: related_records is empty.
+    """
+    answerer = _make_answerer()
+
+    if raises:
+        answerer._bedrock_client.invoke.side_effect = RuntimeError("Bedrock unavailable")
+    else:
+        answerer._bedrock_client.invoke.return_value = body
+
+    result: AnswerResponse = asyncio.get_event_loop().run_until_complete(
+        answerer.answer("What was discussed about the budget?", chunks=chunks)
+    )
+
+    # Exactly TARGET_SUGGESTION_COUNT suggestions
+    assert len(result.recommendations) == TARGET_SUGGESTION_COUNT, (
+        f"Expected {TARGET_SUGGESTION_COUNT} suggestions, got {len(result.recommendations)}"
+    )
+
+    # Each suggestion has non-empty text and reason
+    for rec in result.recommendations:
+        assert rec.text.strip(), f"Empty suggestion text: {rec}"
+        assert rec.reason.strip(), f"Empty suggestion reason: {rec}"
+
+    # Suggestions are distinct under normalise_question
+    keys = [normalise_question(rec.text) for rec in result.recommendations]
+    assert len(set(keys)) == len(keys), f"Duplicate suggestions: {keys}"
+
+    # Grounded vs ungrounded assertions
+    grounded = any(c.relevance_score >= _DEFAULT_RELEVANCE_THRESHOLD for c in chunks)
+
+    if grounded:
+        # related_records should be non-empty when distinct transcript_ids exist
+        distinct_transcripts = {
+            c.transcript_id
+            for c in chunks
+            if c.relevance_score >= _DEFAULT_RELEVANCE_THRESHOLD
+        }
+        if distinct_transcripts:
+            assert len(result.related_records) > 0, (
+                "Expected non-empty related_records when grounded with distinct transcript_ids"
+            )
+    else:
+        # Requirement 4.9: no related records when not grounded
+        assert result.related_records == [], (
+            f"Expected empty related_records when not grounded, got {result.related_records}"
+        )
+
+
+# Property 2
+
+
+@given(
+    body=recommendation_body(),
+    chunks=chunk_scenario(),
+    history_qs=st.lists(st.text(min_size=3, max_size=50), min_size=1, max_size=5),
+)
+@settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+def test_property2_suggestions_never_restate_prior_user_question(
+    body: str,
+    chunks: list[RetrievedChunk],
+    history_qs: list[str],
+) -> None:
+    """Suggestions never restate a prior user question.
+
+    Validates: Requirements 3.6
+
+    For ANY history containing user questions, none of the returned
+    recommendations has text that normalises to any history question
+    under normalise_question.
+    """
+    answerer = _make_answerer()
+    answerer._bedrock_client.invoke.return_value = body
+
+    conversation_history = [("user", q) for q in history_qs]
+
+    result: AnswerResponse = asyncio.get_event_loop().run_until_complete(
+        answerer.answer(
+            "What was discussed about the budget?",
+            chunks=chunks,
+            conversation_history=conversation_history,
+        )
+    )
+
+    history_keys = {normalise_question(q) for q in history_qs}
+
+    for rec in result.recommendations:
+        rec_key = normalise_question(rec.text)
+        assert rec_key not in history_keys, (
+            f"Suggestion {rec.text!r} (normalised: {rec_key!r}) restates a prior "
+            f"user question from history: {history_qs}"
+        )
