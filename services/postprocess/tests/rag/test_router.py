@@ -5,7 +5,7 @@ Validates: Requirements 4.5, 8.6, 9.1
 Covers:
 - AskResponse model dump carries snake_case `related_records` members
   with values preserved (Requirement 4.5)
-- Hints are fetched only when retrieval is empty (Requirement 8.6)
+- Corpus hints are fetched unconditionally on every /rag/ask call
 - History is capped at 20 messages (Requirement 8.6)
 """
 
@@ -215,37 +215,28 @@ class TestHistoryCap:
 
 
 # ---------------------------------------------------------------------------
-# Hints-only-when-empty contract (Requirement 8.6)
+# Unconditional corpus hints contract
 # ---------------------------------------------------------------------------
 
 
-class TestHintsOnlyWhenEmpty:
-    """Corpus hints should only be fetched when retrieval returns no chunks.
+class TestCorpusHintsAlwaysFetched:
+    """Corpus hints are fetched on every /rag/ask call, not conditionally.
 
-    This is tested by examining the router code contract. The endpoint logic is:
-        if not chunks:
-            corpus_hints = await fetch_corpus_hints(session_factory)
-
-    These tests validate the conditional structure via the model contracts and
-    the code path logic replicated in unit form.
+    The agent (HansardChatAgent), not the router, decides whether a turn needs
+    a search_hansard call. The router therefore cannot know in advance whether
+    hints will be needed, so `fetch_corpus_hints` is called unconditionally
+    ahead of the agent invocation. This replaces the old `if not chunks:`
+    conditional fetch from the pre-agent grounded-chain flow.
     """
 
-    def test_nonempty_chunk_list_is_truthy(self) -> None:
-        """A non-empty chunk list evaluates as truthy — hints are NOT fetched.
+    def test_rag_ask_fetches_hints_unconditionally(self) -> None:
+        """rag_ask calls fetch_corpus_hints without a preceding retrieval gate."""
+        import inspect
 
-        **Validates: Requirement 8.6**
-        """
-        chunks = [{"chunk_id": 1}]  # simulated non-empty result
-        # In the router: `if not chunks:` → False → hints NOT fetched
-        assert bool(chunks) is True
-        assert chunks is not False  # noqa: E712
+        from app.rag.router import rag_ask
 
-    def test_empty_chunk_list_is_falsy(self) -> None:
-        """An empty chunk list evaluates as falsy — hints ARE fetched.
+        source = inspect.getsource(rag_ask)
 
-        **Validates: Requirement 8.6**
-        """
-        chunks: list = []
-        # In the router: `if not chunks:` → True → hints fetched
-        assert bool(chunks) is False
-        assert chunks is not True  # noqa: E712
+        assert "fetch_corpus_hints(session_factory)" in source
+        # The old conditional gate must not have resurfaced.
+        assert "if not chunks" not in source
