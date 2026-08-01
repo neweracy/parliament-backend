@@ -826,3 +826,132 @@ def test_property5_one_model_invocation_per_answer_at_most(
     assert answerer._bedrock_client.invoke.call_count == 1, (
         f"Expected exactly 1 invoke call, got {answerer._bedrock_client.invoke.call_count}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Property 11: Every returned citation references a supplied chunk
+# ---------------------------------------------------------------------------
+
+
+@given(
+    body=recommendation_body(),
+    chunks=chunk_scenario(),
+)
+@settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+def test_property11_every_citation_references_a_supplied_chunk(
+    body: str,
+    chunks: list[RetrievedChunk],
+) -> None:
+    """Every returned citation references a supplied chunk.
+
+    Validates: Requirements 8.3
+
+    For any grounded answer (chunks with score >= 0.01), every Citation in
+    result.citations has a chunk_id that matches one of the supplied relevant
+    chunks. No citation may reference a chunk that was not in the context.
+    """
+    # Only test relevant scenarios (at least one chunk above threshold)
+    relevant_chunks = [c for c in chunks if c.relevance_score >= _DEFAULT_RELEVANCE_THRESHOLD]
+    if not relevant_chunks:
+        return  # Skip non-grounded scenarios for this property
+
+    answerer = _make_answerer()
+
+    # Inject chunk_ids into the body so citations can be parsed
+    # Use the actual chunk IDs from the relevant set to produce valid citations
+    chunk_ids = [c.chunk_id for c in relevant_chunks]
+    # Append citation markers for all relevant chunk IDs to the body
+    citation_suffix = " ".join(f"[{cid}]" for cid in chunk_ids)
+    enriched_body = f"{body} {citation_suffix}"
+
+    answerer._bedrock_client.invoke.return_value = enriched_body
+
+    result: AnswerResponse = asyncio.get_event_loop().run_until_complete(
+        answerer.answer("What was discussed about the budget?", chunks=chunks)
+    )
+
+    # All cited chunk_ids must be in the relevant chunk set
+    relevant_ids = {c.chunk_id for c in chunks if c.relevance_score >= _DEFAULT_RELEVANCE_THRESHOLD}
+    for citation in result.citations:
+        assert citation.chunk_id in relevant_ids, (
+            f"Citation chunk_id={citation.chunk_id} not in relevant set {relevant_ids}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Example tests: Grounding, citation validation, and history handling
+# ---------------------------------------------------------------------------
+
+
+class TestGroundingAndHistory:
+    """Tests for grounding, citation validation, and conversation history."""
+
+    def test_system_prompt_contains_mode_selection_rules(self) -> None:
+        """Assert the _SYSTEM_PROMPT string contains key mode-selection rules."""
+        from app.rag.answering import _SYSTEM_PROMPT
+
+        assert "Mode A" in _SYSTEM_PROMPT, "System prompt missing 'Mode A'"
+        assert "Mode B" in _SYSTEM_PROMPT, "System prompt missing 'Mode B'"
+        assert "No-source-chunks clause" in _SYSTEM_PROMPT, (
+            "System prompt missing 'No-source-chunks clause'"
+        )
+        assert "RECOMMENDATIONS" in _SYSTEM_PROMPT, "System prompt missing 'RECOMMENDATIONS'"
+
+    def test_zero_chunk_path_still_invokes_stub(self) -> None:
+        """Empty chunks → bedrock stub called exactly once (Req 8.1)."""
+        answerer = _make_answerer()
+        answerer._bedrock_client.invoke.return_value = (
+            "I can help you search parliamentary debates."
+        )
+
+        asyncio.get_event_loop().run_until_complete(
+            answerer.answer("Hello", chunks=[])
+        )
+
+        assert answerer._bedrock_client.invoke.call_count == 1
+
+    def test_deterministic_failure_text_with_raising_stub(self) -> None:
+        """Bedrock raises → answer contains deterministic failure text."""
+        answerer = _make_answerer()
+        answerer._bedrock_client.invoke.side_effect = RuntimeError("Service unavailable")
+
+        chunks = [_make_chunk(chunk_id=1, relevance_score=0.1)]
+
+        result = asyncio.get_event_loop().run_until_complete(
+            answerer.answer("What about taxes?", chunks=chunks)
+        )
+
+        assert "Unable to generate an answer" in result.answer
+
+    def test_conversation_history_reaches_built_prompt(self) -> None:
+        """Conversation history is included so pronouns are resolvable (Req 8.5).
+
+        Pass conversation_history and assert the built prompt (captured from
+        the invoke call args) contains text from the history.
+        """
+        answerer = _make_answerer()
+        answerer._bedrock_client.invoke.return_value = (
+            "The budget was discussed extensively [1]."
+        )
+
+        chunks = [_make_chunk(chunk_id=1, relevance_score=0.1)]
+        conversation_history = [
+            ("user", "What about the budget?"),
+            ("assistant", "The budget was discussed."),
+        ]
+
+        asyncio.get_event_loop().run_until_complete(
+            answerer.answer(
+                "Tell me more about it",
+                chunks=chunks,
+                conversation_history=conversation_history,
+            )
+        )
+
+        # Capture the user_content argument passed to invoke
+        call_args = answerer._bedrock_client.invoke.call_args[0]
+        user_content = call_args[1]  # Second positional arg is user content
+
+        assert "budget" in user_content.lower(), (
+            f"Expected 'budget' from conversation history in prompt, got: {user_content[:200]}"
+        )
