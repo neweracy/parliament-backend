@@ -18,15 +18,12 @@ import itertools
 import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 import structlog
+from langchain_core.documents import Document
 from sqlalchemy import text
 
 from app.rag.retrieval import RetrievedChunk
-
-if TYPE_CHECKING:
-    from app.rag.answering import RecommendationItem, RelatedRecordItem
 
 logger = structlog.get_logger("rag.recommendations")
 
@@ -51,6 +48,89 @@ class CorpusHints:
 
     entities: list[str] = field(default_factory=list)
     speakers: list[str] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Shared dataclasses — used by both the answerer and the builder
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Citation:
+    """A reference linking an answer statement to a source chunk.
+
+    Attributes:
+        transcript_id: The transcript containing the cited chunk.
+        chunk_id: The unique identifier of the cited chunk.
+        speaker: The speaker attributed to the cited chunk (if available).
+        start_s: Start timestamp of the cited chunk in seconds.
+        end_s: End timestamp of the cited chunk in seconds.
+        excerpt: A short excerpt from the cited chunk text.
+    """
+
+    transcript_id: int
+    chunk_id: int
+    speaker: str | None
+    start_s: float | None
+    end_s: float | None
+    excerpt: str
+
+
+@dataclass
+class RecommendationItem:
+    """A suggested follow-up question derived from the transcript context."""
+
+    text: str
+    reason: str
+
+
+@dataclass
+class RelatedRecordItem:
+    """A sitting, record, or speaker behind the answer, linked to its transcript.
+
+    Derived deterministically from the retrieved chunks by the
+    RecommendationBuilder — no language model involved.
+
+    Attributes:
+        transcript_id: The transcript the record belongs to.
+        label: Display label drawn from the source chunk metadata.
+        chunk_id: The chunk the record was derived from.
+        speaker: Speaker attributed to the source chunk (if available).
+        sitting_title: Sitting title of the source chunk (if available).
+        record_title: Record title of the source chunk (if available).
+        date: Date of the source chunk (if available).
+        start_s: Start timestamp of the source chunk in seconds (if available).
+    """
+
+    transcript_id: int
+    label: str
+    chunk_id: int
+    speaker: str | None = None
+    sitting_title: str | None = None
+    record_title: str | None = None
+    date: str | None = None
+    start_s: float | None = None
+
+
+@dataclass
+class AnswerResponse:
+    """Structured response from the grounded answering engine.
+
+    Attributes:
+        answer: The generated answer text with inline citation markers.
+        citations: List of validated Citation objects referenced in the answer.
+        source_chunks: The retrieved chunks used as context for generation.
+        recommendations: Suggested follow-up questions based on the context.
+        related_records: Sittings, records, or speakers behind the answer.
+        latency_ms: Total time from request to response in milliseconds.
+    """
+
+    answer: str
+    citations: list[Citation] = field(default_factory=list)
+    source_chunks: list[RetrievedChunk] = field(default_factory=list)
+    recommendations: list[RecommendationItem] = field(default_factory=list)
+    related_records: list[RelatedRecordItem] = field(default_factory=list)
+    latency_ms: float = 0.0
 
 
 _STATIC_SUGGESTIONS: tuple[tuple[str, str], ...] = (
@@ -87,53 +167,46 @@ def _clean(value: str | None) -> str | None:
 
 
 def _make_item(text: str, reason: str) -> RecommendationItem:
-    """Build a `RecommendationItem` from the answering engine's contract.
-
-    The import is deferred to call time on purpose: `app.rag.answering` imports
-    this module for the builder, so a module-level import here would create a
-    circular import at startup.
-    """
-    from app.rag.answering import RecommendationItem
-
+    """Build a `RecommendationItem` — now locally defined, no deferred import needed."""
     return RecommendationItem(text=text, reason=reason)
 
 
-def _make_related_record(chunk: RetrievedChunk, label: str) -> RelatedRecordItem:
-    """Build a `RelatedRecordItem` from a chunk and its resolved label.
-
-    The import is deferred to call time for the same reason as `_make_item`:
-    `app.rag.answering` imports this module, so a module-level import here
-    would create a circular import at startup.
-    """
-    from app.rag.answering import RelatedRecordItem
-
+def _make_related_record(chunk: Document, label: str) -> RelatedRecordItem:
+    """Build a `RelatedRecordItem` from a chunk and its resolved label."""
+    meta = chunk.metadata
     return RelatedRecordItem(
-        transcript_id=chunk.transcript_id,
+        transcript_id=meta["transcript_id"],
         label=label,
-        chunk_id=chunk.chunk_id,
-        speaker=_clean(chunk.speaker),
-        sitting_title=_clean(chunk.sitting_title),
-        record_title=_clean(chunk.record_title),
-        date=_clean(chunk.date),
-        start_s=chunk.start_s,
+        chunk_id=meta["chunk_id"],
+        speaker=_clean(meta.get("speaker")),
+        sitting_title=_clean(meta.get("sitting_title")),
+        record_title=_clean(meta.get("record_title")),
+        date=_clean(meta.get("date")),
+        start_s=meta.get("start_s"),
     )
 
 
-def _record_label(chunk: RetrievedChunk) -> str:
+def _record_label(chunk: Document) -> str:
     """Resolve the display label for a chunk, first non-empty value winning.
 
     Precedence: `sitting_title` → `record_title` → `speaker` → `date`. The
     `Transcript {transcript_id}` fallback guarantees a non-empty label even for
     a chunk carrying no metadata at all.
     """
-    for value in (chunk.sitting_title, chunk.record_title, chunk.speaker, chunk.date):
+    meta = chunk.metadata
+    for value in (
+        meta.get("sitting_title"),
+        meta.get("record_title"),
+        meta.get("speaker"),
+        meta.get("date"),
+    ):
         cleaned = _clean(value)
         if cleaned:
             return cleaned
-    return f"Transcript {chunk.transcript_id}"
+    return f"Transcript {meta['transcript_id']}"
 
 
-def _chunk_candidates(chunks: Iterable[RetrievedChunk]) -> Iterator[tuple[str, str]]:
+def _chunk_candidates(chunks: Iterable[Document]) -> Iterator[tuple[str, str]]:
     """Yield (text, reason) pairs naming real values from the given chunks.
 
     Chunks are consumed in the order given — relevance order from the
@@ -142,10 +215,15 @@ def _chunk_candidates(chunks: Iterable[RetrievedChunk]) -> Iterator[tuple[str, s
     emitted text always mentions a value drawn from the record.
     """
     for chunk in chunks:
-        speaker = _clean(chunk.speaker)
-        entities = [e for e in (_clean(v) for v in (chunk.matched_entities or [])) if e]
-        date = _clean(chunk.date)
-        sitting_title = _clean(chunk.sitting_title)
+        meta = chunk.metadata
+        speaker = _clean(meta.get("speaker"))
+        entities = [
+            e
+            for e in (_clean(v) for v in (meta.get("entity_names") or []))
+            if e
+        ]
+        date = _clean(meta.get("date"))
+        sitting_title = _clean(meta.get("sitting_title"))
 
         for entity in entities:
             if speaker:
@@ -230,13 +308,13 @@ class RecommendationBuilder:
 
     Pure: no I/O, no model call, deterministic for a given input. All ranking
     inputs (entities, speakers, dates, titles) are already present on the
-    RetrievedChunk objects the retriever returned.
+    Document metadata dicts the retriever returned.
     """
 
     def suggestions(
         self,
         *,
-        chunks: list[RetrievedChunk],
+        chunks: list[Document],
         corpus_hints: CorpusHints | None = None,
         exclude: list[str] | None = None,
         count: int = TARGET_SUGGESTION_COUNT,
@@ -250,8 +328,8 @@ class RecommendationBuilder:
         `normalise_question`.
 
         Args:
-            chunks: Retrieved chunks to mine for entity, speaker, date, and
-                sitting values. May be empty.
+            chunks: Retrieved chunks as LangChain Document objects to mine for
+                entity, speaker, date, and sitting values. May be empty.
             corpus_hints: Corpus-wide entity and speaker names, used when the
                 chunks yield too few candidates.
             exclude: Question text that must not be returned — parsed model
@@ -290,7 +368,7 @@ class RecommendationBuilder:
     def related_records(
         self,
         *,
-        chunks: list[RetrievedChunk],
+        chunks: list[Document],
         limit: int = MAX_RELATED_RECORDS,
     ) -> list[RelatedRecordItem]:
         """Return at most `limit` records, at most one per transcript_id.
@@ -319,9 +397,10 @@ class RecommendationBuilder:
         records: list[RelatedRecordItem] = []
 
         for chunk in chunks or []:
-            if chunk.transcript_id in seen:
+            transcript_id = chunk.metadata["transcript_id"]
+            if transcript_id in seen:
                 continue
-            seen.add(chunk.transcript_id)
+            seen.add(transcript_id)
             records.append(_make_related_record(chunk, _record_label(chunk)))
             if len(records) == limit:
                 break
