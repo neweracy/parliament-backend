@@ -38,6 +38,7 @@ import re
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from langchain_core.documents import Document
 
 from app.rag.recommendations import (
     _STATIC_SUGGESTIONS,
@@ -46,7 +47,6 @@ from app.rag.recommendations import (
     RecommendationBuilder,
     normalise_question,
 )
-from app.rag.retrieval import RetrievedChunk
 
 # ---------------------------------------------------------------------------
 # Value pools
@@ -105,7 +105,7 @@ def retrieved_chunks(
     max_size: int = 4,
     transcript_id_pool: list[int] | None = None,
     blank_labels: bool = False,
-) -> list[RetrievedChunk]:
+) -> list[Document]:
     """Generate a relevance-ordered chunk list with sparse metadata.
 
     `relevance_score` is strictly descending, matching the retriever's output
@@ -128,7 +128,7 @@ def retrieved_chunks(
         if transcript_id_pool
         else st.integers(min_value=1, max_value=500)
     )
-    chunks: list[RetrievedChunk] = []
+    chunks: list[Document] = []
     for index in range(size):
         start_s = draw(
             st.one_of(
@@ -137,41 +137,49 @@ def retrieved_chunks(
             )
         )
         chunks.append(
-            RetrievedChunk(
-                chunk_id=draw(st.integers(min_value=1, max_value=10_000)),
-                text=draw(st.sampled_from(["The House resolved.", "Debate continued."])),
-                relevance_score=1.0 / (index + 1),
-                transcript_id=draw(id_st),
-                speaker=draw(blank if blank_labels else _optional_value(_SPEAKERS)),
-                start_s=start_s,
-                end_s=None if start_s is None else start_s + 5.0,
-                matched_entities=draw(st.lists(_entity_value(_ENTITIES), max_size=3)),
-                record_title=draw(blank if blank_labels else _optional_value(_RECORD_TITLES)),
-                sitting_title=draw(blank if blank_labels else _optional_value(_SITTING_TITLES)),
-                date=draw(blank if blank_labels else _optional_value(_DATES)),
+            Document(
+                page_content=draw(st.sampled_from(["The House resolved.", "Debate continued."])),
+                metadata={
+                    "chunk_id": draw(st.integers(min_value=1, max_value=10_000)),
+                    "transcript_id": draw(id_st),
+                    "speaker": draw(blank if blank_labels else _optional_value(_SPEAKERS)),
+                    "start_s": start_s,
+                    "end_s": None if start_s is None else start_s + 5.0,
+                    "entity_names": draw(st.lists(_entity_value(_ENTITIES), max_size=3)),
+                    "record_title": draw(
+                        blank if blank_labels else _optional_value(_RECORD_TITLES)
+                    ),
+                    "sitting_title": draw(
+                        blank if blank_labels else _optional_value(_SITTING_TITLES)
+                    ),
+                    "date": draw(blank if blank_labels else _optional_value(_DATES)),
+                    "score": 1.0 / (index + 1),
+                },
             )
         )
     return chunks
 
 
 @st.composite
-def value_free_chunks(draw: st.DrawFn) -> list[RetrievedChunk]:
+def value_free_chunks(draw: st.DrawFn) -> list[Document]:
     """Generate chunks whose suggestion-bearing metadata is all absent or blank."""
     size = draw(st.integers(min_value=0, max_value=4))
     blank = st.one_of(st.none(), st.just(""), st.just("   "))
     return [
-        RetrievedChunk(
-            chunk_id=draw(st.integers(min_value=1, max_value=10_000)),
-            text="The House resolved.",
-            relevance_score=1.0,
-            transcript_id=draw(st.integers(min_value=1, max_value=500)),
-            speaker=draw(blank),
-            start_s=None,
-            end_s=None,
-            matched_entities=draw(st.lists(st.sampled_from(["", "  "]), max_size=3)),
-            record_title=draw(_optional_value(_RECORD_TITLES)),
-            sitting_title=draw(blank),
-            date=draw(blank),
+        Document(
+            page_content="The House resolved.",
+            metadata={
+                "chunk_id": draw(st.integers(min_value=1, max_value=10_000)),
+                "transcript_id": draw(st.integers(min_value=1, max_value=500)),
+                "speaker": draw(blank),
+                "start_s": None,
+                "end_s": None,
+                "entity_names": draw(st.lists(st.sampled_from(["", "  "]), max_size=3)),
+                "record_title": draw(_optional_value(_RECORD_TITLES)),
+                "sitting_title": draw(blank),
+                "date": draw(blank),
+                "score": 1.0,
+            },
         )
         for _ in range(size)
     ]
@@ -222,12 +230,13 @@ def _clean_values(raw_values: list[str | None]) -> set[str]:
     return cleaned
 
 
-def _chunk_values(chunks: list[RetrievedChunk]) -> set[str]:
+def _chunk_values(chunks: list[Document]) -> set[str]:
     """Every value the builder may name from chunk metadata."""
     raw: list[str | None] = []
     for chunk in chunks:
-        raw.extend([chunk.speaker, chunk.date, chunk.sitting_title])
-        raw.extend(chunk.matched_entities or [])
+        meta = chunk.metadata
+        raw.extend([meta.get("speaker"), meta.get("date"), meta.get("sitting_title")])
+        raw.extend(meta.get("entity_names") or [])
     return _clean_values(raw)
 
 
@@ -248,27 +257,33 @@ def _is_general(text: str) -> bool:
     return key in _STATIC_KEYS or _FILLER_PATTERN.match(key) is not None
 
 
-def _expected_label(chunk: RetrievedChunk) -> str:
+def _expected_label(chunk: Document) -> str:
     """Re-derive the required label independently of the builder's own helper.
 
     Precedence per Requirement 4.2: `sitting_title` → `record_title` →
     `speaker` → `date`, first non-empty winning, with
     `Transcript {transcript_id}` as the guaranteed non-empty fallback.
     """
-    for value in (chunk.sitting_title, chunk.record_title, chunk.speaker, chunk.date):
+    meta = chunk.metadata
+    for value in (
+        meta.get("sitting_title"),
+        meta.get("record_title"),
+        meta.get("speaker"),
+        meta.get("date"),
+    ):
         if value is None:
             continue
         collapsed = re.sub(r"\s+", " ", value).strip()
         if collapsed:
             return collapsed
-    return f"Transcript {chunk.transcript_id}"
+    return f"Transcript {meta['transcript_id']}"
 
 
-def _first_chunk_by_transcript_id(chunks: list[RetrievedChunk]) -> dict[int, RetrievedChunk]:
+def _first_chunk_by_transcript_id(chunks: list[Document]) -> dict[int, Document]:
     """Map each transcript_id to the earliest — highest-scoring — chunk carrying it."""
-    first: dict[int, RetrievedChunk] = {}
+    first: dict[int, Document] = {}
     for chunk in chunks:
-        first.setdefault(chunk.transcript_id, chunk)
+        first.setdefault(chunk.metadata["transcript_id"], chunk)
     return first
 
 
@@ -285,7 +300,7 @@ def _first_chunk_by_transcript_id(chunks: list[RetrievedChunk]) -> dict[int, Ret
 )
 @settings(max_examples=300)
 def test_suggestions_are_grounded_in_available_data(
-    chunks: list[RetrievedChunk],
+    chunks: list[Document],
     hints: CorpusHints | None,
     exclude: list[str],
     count: int,
@@ -345,7 +360,7 @@ def test_suggestions_are_grounded_in_available_data(
 )
 @settings(max_examples=300)
 def test_chunk_metadata_takes_precedence_over_corpus_hints(
-    chunks: list[RetrievedChunk],
+    chunks: list[Document],
     hints: CorpusHints | None,
     exclude: list[str],
     count: int,
@@ -378,7 +393,7 @@ def test_chunk_metadata_takes_precedence_over_corpus_hints(
 @given(chunks=value_free_chunks(), exclude=_exclude_st, count=_count_st)
 @settings(max_examples=300)
 def test_general_suggestions_when_no_values_available(
-    chunks: list[RetrievedChunk],
+    chunks: list[Document],
     exclude: list[str],
     count: int,
 ) -> None:
@@ -414,7 +429,7 @@ def test_general_suggestions_when_no_values_available(
 @given(chunks=_related_chunks_st)
 @settings(max_examples=300)
 def test_related_records_are_deduplicated_labelled_and_bounded(
-    chunks: list[RetrievedChunk],
+    chunks: list[Document],
 ) -> None:
     """Records are capped, one per transcript, labelled, and carry `start_s`.
 
@@ -450,19 +465,20 @@ def test_related_records_are_deduplicated_labelled_and_bounded(
     for record in records:
         source = first_by_id[record.transcript_id]
 
-        assert record.chunk_id == source.chunk_id, (
+        assert record.chunk_id == source.metadata["chunk_id"], (
             f"Record for transcript {record.transcript_id} was derived from chunk "
-            f"{record.chunk_id}, not the highest-scoring chunk {source.chunk_id}"
+            f"{record.chunk_id}, not the highest-scoring chunk {source.metadata['chunk_id']}"
         )
         assert record.label.strip(), f"Empty label on record {record}"
         assert record.label == _expected_label(source), (
             f"Label {record.label!r} does not follow the required precedence, "
             f"expected {_expected_label(source)!r}"
         )
-        assert record.start_s == source.start_s, (
-            f"start_s {record.start_s!r} does not match source chunk {source.start_s!r}"
+        assert record.start_s == source.metadata.get("start_s"), (
+            f"start_s {record.start_s!r} does not match source chunk "
+            f"{source.metadata.get('start_s')!r}"
         )
-        if source.start_s is None:
+        if source.metadata.get("start_s") is None:
             assert record.start_s is None
         else:
             assert record.start_s is not None
@@ -471,7 +487,7 @@ def test_related_records_are_deduplicated_labelled_and_bounded(
 @given(chunks=_related_chunks_st, limit=_limit_st)
 @settings(max_examples=300)
 def test_related_records_respect_an_explicit_limit(
-    chunks: list[RetrievedChunk],
+    chunks: list[Document],
     limit: int,
 ) -> None:
     """An explicit `limit` bounds the result to the distinct transcripts available.
@@ -482,7 +498,7 @@ def test_related_records_respect_an_explicit_limit(
 
     records = builder.related_records(chunks=chunks, limit=limit)
 
-    distinct_ids = len({chunk.transcript_id for chunk in chunks})
+    distinct_ids = len({chunk.metadata["transcript_id"] for chunk in chunks})
     assert len(records) == min(limit, distinct_ids), (
         f"Expected {min(limit, distinct_ids)} records for limit {limit} over "
         f"{distinct_ids} distinct transcripts, got {len(records)}"
