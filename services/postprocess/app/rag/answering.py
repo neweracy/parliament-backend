@@ -22,7 +22,12 @@ import structlog
 
 from app.config import Settings
 from app.llm.bedrock import BedrockClient
-from app.rag.recommendations import CorpusHints, RecommendationBuilder
+from app.rag.recommendations import (
+    TARGET_SUGGESTION_COUNT,
+    CorpusHints,
+    RecommendationBuilder,
+    normalise_question,
+)
 from app.rag.retrieval import RetrievedChunk
 
 logger = structlog.get_logger("rag.answering")
@@ -35,6 +40,9 @@ _DEFAULT_ANSWERING_MODEL = "anthropic.claude-3-sonnet-20240229-v1:0"
 
 # Maximum number of chunks to include in the prompt context
 _MAX_CONTEXT_CHUNKS = 10
+
+# Deterministic text returned when the Bedrock invocation raises
+_GENERATION_FAILURE_TEXT = "Unable to generate an answer at this time. Please try again later."
 
 # System prompt instructing Claude to produce cited answers with recommendations
 _SYSTEM_PROMPT = """You are a parliamentary research assistant chatbot. Your task is to answer questions using ONLY the provided transcript chunks. Follow these rules strictly:
@@ -184,6 +192,10 @@ class GroundedAnswerer:
             7. Parse recommendations from response.
             8. Return AnswerResponse with answer, citations, chunks, recommendations, latency.
 
+        Every return path goes through `_finalise`, which is the single place
+        recommendations and related records are assembled, so no path can
+        return an empty recommendation set.
+
         Args:
             question: The natural language question to answer.
             chunks: Retrieved chunks from the HybridRetriever.
@@ -204,6 +216,12 @@ class GroundedAnswerer:
             chunk_count=len(chunks),
         )
 
+        # Questions the user has already asked — excluded from any builder
+        # top-up so a suggestion never restates a prior turn (Requirement 3.6)
+        history_questions = [
+            content for role, content in (conversation_history or []) if role == "user"
+        ]
+
         # Step 1: Filter chunks by relevance threshold
         relevant_chunks = [
             c for c in chunks
@@ -212,21 +230,29 @@ class GroundedAnswerer:
 
         # Step 2: If no chunks meet threshold, return early
         if not relevant_chunks:
-            latency_ms = (time.perf_counter() - start_time) * 1000
             logger.info(
                 "rag.answering.no_relevant_chunks",
                 question_preview=question[:80],
                 threshold=self._relevance_threshold,
             )
-            return AnswerResponse(
+            return self._finalise(
                 answer="No supporting evidence found in the parliamentary record for this question.",
                 citations=[],
-                source_chunks=[],
-                latency_ms=latency_ms,
+                context_chunks=[],
+                parsed=[],
+                # Sub-threshold chunks are not evidence, but they carry real
+                # entity and speaker names, so they remain a legitimate hint
+                # source for suggestion text.
+                hint_chunks=chunks,
+                corpus_hints=corpus_hints,
+                history_questions=history_questions,
+                grounded=False,
+                start_time=start_time,
             )
 
         # Limit to max context chunks (already sorted by relevance from retriever)
         context_chunks = relevant_chunks[: self._max_context_chunks]
+        grounded = bool(context_chunks)
 
         # Step 3: Build prompt
         user_content = self._build_user_prompt(question, context_chunks, conversation_history)
@@ -235,23 +261,26 @@ class GroundedAnswerer:
         try:
             raw_answer = await self._invoke_claude(user_content)
         except Exception:
-            latency_ms = (time.perf_counter() - start_time) * 1000
             logger.error(
                 "rag.answering.claude_invocation_failed",
                 question_preview=question[:80],
                 exc_info=True,
             )
-            return AnswerResponse(
-                answer="Unable to generate an answer at this time. Please try again later.",
+            return self._finalise(
+                answer=_GENERATION_FAILURE_TEXT,
                 citations=[],
-                source_chunks=context_chunks,
-                recommendations=[],
-                latency_ms=latency_ms,
+                context_chunks=context_chunks,
+                parsed=[],
+                hint_chunks=context_chunks or chunks,
+                corpus_hints=corpus_hints,
+                history_questions=history_questions,
+                grounded=grounded,
+                start_time=start_time,
             )
 
         # Step 5: Parse citation markers from response
         # Split answer text from recommendations section
-        answer_text, recommendations = self._split_recommendations(raw_answer)
+        answer_text, parsed = self._split_recommendations(raw_answer)
         cited_chunk_ids = self._parse_citations(answer_text)
 
         # Step 6: Validate citations against source chunks
@@ -259,22 +288,122 @@ class GroundedAnswerer:
         citations = self._validate_citations(cited_chunk_ids, chunk_map)
 
         # Step 7: Return structured response
-        latency_ms = (time.perf_counter() - start_time) * 1000
-
         logger.info(
             "rag.answering.complete",
             question_preview=question[:80],
             answer_length=len(answer_text),
             citation_count=len(citations),
-            recommendation_count=len(recommendations),
+            parsed_recommendation_count=len(parsed),
+        )
+
+        return self._finalise(
+            answer=answer_text,
+            citations=citations,
+            context_chunks=context_chunks,
+            parsed=parsed,
+            hint_chunks=context_chunks or chunks,
+            corpus_hints=corpus_hints,
+            history_questions=history_questions,
+            grounded=grounded,
+            start_time=start_time,
+        )
+
+    # ------------------------------------------------------------------
+    # Recommendation assembly
+    # ------------------------------------------------------------------
+
+    def _finalise(
+        self,
+        *,
+        answer: str,
+        citations: list[Citation],
+        context_chunks: list[RetrievedChunk],
+        parsed: list[RecommendationItem],
+        hint_chunks: list[RetrievedChunk],
+        corpus_hints: CorpusHints | None,
+        history_questions: list[str],
+        grounded: bool,
+        start_time: float,
+    ) -> AnswerResponse:
+        """Attach recommendations and related records, then stamp latency.
+
+        The single assembly point for a Recommendation_Set. Every return path in
+        `answer()` — grounded success, zero-context success, and generation
+        failure — goes through here, so no path can return an empty
+        recommendation set (Requirements 2.1, 2.2, 2.3).
+
+        `parsed` items keep their order and priority; the builder only tops up
+        to TARGET_SUGGESTION_COUNT when the model supplied fewer than that
+        (Requirements 2.4, 2.5). Items that repeat an earlier parsed item are
+        dropped before the top-up so the set stays distinct under
+        `normalise_question` (Requirement 3.5). `exclude` carries both the kept
+        parsed text and the user questions already in the history, so a top-up
+        never restates either (Requirement 3.6).
+
+        No model request is issued here: the builder is deterministic, which is
+        what keeps the whole answer to at most one invocation (Requirement 2.6).
+
+        Args:
+            answer: Final answer text, already stripped of its recommendations
+                block.
+            citations: Validated citations, empty on the ungrounded paths.
+            context_chunks: Chunks used as evidence — the `source_chunks` of the
+                response and the only Related_Record source.
+            parsed: Recommendation items parsed from the model response.
+            hint_chunks: Chunks the builder may mine for suggestion text. May
+                include sub-threshold chunks, which are hints but not evidence.
+            corpus_hints: Corpus-wide entity and speaker names, used when the
+                hint chunks yield too few candidates.
+            history_questions: Prior user questions, excluded from the top-up.
+            grounded: Whether evidence was available. Related records are built
+                only when true, so a turn with no evidence returns an empty
+                collection (Requirement 4.9).
+            start_time: `time.perf_counter()` value captured at request entry.
+
+        Returns:
+            An AnswerResponse carrying TARGET_SUGGESTION_COUNT recommendations.
+        """
+        recommendations: list[RecommendationItem] = []
+        seen: set[str] = set()
+
+        for item in parsed:
+            key = normalise_question(item.text)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            recommendations.append(item)
+            if len(recommendations) == TARGET_SUGGESTION_COUNT:
+                break
+
+        parsed_kept = len(recommendations)
+
+        if parsed_kept < TARGET_SUGGESTION_COUNT:
+            recommendations += self._builder.suggestions(
+                chunks=hint_chunks,
+                corpus_hints=corpus_hints,
+                exclude=[r.text for r in recommendations] + history_questions,
+                count=TARGET_SUGGESTION_COUNT - parsed_kept,
+            )
+
+        related = self._builder.related_records(chunks=context_chunks) if grounded else []
+
+        latency_ms = (time.perf_counter() - start_time) * 1000
+
+        logger.info(
+            "rag.answering.recommendations_assembled",
+            parsed_count=len(parsed),
+            parsed_kept=parsed_kept,
+            topped_up=len(recommendations) - parsed_kept,
+            related_record_count=len(related),
             latency_ms=round(latency_ms, 1),
         )
 
         return AnswerResponse(
-            answer=answer_text,
+            answer=answer,
             citations=citations,
             source_chunks=context_chunks,
             recommendations=recommendations,
+            related_records=related,
             latency_ms=latency_ms,
         )
 
