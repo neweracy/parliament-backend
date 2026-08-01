@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from app.deps import verify_service_token
 from app.rag.answering import GroundedAnswerer
 from app.rag.ingestion import TranscriptIngestionWorker
+from app.rag.recommendations import fetch_corpus_hints
 from app.rag.retrieval import HybridRetriever, RetrievalFilters
 
 logger = structlog.get_logger("rag.router")
@@ -280,6 +281,12 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
 
     chunks = await retriever.retrieve(query=body.question, filters=filters, limit=10)
 
+    # Fetch corpus hints only when retrieval returned nothing — the hot path
+    # with results should not pay for an extra DB query (Requirement 3.3, 8.6)
+    corpus_hints = None
+    if not chunks:
+        corpus_hints = await fetch_corpus_hints(session_factory)
+
     # Build conversation history for the answerer
     conversation_history: list[tuple[str, str]] | None = None
     if body.conversation_history:
@@ -293,6 +300,7 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
         question=body.question,
         chunks=chunks,
         conversation_history=conversation_history,
+        corpus_hints=corpus_hints,
     )
 
     # Map to response models
