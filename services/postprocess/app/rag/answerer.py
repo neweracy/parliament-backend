@@ -18,13 +18,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.config import Settings
 from app.rag.recommendations import (
-    TARGET_SUGGESTION_COUNT,
     AnswerResponse,
     Citation,
     CorpusHints,
     RecommendationBuilder,
     RecommendationItem,
-    normalise_question,
+    finalise_answer,
 )
 from app.rag.retriever import RetrievedChunk
 
@@ -287,63 +286,18 @@ class GroundedAnsweringChain:
         grounded: bool,
         start_time: float,
     ) -> AnswerResponse:
-        """Attach recommendations and related records, then stamp latency.
-
-        The single assembly point for a Recommendation_Set. Every return path
-        in `answer()` goes through here, so no path can return an empty
-        recommendation set (Requirements 2.1, 2.2, 2.3).
-
-        `parsed` items keep their order and priority; the builder only tops up
-        to TARGET_SUGGESTION_COUNT when the model supplied fewer than that.
-        Items that repeat an earlier parsed item are dropped before the top-up
-        so the set stays distinct under `normalise_question`. `exclude` carries
-        both the kept parsed text and the user questions already in the history,
-        so a top-up never restates either.
-
-        No model request is issued here: the builder is deterministic.
-        """
-        recommendations: list[RecommendationItem] = []
-        seen: set[str] = set()
-
-        for item in parsed:
-            key = normalise_question(item.text)
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            recommendations.append(item)
-            if len(recommendations) == TARGET_SUGGESTION_COUNT:
-                break
-
-        parsed_kept = len(recommendations)
-
-        if parsed_kept < TARGET_SUGGESTION_COUNT:
-            recommendations += self._builder.suggestions(
-                chunks=hint_chunks,
-                corpus_hints=corpus_hints,
-                exclude=[r.text for r in recommendations] + history_questions,
-                count=TARGET_SUGGESTION_COUNT - parsed_kept,
-            )
-
-        related = self._builder.related_records(chunks=context_chunks) if grounded else []
-
-        latency_ms = (time.perf_counter() - start_time) * 1000
-
-        logger.info(
-            "rag.answerer.recommendations_assembled",
-            parsed_count=len(parsed),
-            parsed_kept=parsed_kept,
-            topped_up=len(recommendations) - parsed_kept,
-            related_record_count=len(related),
-            latency_ms=round(latency_ms, 1),
-        )
-
-        return AnswerResponse(
+        """Delegate to the shared assembly point in recommendations.py."""
+        return finalise_answer(
+            builder=self._builder,
             answer=answer,
             citations=citations,
-            source_chunks=context_chunks,
-            recommendations=recommendations,
-            related_records=related,
-            latency_ms=latency_ms,
+            context_chunks=context_chunks,
+            parsed=parsed,
+            hint_chunks=hint_chunks,
+            corpus_hints=corpus_hints,
+            history_questions=history_questions,
+            grounded=grounded,
+            start_time=start_time,
         )
 
     # ------------------------------------------------------------------

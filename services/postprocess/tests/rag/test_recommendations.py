@@ -334,3 +334,32 @@ class TestFetchCorpusHints:
         items = RecommendationBuilder().suggestions(chunks=[], corpus_hints=hints)
 
         assert [(item.text, item.reason) for item in items] == list(_STATIC_SUGGESTIONS)
+
+
+def test_finalise_answer_accepts_retrieved_chunks(sample_retrieved_chunks):
+    """finalise_answer converts RetrievedChunk input before handing it to the builder.
+
+    Regression: the builder reads `Document.metadata`, so passing RetrievedChunk
+    straight through used to raise AttributeError.
+    """
+    import time as _time
+
+    from app.rag.recommendations import RecommendationBuilder, finalise_answer
+
+    response = finalise_answer(
+        builder=RecommendationBuilder(),
+        answer="Some answer [1].",
+        citations=[],
+        context_chunks=sample_retrieved_chunks,
+        parsed=[],
+        hint_chunks=sample_retrieved_chunks,
+        corpus_hints=None,
+        history_questions=[],
+        grounded=True,
+        start_time=_time.perf_counter(),
+    )
+
+    assert len(response.recommendations) == 3
+    assert all(r.text and r.reason for r in response.recommendations)
+    assert len(response.related_records) >= 1
+    assert response.source_chunks == sample_retrieved_chunks

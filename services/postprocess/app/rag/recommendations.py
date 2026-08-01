@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import itertools
 import re
+import time
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 
@@ -164,6 +165,37 @@ def _clean(value: str | None) -> str | None:
         return None
     collapsed = re.sub(r"\s+", " ", value).strip()
     return collapsed or None
+
+
+def chunks_to_documents(chunks: Iterable[RetrievedChunk]) -> list[Document]:
+    """Convert RetrievedChunk objects into the Document form the builder expects.
+
+    The builder reads its ranking inputs from `Document.metadata`, so a chunk
+    coming back from the retriever facade has to be projected before it can be
+    mined for suggestions or related records. Metadata keys match the ones the
+    retriever arms emit, so a Document built here is interchangeable with one
+    the retriever produced directly.
+    """
+    documents: list[Document] = []
+    for chunk in chunks or []:
+        documents.append(
+            Document(
+                page_content=chunk.text,
+                metadata={
+                    "chunk_id": chunk.chunk_id,
+                    "transcript_id": chunk.transcript_id,
+                    "speaker": chunk.speaker,
+                    "start_s": chunk.start_s,
+                    "end_s": chunk.end_s,
+                    "entity_names": chunk.matched_entities or [],
+                    "score": chunk.relevance_score,
+                    "record_title": chunk.record_title,
+                    "sitting_title": chunk.sitting_title,
+                    "date": chunk.date,
+                },
+            )
+        )
+    return documents
 
 
 def _make_item(text: str, reason: str) -> RecommendationItem:
@@ -461,3 +493,78 @@ async def fetch_corpus_hints(session_factory) -> CorpusHints:
     )
 
     return CorpusHints(entities=entities, speakers=speakers)
+
+
+def finalise_answer(
+    *,
+    builder: RecommendationBuilder,
+    answer: str,
+    citations: list[Citation],
+    context_chunks: list[RetrievedChunk],
+    parsed: list[RecommendationItem],
+    hint_chunks: list[RetrievedChunk],
+    corpus_hints: CorpusHints | None,
+    history_questions: list[str],
+    grounded: bool,
+    start_time: float,
+) -> AnswerResponse:
+    """Attach recommendations and related records, then stamp latency.
+
+    The single assembly point for a recommendation set. Every answering path
+    routes through here, so no path can return an empty recommendation set
+    (Requirements 2.1, 2.2, 2.3).
+
+    `parsed` items keep their order and priority; the builder only tops up to
+    TARGET_SUGGESTION_COUNT when the model supplied fewer than that. Items that
+    repeat an earlier parsed item are dropped before the top-up so the set stays
+    distinct under `normalise_question`. `exclude` carries both the kept parsed
+    text and the user questions already in the history, so a top-up never
+    restates either.
+
+    No model request is issued here: the builder is deterministic.
+    """
+    recommendations: list[RecommendationItem] = []
+    seen: set[str] = set()
+
+    for item in parsed:
+        key = normalise_question(item.text)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        recommendations.append(item)
+        if len(recommendations) == TARGET_SUGGESTION_COUNT:
+            break
+
+    parsed_kept = len(recommendations)
+
+    if parsed_kept < TARGET_SUGGESTION_COUNT:
+        recommendations += builder.suggestions(
+            chunks=chunks_to_documents(hint_chunks),
+            corpus_hints=corpus_hints,
+            exclude=[r.text for r in recommendations] + history_questions,
+            count=TARGET_SUGGESTION_COUNT - parsed_kept,
+        )
+
+    related = (
+        builder.related_records(chunks=chunks_to_documents(context_chunks)) if grounded else []
+    )
+
+    latency_ms = (time.perf_counter() - start_time) * 1000
+
+    logger.info(
+        "rag.finalise.recommendations_assembled",
+        parsed_count=len(parsed),
+        parsed_kept=parsed_kept,
+        topped_up=len(recommendations) - parsed_kept,
+        related_record_count=len(related),
+        latency_ms=round(latency_ms, 1),
+    )
+
+    return AnswerResponse(
+        answer=answer,
+        citations=citations,
+        source_chunks=context_chunks,
+        recommendations=recommendations,
+        related_records=related,
+        latency_ms=latency_ms,
+    )

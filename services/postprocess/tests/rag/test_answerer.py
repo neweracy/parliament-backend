@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.rag.answerer import _GENERATION_FAILURE_TEXT, GroundedAnsweringChain
-from app.rag.recommendations import RecommendationItem
 
 
 class TestParseCitations:
@@ -81,15 +80,14 @@ class TestAnswer:
     async def test_grounded_answer(self, mock_chat_model, mock_settings, sample_retrieved_chunks):
         chain = GroundedAnsweringChain(mock_chat_model, mock_settings)
 
-        # Patch builder methods to avoid Document vs RetrievedChunk mismatch
-        chain._builder.suggestions = MagicMock(return_value=[])
-        chain._builder.related_records = MagicMock(return_value=[])
-
         response = await chain.answer("What was discussed?", sample_retrieved_chunks)
 
         assert response.answer  # non-empty
         assert response.latency_ms > 0
+        # All 3 come from parsing the model stub's RECOMMENDATIONS block
         assert len(response.recommendations) == 3
+        # 2 chunks across 2 distinct transcript_ids, answer is grounded
+        assert len(response.related_records) >= 1
         mock_chat_model.ainvoke.assert_called_once()
 
     @pytest.mark.asyncio
@@ -99,17 +97,8 @@ class TestAnswer:
 
         chain = GroundedAnsweringChain(failing_model, mock_settings)
 
-        # Patch builder to return fallback suggestions (simulating top-up)
-        chain._builder.suggestions = MagicMock(
-            return_value=[
-                RecommendationItem(text="Q1", reason="R1"),
-                RecommendationItem(text="Q2", reason="R2"),
-                RecommendationItem(text="Q3", reason="R3"),
-            ]
-        )
-        chain._builder.related_records = MagicMock(return_value=[])
-
         response = await chain.answer("What?", sample_retrieved_chunks)
 
         assert response.answer == _GENERATION_FAILURE_TEXT
-        assert len(response.recommendations) == 3  # builder tops up
+        # Real builder tops up from chunk metadata → static set
+        assert len(response.recommendations) == 3
