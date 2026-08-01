@@ -13,6 +13,7 @@ Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -338,3 +339,266 @@ class VectorRetriever(BaseRetriever):
         except Exception:
             logger.error("rag.retriever.vector_search_failed", exc_info=True)
             return []
+
+
+# ---------------------------------------------------------------------------
+# RRFRetriever — fuses fulltext + vector arms with Reciprocal Rank Fusion
+# ---------------------------------------------------------------------------
+
+
+class RRFRetriever:
+    """Fuses FulltextRetriever and VectorRetriever results using Reciprocal Rank Fusion.
+
+    Calls both retrievers in parallel via asyncio.gather, then combines
+    their ranked lists using RRF scoring: score = sum(1 / (k + rank)) per
+    document across both lists (k=60). Documents are identified by chunk_id.
+
+    This is NOT a LangChain BaseRetriever subclass — it orchestrates the two
+    underlying retrievers and returns fused Documents sorted by descending
+    fused score.
+
+    Requirements: 3.2, 3.4, 3.5
+    """
+
+    def __init__(
+        self,
+        fulltext_retriever: FulltextRetriever,
+        vector_retriever: VectorRetriever,
+    ) -> None:
+        self._fulltext_retriever = fulltext_retriever
+        self._vector_retriever = vector_retriever
+
+    async def retrieve(self, query: str, limit: int = _DEFAULT_LIMIT) -> list[Document]:
+        """Retrieve and fuse documents from both search arms.
+
+        Args:
+            query: The search query string.
+            limit: Maximum number of documents to return (capped at _MAX_LIMIT).
+
+        Returns:
+            List of Documents sorted by descending fused RRF score, capped at limit.
+        """
+        limit = min(limit, _MAX_LIMIT)
+
+        # Call both retrievers in parallel
+        fulltext_results, vector_results = await asyncio.gather(
+            self._fulltext_retriever.ainvoke(query),
+            self._vector_retriever.ainvoke(query),
+        )
+
+        # Fuse results using Reciprocal Rank Fusion
+        fused = self._reciprocal_rank_fusion(fulltext_results, vector_results)
+
+        logger.debug(
+            "rag.retriever.rrf_complete",
+            query_preview=query[:80],
+            fulltext_count=len(fulltext_results),
+            vector_count=len(vector_results),
+            fused_count=len(fused),
+            returned=min(len(fused), limit),
+        )
+
+        return fused[:limit]
+
+    @staticmethod
+    def _reciprocal_rank_fusion(
+        fulltext_results: list[Document],
+        vector_results: list[Document],
+    ) -> list[Document]:
+        """Combine ranked lists from both arms using RRF (k=60).
+
+        For each document appearing in either list:
+            fused_score = sum(1 / (k + rank))
+        where rank is 1-based position in the respective list.
+
+        Documents are identified by metadata["chunk_id"]. The fused score
+        is stored in metadata["score"], overwriting the per-arm score.
+        """
+        chunk_map: dict[int, tuple[Document, float]] = {}
+
+        for rank, doc in enumerate(fulltext_results, start=1):
+            chunk_id = doc.metadata["chunk_id"]
+            rrf_score = 1.0 / (_RRF_K + rank)
+            if chunk_id in chunk_map:
+                existing_doc, existing_score = chunk_map[chunk_id]
+                chunk_map[chunk_id] = (existing_doc, existing_score + rrf_score)
+            else:
+                chunk_map[chunk_id] = (doc, rrf_score)
+
+        for rank, doc in enumerate(vector_results, start=1):
+            chunk_id = doc.metadata["chunk_id"]
+            rrf_score = 1.0 / (_RRF_K + rank)
+            if chunk_id in chunk_map:
+                existing_doc, existing_score = chunk_map[chunk_id]
+                chunk_map[chunk_id] = (existing_doc, existing_score + rrf_score)
+            else:
+                chunk_map[chunk_id] = (doc, rrf_score)
+
+        # Sort by fused score descending
+        sorted_items = sorted(chunk_map.values(), key=lambda x: x[1], reverse=True)
+
+        # Set the fused score in metadata and return Documents
+        results: list[Document] = []
+        for doc, fused_score in sorted_items:
+            doc.metadata["score"] = fused_score
+            results.append(doc)
+
+        return results
+
+
+# ---------------------------------------------------------------------------
+# HybridRetriever — public facade for the router
+# ---------------------------------------------------------------------------
+
+
+class HybridRetriever:
+    """Public facade that orchestrates fulltext + vector + RRF retrieval.
+
+    This is the main entry point called by router.py. It creates both arm
+    retrievers, applies filters, fuses results via RRF, converts Documents
+    back to RetrievedChunk instances, and enriches them with metadata from
+    the hansard_record and sitting tables.
+
+    Requirements: 3.6, 3.7
+    """
+
+    def __init__(
+        self,
+        session_factory: Any,
+        embeddings: Any,
+        settings: Any = None,
+    ) -> None:
+        self._session_factory = session_factory
+        self._embeddings = embeddings
+        self._settings = settings
+
+    async def retrieve(
+        self,
+        query: str,
+        filters: RetrievalFilters | None = None,
+        limit: int = _DEFAULT_LIMIT,
+    ) -> list[RetrievedChunk]:
+        """Execute hybrid retrieval and return enriched chunks.
+
+        Creates both retriever arms with the given filters, fuses via RRF,
+        converts the fused Documents to RetrievedChunk, and enriches with
+        metadata (record_title, sitting_title, date).
+
+        Args:
+            query: The user's search query.
+            filters: Optional pre-filters (entity names, date range, speaker).
+            limit: Maximum number of results (default 10, max 50).
+
+        Returns:
+            List of RetrievedChunk sorted by descending fused relevance score.
+        """
+        limit = min(limit, _MAX_LIMIT)
+
+        logger.info(
+            "rag.retriever.hybrid_retrieve_start",
+            query_preview=query[:80],
+            has_filters=filters is not None,
+            limit=limit,
+        )
+
+        # Step 1: Create both retriever arms with filters applied
+        fulltext = FulltextRetriever(
+            session_factory=self._session_factory,
+            filters=filters,
+        )
+        vector = VectorRetriever(
+            session_factory=self._session_factory,
+            embeddings=self._embeddings,
+            filters=filters,
+        )
+
+        # Step 2: Fuse via RRF
+        rrf = RRFRetriever(fulltext, vector)
+        fused_docs = await rrf.retrieve(query, limit)
+
+        # Step 3: Convert Documents to RetrievedChunk
+        chunks = self._docs_to_chunks(fused_docs)
+
+        # Step 4: Enrich with metadata (record_title, sitting_title, date)
+        if chunks:
+            chunks = await self._enrich_with_metadata(chunks)
+
+        logger.info(
+            "rag.retriever.hybrid_retrieve_complete",
+            query_preview=query[:80],
+            results=len(chunks),
+        )
+
+        return chunks
+
+    @staticmethod
+    def _docs_to_chunks(documents: list[Document]) -> list[RetrievedChunk]:
+        """Convert fused LangChain Documents to RetrievedChunk instances."""
+        chunks: list[RetrievedChunk] = []
+        for doc in documents:
+            meta = doc.metadata
+            chunk = RetrievedChunk(
+                chunk_id=meta["chunk_id"],
+                text=doc.page_content,
+                relevance_score=meta["score"],
+                transcript_id=meta["transcript_id"],
+                speaker=meta.get("speaker"),
+                start_s=meta.get("start_s"),
+                end_s=meta.get("end_s"),
+                matched_entities=meta.get("entity_names", []),
+            )
+            chunks.append(chunk)
+        return chunks
+
+    async def _enrich_with_metadata(
+        self,
+        chunks: list[RetrievedChunk],
+    ) -> list[RetrievedChunk]:
+        """Enrich chunks with record title, sitting title, and date.
+
+        Fetches metadata via a single query joining through the
+        transcript → hansard_record → sitting chain.
+        """
+        chunk_ids = [c.chunk_id for c in chunks]
+
+        sql = """
+            SELECT
+                tc.id AS chunk_id,
+                hr.title AS record_title,
+                s.title AS sitting_title,
+                hr.date::text AS record_date
+            FROM transcript_chunk tc
+            JOIN transcript t ON t.id = tc.transcript_id
+            JOIN hansard_record hr ON hr.id = t.record_id
+            JOIN sitting s ON s.id = hr.sitting_id
+            WHERE tc.id = ANY(:chunk_ids)
+        """
+
+        try:
+            async with self._session_factory() as session:
+                result = await session.execute(
+                    text(sql), {"chunk_ids": chunk_ids}
+                )
+                rows = result.fetchall()
+
+                metadata_map: dict[int, dict] = {}
+                for row in rows:
+                    metadata_map[row[0]] = {
+                        "record_title": row[1],
+                        "sitting_title": row[2],
+                        "date": row[3],
+                    }
+
+                for chunk in chunks:
+                    meta = metadata_map.get(chunk.chunk_id, {})
+                    chunk.record_title = meta.get("record_title")
+                    chunk.sitting_title = meta.get("sitting_title")
+                    chunk.date = meta.get("date")
+
+        except Exception:
+            logger.error(
+                "rag.retriever.metadata_enrichment_failed",
+                exc_info=True,
+            )
+
+        return chunks
