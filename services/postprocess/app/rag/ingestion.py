@@ -8,21 +8,22 @@ Follows the same bounded-queue + background-task pattern as
 CorrectionHistoryWriter: ingestion is fully async, non-blocking, and
 overflow is logged rather than allowed to stall request handlers.
 
-Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8
+Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-import boto3
 import structlog
-from botocore.config import Config
+from langchain_aws import BedrockEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
 
@@ -73,13 +74,19 @@ class TranscriptIngestionWorker:
         session_factory: async_sessionmaker[AsyncSession],
         settings: Settings,
         max_queue_size: int = 100,
+        embeddings: BedrockEmbeddings | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._settings = settings
         self._queue: asyncio.Queue[int] = asyncio.Queue(maxsize=max_queue_size)
         self._dropped_count: int = 0
         self._task: asyncio.Task[None] | None = None
-        self._bedrock_client = self._build_bedrock_client(settings)
+        self._embeddings = embeddings
+        self._text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,  # ~200 words * 5 chars/word
+            chunk_overlap=50,
+            separators=["\n\n", "\n", ". ", " "],
+        )
 
     @property
     def dropped_count(self) -> int:
@@ -97,10 +104,8 @@ class TranscriptIngestionWorker:
         if self._task is None:
             return
         self._task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await self._task
-        except asyncio.CancelledError:
-            pass
         # Drain any remaining transcript IDs
         await self._drain_remaining()
 
@@ -264,49 +269,12 @@ class TranscriptIngestionWorker:
     # Private helpers
     # -----------------------------------------------------------------------
 
-    @staticmethod
-    def _build_bedrock_client(settings: Settings):
-        """Build a boto3 bedrock-runtime client for embedding generation."""
-        config = Config(
-            region_name=settings.aws_region,
-            read_timeout=30.0,
-            connect_timeout=10.0,
-            retries={"max_attempts": 2, "mode": "standard"},
-        )
-        return boto3.client(
-            "bedrock-runtime",
-            region_name=settings.aws_region,
-            config=config,
-        )
-
     async def _generate_embedding(self, text_content: str) -> list[float]:
-        """Call Bedrock Titan Text Embeddings V2 to generate an embedding.
-
-        Runs the synchronous boto3 call in a thread executor to avoid
-        blocking the event loop.
-        """
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._invoke_embedding_model, text_content
-        )
-
-    def _invoke_embedding_model(self, text_content: str) -> list[float]:
-        """Synchronous call to Bedrock Titan Text Embeddings V2."""
-        body = json.dumps({
-            "inputText": text_content,
-            "dimensions": _EMBEDDING_DIMENSION,
-            "normalize": True,
-        })
-
-        response = self._bedrock_client.invoke_model(
-            modelId=_EMBEDDING_MODEL_ID,
-            contentType="application/json",
-            accept="application/json",
-            body=body,
-        )
-
-        response_body = json.loads(response["body"].read())
-        return response_body["embedding"]
+        """Generate embedding via BedrockEmbeddings."""
+        if self._embeddings is None:
+            raise RuntimeError("Embeddings client not configured")
+        result = await self._embeddings.aembed_documents([text_content])
+        return result[0]
 
     def _group_speaker_turns(
         self, words: list[dict]
@@ -470,28 +438,19 @@ class TranscriptIngestionWorker:
     ) -> list[Chunk]:
         """Fallback chunking when no word timings are available.
 
-        Splits by whitespace into chunks of 100-200 words. No speaker
-        or timestamp information is available.
+        Uses RecursiveCharacterTextSplitter for intelligent splitting
+        with overlap and sentence-aware boundaries.
         """
-        words = text_content.split()
-        if not words:
-            return []
-
         # Collect all entity names (no time-based filtering possible)
-        all_entity_names = list({
-            e["name"] for e in entities if "name" in e
-        })
+        all_entity_names = list({e["name"] for e in entities if "name" in e})
+
+        sub_texts = self._text_splitter.split_text(text_content)
 
         chunks: list[Chunk] = []
-        ordinal = 0
-        i = 0
-
-        while i < len(words):
-            end = min(i + _MAX_CHUNK_WORDS, len(words))
-            chunk_text = " ".join(words[i:end])
+        for ordinal, text_segment in enumerate(sub_texts):
             chunks.append(
                 Chunk(
-                    text=chunk_text,
+                    text=text_segment,
                     start_s=None,
                     end_s=None,
                     speaker=None,
@@ -499,9 +458,6 @@ class TranscriptIngestionWorker:
                     ordinal=ordinal,
                 )
             )
-            ordinal += 1
-            i = end
-
         return chunks
 
     async def _load_transcript(self, transcript_id: int) -> dict | None:
@@ -546,15 +502,14 @@ class TranscriptIngestionWorker:
     async def _delete_existing_chunks(self, transcript_id: int) -> None:
         """Delete existing chunks for a transcript (for re-ingestion)."""
         try:
-            async with self._session_factory() as session:
-                async with session.begin():
-                    await session.execute(
-                        text(
-                            "DELETE FROM transcript_chunk "
-                            "WHERE transcript_id = :transcript_id"
-                        ),
-                        {"transcript_id": transcript_id},
-                    )
+            async with self._session_factory() as session, session.begin():
+                await session.execute(
+                    text(
+                        "DELETE FROM transcript_chunk "
+                        "WHERE transcript_id = :transcript_id"
+                    ),
+                    {"transcript_id": transcript_id},
+                )
         except Exception:
             logger.error(
                 "rag.ingestion.delete_chunks_failed",
@@ -574,39 +529,38 @@ class TranscriptIngestionWorker:
         vector and without an indexed_at timestamp (marked as unindexed).
         """
         try:
-            async with self._session_factory() as session:
-                async with session.begin():
-                    for chunk, embedding in zip(chunks, embeddings):
-                        indexed_at = (
-                            datetime.now(timezone.utc) if embedding else None
-                        )
-                        # Format embedding as pgvector literal or NULL
-                        embedding_value = (
-                            str(embedding) if embedding else None
-                        )
+            async with self._session_factory() as session, session.begin():
+                for chunk, embedding in zip(chunks, embeddings, strict=True):
+                    indexed_at = (
+                        datetime.now(UTC) if embedding else None
+                    )
+                    # Format embedding as pgvector literal or NULL
+                    embedding_value = (
+                        str(embedding) if embedding else None
+                    )
 
-                        await session.execute(
-                            text(
-                                "INSERT INTO transcript_chunk "
-                                "(transcript_id, ordinal, text, start_s, end_s, "
-                                "speaker, entity_names, embedding, model_id, indexed_at) "
-                                "VALUES "
-                                "(:transcript_id, :ordinal, :text, :start_s, :end_s, "
-                                ":speaker, :entity_names, :embedding, :model_id, :indexed_at)"
-                            ),
-                            {
-                                "transcript_id": transcript_id,
-                                "ordinal": chunk.ordinal,
-                                "text": chunk.text,
-                                "start_s": chunk.start_s,
-                                "end_s": chunk.end_s,
-                                "speaker": chunk.speaker,
-                                "entity_names": chunk.entity_names,
-                                "embedding": embedding_value,
-                                "model_id": _EMBEDDING_MODEL_ID,
-                                "indexed_at": indexed_at,
-                            },
-                        )
+                    await session.execute(
+                        text(
+                            "INSERT INTO transcript_chunk "
+                            "(transcript_id, ordinal, text, start_s, end_s, "
+                            "speaker, entity_names, embedding, model_id, indexed_at) "
+                            "VALUES "
+                            "(:transcript_id, :ordinal, :text, :start_s, :end_s, "
+                            ":speaker, :entity_names, :embedding, :model_id, :indexed_at)"
+                        ),
+                        {
+                            "transcript_id": transcript_id,
+                            "ordinal": chunk.ordinal,
+                            "text": chunk.text,
+                            "start_s": chunk.start_s,
+                            "end_s": chunk.end_s,
+                            "speaker": chunk.speaker,
+                            "entity_names": chunk.entity_names,
+                            "embedding": embedding_value,
+                            "model_id": _EMBEDDING_MODEL_ID,
+                            "indexed_at": indexed_at,
+                        },
+                    )
 
             logger.debug(
                 "rag.ingestion.chunks_stored",
