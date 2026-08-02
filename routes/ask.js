@@ -37,6 +37,10 @@ function mapAskResponse(raw) {
       startS: c.start_s ?? null,
       endS: c.end_s ?? null,
       excerpt: c.excerpt || "",
+      // Distinct identifier spaces — the frontend navigates by sitting+record,
+      // never by transcriptId.
+      sittingId: c.sitting_id ?? null,
+      recordId: c.record_id ?? null,
     })),
     sourceChunks: (raw.source_chunks || []).filter(Boolean).map((c) => ({
       chunkId: c.chunk_id ?? 0,
@@ -50,6 +54,8 @@ function mapAskResponse(raw) {
       recordTitle: c.record_title || null,
       sittingTitle: c.sitting_title || null,
       date: c.date || null,
+      sittingId: c.sitting_id ?? null,
+      recordId: c.record_id ?? null,
     })),
     recommendations: (raw.recommendations || []).filter(Boolean).map((r) => ({
       text: r.text || "",
@@ -64,6 +70,8 @@ function mapAskResponse(raw) {
       recordTitle: r.record_title || null,
       date: r.date || null,
       startS: r.start_s ?? null,
+      sittingId: r.sitting_id ?? null,
+      recordId: r.record_id ?? null,
     })),
     latencyMs: raw.latency_ms ?? raw.latencyMs ?? 0,
   };

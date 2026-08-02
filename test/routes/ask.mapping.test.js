@@ -66,6 +66,8 @@ describe("mapAskResponse", () => {
           start_s: 10.5,
           end_s: 20.3,
           excerpt: "We propose...",
+          sitting_id: 1,
+          record_id: 1,
         },
       ],
       source_chunks: [
@@ -81,6 +83,8 @@ describe("mapAskResponse", () => {
           record_title: "Budget Statement",
           sitting_title: "3rd Sitting",
           date: "2024-03-15",
+          sitting_id: 1,
+          record_id: 1,
         },
       ],
       recommendations: [
@@ -96,6 +100,8 @@ describe("mapAskResponse", () => {
           record_title: "Opening Statement",
           date: "2024-03-14",
           start_s: 5.0,
+          sitting_id: 1,
+          record_id: 2,
         },
       ],
     };
@@ -113,6 +119,8 @@ describe("mapAskResponse", () => {
       startS: 10.5,
       endS: 20.3,
       excerpt: "We propose...",
+      sittingId: 1,
+      recordId: 1,
     });
 
     assert.strictEqual(result.sourceChunks.length, 1);
@@ -128,6 +136,8 @@ describe("mapAskResponse", () => {
       recordTitle: "Budget Statement",
       sittingTitle: "3rd Sitting",
       date: "2024-03-15",
+      sittingId: 1,
+      recordId: 1,
     });
 
     assert.strictEqual(result.recommendations.length, 1);
@@ -146,7 +156,94 @@ describe("mapAskResponse", () => {
       recordTitle: "Opening Statement",
       date: "2024-03-14",
       startS: 5.0,
+      sittingId: 1,
+      recordId: 2,
     });
+  });
+
+  it("maps sitting_id and record_id to sittingId and recordId on citations", () => {
+    // transcript 2 lives inside record 1 of sitting 1 — all three differ, so a
+    // regression to "transcriptId for everything" cannot pass this.
+    const result = mapAskResponse({
+      answer: "test",
+      citations: [
+        { transcript_id: 2, chunk_id: 63, sitting_id: 1, record_id: 1 },
+      ],
+    });
+
+    assert.strictEqual(result.citations[0].transcriptId, 2);
+    assert.strictEqual(result.citations[0].sittingId, 1);
+    assert.strictEqual(result.citations[0].recordId, 1);
+  });
+
+  it("maps sitting_id and record_id to null on citations when absent", () => {
+    const result = mapAskResponse({
+      answer: "test",
+      citations: [{ transcript_id: 2, chunk_id: 63 }],
+    });
+
+    assert.strictEqual(result.citations[0].sittingId, null);
+    assert.strictEqual(result.citations[0].recordId, null);
+  });
+
+  it("maps sitting_id and record_id on sourceChunks", () => {
+    const result = mapAskResponse({
+      answer: "test",
+      source_chunks: [
+        { chunk_id: 63, transcript_id: 2, sitting_id: 4, record_id: 7 },
+        { chunk_id: 64, transcript_id: 3 },
+      ],
+    });
+
+    assert.strictEqual(result.sourceChunks[0].sittingId, 4);
+    assert.strictEqual(result.sourceChunks[0].recordId, 7);
+    assert.strictEqual(result.sourceChunks[1].sittingId, null);
+    assert.strictEqual(result.sourceChunks[1].recordId, null);
+  });
+
+  it("preserves sourceChunk provenance metadata through the mapping", () => {
+    const result = mapAskResponse({
+      answer: "test",
+      source_chunks: [
+        {
+          chunk_id: 63,
+          transcript_id: 2,
+          record_title: "Budget Debate 2026",
+          sitting_title: "First Sitting",
+          date: "2026-02-01",
+        },
+      ],
+    });
+
+    assert.strictEqual(result.sourceChunks[0].recordTitle, "Budget Debate 2026");
+    assert.strictEqual(result.sourceChunks[0].sittingTitle, "First Sitting");
+    assert.strictEqual(result.sourceChunks[0].date, "2026-02-01");
+  });
+
+  it("maps sitting_id and record_id on relatedRecords", () => {
+    const result = mapAskResponse({
+      answer: "test",
+      related_records: [
+        { transcript_id: 2, label: "Budget Debate", chunk_id: 63, sitting_id: 1, record_id: 1 },
+        { transcript_id: 3, label: "Question Time", chunk_id: 64 },
+      ],
+    });
+
+    assert.strictEqual(result.relatedRecords[0].transcriptId, 2);
+    assert.strictEqual(result.relatedRecords[0].sittingId, 1);
+    assert.strictEqual(result.relatedRecords[0].recordId, 1);
+    assert.strictEqual(result.relatedRecords[1].sittingId, null);
+    assert.strictEqual(result.relatedRecords[1].recordId, null);
+  });
+
+  it("maps a sitting_id or record_id of 0 without coercing it to null", () => {
+    const result = mapAskResponse({
+      answer: "test",
+      citations: [{ transcript_id: 2, chunk_id: 63, sitting_id: 0, record_id: 0 }],
+    });
+
+    assert.strictEqual(result.citations[0].sittingId, 0);
+    assert.strictEqual(result.citations[0].recordId, 0);
   });
 
   it("maps citations absent to empty array", () => {

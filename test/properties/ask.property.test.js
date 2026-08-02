@@ -15,6 +15,8 @@ const rawRelatedRecord = fc.record({
   record_title: fc.oneof(fc.string(), fc.constant(null)),
   date: fc.oneof(fc.string(), fc.constant(null)),
   start_s: fc.oneof(fc.float(), fc.constant(null)),
+  sitting_id: fc.oneof(fc.integer(), fc.constant(null)),
+  record_id: fc.oneof(fc.integer(), fc.constant(null)),
 }, { requiredKeys: [] });
 
 const rawResponse = fc.record({
@@ -26,6 +28,8 @@ const rawResponse = fc.record({
     start_s: fc.oneof(fc.float(), fc.constant(null)),
     end_s: fc.oneof(fc.float(), fc.constant(null)),
     excerpt: fc.oneof(fc.string(), fc.constant("")),
+    sitting_id: fc.oneof(fc.integer(), fc.constant(null)),
+    record_id: fc.oneof(fc.integer(), fc.constant(null)),
   }, { requiredKeys: [] })), fc.constant(null), fc.constant(undefined)),
   source_chunks: fc.oneof(fc.array(fc.anything()), fc.constant(null), fc.constant(undefined)),
   recommendations: fc.oneof(fc.array(fc.record({
@@ -68,6 +72,16 @@ describe("mapAskResponse — property tests", () => {
           assert.ok(rec.recordTitle === null || typeof rec.recordTitle === "string");
           assert.ok(rec.date === null || typeof rec.date === "string");
           assert.ok(rec.startS === null || typeof rec.startS === "number");
+          // Navigation ids are either absent (null) or a real id — never
+          // undefined, since the frontend keys "not navigable" off null.
+          assert.ok(rec.sittingId === null || typeof rec.sittingId === "number");
+          assert.ok(rec.recordId === null || typeof rec.recordId === "number");
+        }
+
+        // Citations carry the same navigation contract
+        for (const citation of result.citations) {
+          assert.ok(citation.sittingId === null || typeof citation.sittingId === "number");
+          assert.ok(citation.recordId === null || typeof citation.recordId === "number");
         }
       }),
       { numRuns: 200 }

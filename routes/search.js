@@ -134,6 +134,9 @@ module.exports = function searchRoutes(requireSession, db) {
             recordTitle: r.record_title,
             sittingTitle: r.sitting_title,
             date: r.date,
+            // Navigation target — distinct identifier spaces from transcriptId.
+            sittingId: r.sitting_id ?? null,
+            recordId: r.record_id ?? null,
           })),
           totalMatched: raw.total_matched ?? raw.totalMatched ?? 0,
           latencyMs: raw.latency_ms ?? raw.latencyMs ?? 0,
