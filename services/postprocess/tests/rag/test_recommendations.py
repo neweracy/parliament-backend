@@ -14,10 +14,13 @@ Validates: Requirements 3.3, 3.4
 
 from __future__ import annotations
 
+from langchain_core.documents import Document
+
 from app.rag.recommendations import (
     _STATIC_SUGGESTIONS,
     CorpusHints,
     RecommendationBuilder,
+    chunks_to_documents,
     fetch_corpus_hints,
     normalise_question,
 )
@@ -363,3 +366,111 @@ def test_finalise_answer_accepts_retrieved_chunks(sample_retrieved_chunks):
     assert all(r.text and r.reason for r in response.recommendations)
     assert len(response.related_records) >= 1
     assert response.source_chunks == sample_retrieved_chunks
+
+
+# ---------------------------------------------------------------------------
+# related_records dedup key — record_id, falling back to transcript_id
+# ---------------------------------------------------------------------------
+
+
+def _related_chunk(
+    *,
+    chunk_id: int,
+    transcript_id: int,
+    record_id: int | None,
+    sitting_id: int | None = 1,
+    label: str = "Budget Debate 2026 — Revised",
+) -> Document:
+    """Build a Document carrying only the fields related_records reads."""
+    return Document(
+        page_content="text",
+        metadata={
+            "chunk_id": chunk_id,
+            "transcript_id": transcript_id,
+            "record_id": record_id,
+            "sitting_id": sitting_id,
+            "speaker": None,
+            "start_s": None,
+            "end_s": None,
+            "entity_names": [],
+            "score": 0.5,
+            "sitting_title": label,
+            "record_title": None,
+            "date": None,
+        },
+    )
+
+
+def test_related_records_dedup_by_record_id_not_transcript_id():
+    """Two transcript versions of one record collapse into a single chip.
+
+    Regression: dedup used to key on `transcript_id`, so two transcripts of the
+    same record produced two chips with the same label pointing at the same
+    destination.
+    """
+    chunks = [
+        _related_chunk(chunk_id=1, transcript_id=1, record_id=1),
+        _related_chunk(chunk_id=2, transcript_id=2, record_id=1),
+    ]
+
+    records = RecommendationBuilder().related_records(chunks=chunks)
+
+    assert len(records) == 1
+    assert records[0].record_id == 1
+    assert records[0].sitting_id == 1
+    # The highest-scoring chunk wins its key.
+    assert records[0].chunk_id == 1
+    assert records[0].transcript_id == 1
+
+
+def test_related_records_keeps_distinct_record_ids():
+    """Chunks with different record_id values each get their own chip."""
+    chunks = [
+        _related_chunk(chunk_id=1, transcript_id=1, record_id=1, label="Budget Debate"),
+        _related_chunk(chunk_id=2, transcript_id=1, record_id=2, label="Question Time"),
+    ]
+
+    records = RecommendationBuilder().related_records(chunks=chunks)
+
+    assert [r.record_id for r in records] == [1, 2]
+    assert [r.label for r in records] == ["Budget Debate", "Question Time"]
+
+
+def test_related_records_falls_back_to_transcript_id_when_record_id_is_none():
+    """Un-enriched chunks keep the old transcript_id dedup behaviour."""
+    chunks = [
+        _related_chunk(chunk_id=1, transcript_id=1, record_id=None, sitting_id=None),
+        _related_chunk(chunk_id=2, transcript_id=1, record_id=None, sitting_id=None),
+        _related_chunk(chunk_id=3, transcript_id=2, record_id=None, sitting_id=None),
+    ]
+
+    records = RecommendationBuilder().related_records(chunks=chunks)
+
+    assert [r.transcript_id for r in records] == [1, 2]
+    assert all(r.record_id is None and r.sitting_id is None for r in records)
+
+
+def test_related_records_mixed_present_and_absent_record_ids():
+    """A None record_id never collides with a present one."""
+    chunks = [
+        _related_chunk(chunk_id=1, transcript_id=1, record_id=1),
+        _related_chunk(chunk_id=2, transcript_id=1, record_id=None),
+    ]
+
+    records = RecommendationBuilder().related_records(chunks=chunks)
+
+    assert len(records) == 2
+    assert [r.record_id for r in records] == [1, None]
+
+
+def test_chunks_to_documents_carries_navigation_ids(sample_retrieved_chunks):
+    """chunks_to_documents projects sitting_id and record_id onto the metadata."""
+    sample_retrieved_chunks[0].sitting_id = 4
+    sample_retrieved_chunks[0].record_id = 9
+
+    documents = chunks_to_documents(sample_retrieved_chunks)
+
+    assert documents[0].metadata["sitting_id"] == 4
+    assert documents[0].metadata["record_id"] == 9
+    assert documents[1].metadata["sitting_id"] is None
+    assert documents[1].metadata["record_id"] is None

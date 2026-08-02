@@ -89,6 +89,8 @@ def validate_citations(
                 start_s=chunk.start_s,
                 end_s=chunk.end_s,
                 excerpt=excerpt,
+                sitting_id=chunk.sitting_id,
+                record_id=chunk.record_id,
             )
         )
 

@@ -82,6 +82,12 @@ class RetrievedChunk:
     record_title: str | None = None
     sitting_title: str | None = None
     date: str | None = None
+    # `transcript_id`, `record_id`, and `sitting_id` are three distinct
+    # identifier spaces. Navigation targets address a record inside a sitting,
+    # so both are carried through separately from the transcript id. Populated
+    # by `HybridRetriever._enrich_with_metadata`.
+    sitting_id: int | None = None
+    record_id: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -550,10 +556,13 @@ class HybridRetriever:
         self,
         chunks: list[RetrievedChunk],
     ) -> list[RetrievedChunk]:
-        """Enrich chunks with record title, sitting title, and date.
+        """Enrich chunks with record/sitting identifiers, titles, and date.
 
         Fetches metadata via a single query joining through the
-        transcript → hansard_record → sitting chain.
+        transcript → hansard_record → sitting chain. The join already reaches
+        both parent rows, so `hr.id` and `s.id` come for free and give the
+        frontend the real navigation target instead of guessing from
+        `transcript_id`.
         """
         chunk_ids = [c.chunk_id for c in chunks]
 
@@ -562,7 +571,9 @@ class HybridRetriever:
                 tc.id AS chunk_id,
                 hr.title AS record_title,
                 s.title AS sitting_title,
-                hr.date::text AS record_date
+                hr.date::text AS record_date,
+                hr.id AS record_id,
+                s.id AS sitting_id
             FROM transcript_chunk tc
             JOIN transcript t ON t.id = tc.transcript_id
             JOIN hansard_record hr ON hr.id = t.record_id
@@ -581,6 +592,8 @@ class HybridRetriever:
                         "record_title": row[1],
                         "sitting_title": row[2],
                         "date": row[3],
+                        "record_id": row[4],
+                        "sitting_id": row[5],
                     }
 
                 for chunk in chunks:
@@ -588,6 +601,8 @@ class HybridRetriever:
                     chunk.record_title = meta.get("record_title")
                     chunk.sitting_title = meta.get("sitting_title")
                     chunk.date = meta.get("date")
+                    chunk.record_id = meta.get("record_id")
+                    chunk.sitting_id = meta.get("sitting_id")
 
         except Exception:
             logger.error(

@@ -69,6 +69,8 @@ class SearchResultItem(BaseModel):
     record_title: str | None
     sitting_title: str | None
     date: str | None
+    sitting_id: int | None = None
+    record_id: int | None = None
 
 
 class SearchResponse(BaseModel):
@@ -113,6 +115,8 @@ class CitationItem(BaseModel):
     start_s: float | None
     end_s: float | None
     excerpt: str
+    sitting_id: int | None = None
+    record_id: int | None = None
 
 
 class SourceChunkItem(BaseModel):
@@ -126,6 +130,11 @@ class SourceChunkItem(BaseModel):
     start_s: float | None
     end_s: float | None
     matched_entities: list[str]
+    record_title: str | None = None
+    sitting_title: str | None = None
+    date: str | None = None
+    sitting_id: int | None = None
+    record_id: int | None = None
 
 
 class Recommendation(BaseModel):
@@ -146,6 +155,8 @@ class RelatedRecord(BaseModel):
     record_title: str | None = None
     date: str | None = None
     start_s: float | None = None
+    sitting_id: int | None = None
+    record_id: int | None = None
 
 
 class AskResponse(BaseModel):
@@ -227,6 +238,8 @@ async def rag_search(body: SearchRequest, request: Request) -> SearchResponse:
             record_title=c.record_title,
             sitting_title=c.sitting_title,
             date=c.date,
+            sitting_id=c.sitting_id,
+            record_id=c.record_id,
         )
         for c in chunks
     ]
@@ -304,6 +317,8 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
             start_s=c.start_s,
             end_s=c.end_s,
             excerpt=c.excerpt,
+            sitting_id=c.sitting_id,
+            record_id=c.record_id,
         )
         for c in answer_response.citations
     ]
@@ -318,6 +333,11 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
             start_s=c.start_s,
             end_s=c.end_s,
             matched_entities=c.matched_entities,
+            record_title=c.record_title,
+            sitting_title=c.sitting_title,
+            date=c.date,
+            sitting_id=c.sitting_id,
+            record_id=c.record_id,
         )
         for c in answer_response.source_chunks
     ]
@@ -332,6 +352,8 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
             record_title=r.record_title,
             date=r.date,
             start_s=r.start_s,
+            sitting_id=r.sitting_id,
+            record_id=r.record_id,
         )
         for r in answer_response.related_records
     ]

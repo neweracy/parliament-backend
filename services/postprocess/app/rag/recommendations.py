@@ -67,6 +67,10 @@ class Citation:
         start_s: Start timestamp of the cited chunk in seconds.
         end_s: End timestamp of the cited chunk in seconds.
         excerpt: A short excerpt from the cited chunk text.
+        sitting_id: The sitting the cited chunk belongs to — the navigation
+            target, distinct from `transcript_id`.
+        record_id: The hansard record the cited chunk belongs to — the
+            navigation target, distinct from `transcript_id`.
     """
 
     transcript_id: int
@@ -75,6 +79,8 @@ class Citation:
     start_s: float | None
     end_s: float | None
     excerpt: str
+    sitting_id: int | None = None
+    record_id: int | None = None
 
 
 @dataclass
@@ -101,6 +107,9 @@ class RelatedRecordItem:
         record_title: Record title of the source chunk (if available).
         date: Date of the source chunk (if available).
         start_s: Start timestamp of the source chunk in seconds (if available).
+        sitting_id: The sitting the record belongs to — the navigation target.
+        record_id: The hansard record itself — the navigation target, and the
+            dedup key used by `RecommendationBuilder.related_records`.
     """
 
     transcript_id: int
@@ -111,6 +120,8 @@ class RelatedRecordItem:
     record_title: str | None = None
     date: str | None = None
     start_s: float | None = None
+    sitting_id: int | None = None
+    record_id: int | None = None
 
 
 @dataclass
@@ -192,6 +203,8 @@ def chunks_to_documents(chunks: Iterable[RetrievedChunk]) -> list[Document]:
                     "record_title": chunk.record_title,
                     "sitting_title": chunk.sitting_title,
                     "date": chunk.date,
+                    "sitting_id": chunk.sitting_id,
+                    "record_id": chunk.record_id,
                 },
             )
         )
@@ -215,6 +228,8 @@ def _make_related_record(chunk: Document, label: str) -> RelatedRecordItem:
         record_title=_clean(meta.get("record_title")),
         date=_clean(meta.get("date")),
         start_s=meta.get("start_s"),
+        sitting_id=meta.get("sitting_id"),
+        record_id=meta.get("record_id"),
     )
 
 
@@ -399,10 +414,17 @@ class RecommendationBuilder:
         chunks: list[Document],
         limit: int = MAX_RELATED_RECORDS,
     ) -> list[RelatedRecordItem]:
-        """Return at most `limit` records, at most one per transcript_id.
+        """Return at most `limit` records, at most one per `record_id`.
+
+        A related record is a navigation target pointing at a hansard record, so
+        `record_id` is the dedup key — not `transcript_id`. Two transcript
+        versions of the same record share a label and a destination, so keying
+        on `transcript_id` produced visibly duplicated chips. Chunks whose
+        `record_id` is absent fall back to `transcript_id` as the key, keeping
+        the old behaviour for un-enriched chunks.
 
         Chunks are consumed in the order given (relevance order from the
-        retriever), so the highest-scoring chunk wins its transcript_id.
+        retriever), so the highest-scoring chunk wins its key.
 
         The label of each record is the first non-empty value among the source
         chunk's `sitting_title`, `record_title`, `speaker`, and `date`, falling
@@ -416,19 +438,25 @@ class RecommendationBuilder:
 
         Returns:
             At most `limit` RelatedRecordItem objects, one per distinct
-            transcript_id, in the order their source chunks were given.
+            `record_id` (or `transcript_id` when `record_id` is None), in the
+            order their source chunks were given.
         """
         if limit <= 0:
             return []
 
-        seen: set[int] = set()
+        seen: set[tuple[str, int]] = set()
         records: list[RelatedRecordItem] = []
 
         for chunk in chunks or []:
-            transcript_id = chunk.metadata["transcript_id"]
-            if transcript_id in seen:
+            record_id = chunk.metadata.get("record_id")
+            key = (
+                ("record", record_id)
+                if record_id is not None
+                else ("transcript", chunk.metadata["transcript_id"])
+            )
+            if key in seen:
                 continue
-            seen.add(transcript_id)
+            seen.add(key)
             records.append(_make_related_record(chunk, _record_label(chunk)))
             if len(records) == limit:
                 break

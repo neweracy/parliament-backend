@@ -235,3 +235,127 @@ class TestHybridRetrieverDocsToChunks:
         """Empty document list returns empty chunk list."""
         chunks = HybridRetriever._docs_to_chunks([])
         assert chunks == []
+
+
+class TestHybridRetrieverEnrichWithMetadata:
+    """Tests for HybridRetriever._enrich_with_metadata.
+
+    The enrichment join already reaches `hansard_record` and `sitting`, so it is
+    the single place where a chunk learns its real navigation target. A chunk
+    that comes back without `sitting_id`/`record_id` leaves the frontend with
+    nothing but `transcript_id`, which addresses a different identifier space.
+    """
+
+    @staticmethod
+    def _retriever_with_rows(rows: list[tuple]) -> tuple[HybridRetriever, dict]:
+        """Build a HybridRetriever whose session returns `rows`, capturing params."""
+        captured: dict = {}
+
+        class _Result:
+            def fetchall(self):
+                return rows
+
+        class _Session:
+            async def execute(self, statement, params=None):
+                captured["sql"] = str(statement)
+                captured["params"] = params
+                return _Result()
+
+        class _Factory:
+            def __call__(self):
+                return self
+
+            async def __aenter__(self):
+                return _Session()
+
+            async def __aexit__(self, *exc):
+                return None
+
+        return HybridRetriever(_Factory(), embeddings=None), captured
+
+    @pytest.mark.asyncio
+    async def test_populates_sitting_id_and_record_id(self):
+        """Enrichment sets sitting_id and record_id alongside the titles and date."""
+        chunks = HybridRetriever._docs_to_chunks(
+            [
+                Document(
+                    page_content="Budget text",
+                    metadata={
+                        "chunk_id": 11,
+                        "transcript_id": 2,
+                        "score": 0.9,
+                        "speaker": "Hon. Doe",
+                        "start_s": 1.0,
+                        "end_s": 2.0,
+                        "entity_names": [],
+                    },
+                )
+            ]
+        )
+        # transcript 2 belongs to record 1 in sitting 1 — the exact shape that
+        # made the old "transcript_id as recordId" behaviour fail.
+        retriever, _ = self._retriever_with_rows(
+            [(11, "Budget Debate 2026", "First Sitting", "2026-02-01", 1, 1)]
+        )
+
+        enriched = await retriever._enrich_with_metadata(chunks)
+
+        assert enriched[0].record_id == 1
+        assert enriched[0].sitting_id == 1
+        assert enriched[0].transcript_id == 2
+        assert enriched[0].record_title == "Budget Debate 2026"
+        assert enriched[0].sitting_title == "First Sitting"
+        assert enriched[0].date == "2026-02-01"
+
+    @pytest.mark.asyncio
+    async def test_uses_a_single_query(self):
+        """Enrichment issues one query that already joins record and sitting."""
+        chunks = HybridRetriever._docs_to_chunks(
+            [
+                Document(
+                    page_content="text",
+                    metadata={
+                        "chunk_id": 5,
+                        "transcript_id": 7,
+                        "score": 0.5,
+                        "speaker": None,
+                        "start_s": None,
+                        "end_s": None,
+                        "entity_names": [],
+                    },
+                )
+            ]
+        )
+        retriever, captured = self._retriever_with_rows([(5, "R", "S", "2026-01-01", 3, 4)])
+
+        await retriever._enrich_with_metadata(chunks)
+
+        assert captured["params"] == {"chunk_ids": [5]}
+        assert "hr.id" in captured["sql"]
+        assert "s.id" in captured["sql"]
+
+    @pytest.mark.asyncio
+    async def test_unmatched_chunk_gets_none_ids(self):
+        """A chunk with no metadata row keeps None ids rather than a stale value."""
+        chunks = HybridRetriever._docs_to_chunks(
+            [
+                Document(
+                    page_content="text",
+                    metadata={
+                        "chunk_id": 99,
+                        "transcript_id": 7,
+                        "score": 0.5,
+                        "speaker": None,
+                        "start_s": None,
+                        "end_s": None,
+                        "entity_names": [],
+                    },
+                )
+            ]
+        )
+        retriever, _ = self._retriever_with_rows([])
+
+        enriched = await retriever._enrich_with_metadata(chunks)
+
+        assert enriched[0].sitting_id is None
+        assert enriched[0].record_id is None

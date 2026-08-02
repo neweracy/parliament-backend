@@ -121,6 +121,8 @@ class TestAskResponseContract:
             record_title="Budget Statement",
             date="2024-11-01",
             start_s=60.0,
+            sitting_id=3,
+            record_id=8,
         )
         dump = record.model_dump()
         assert dump == {
@@ -132,7 +134,20 @@ class TestAskResponseContract:
             "record_title": "Budget Statement",
             "date": "2024-11-01",
             "start_s": 60.0,
+            "sitting_id": 3,
+            "record_id": 8,
         }
+
+    def test_related_record_navigation_ids_default_to_none(self) -> None:
+        """A RelatedRecord built without navigation ids serialises them as null.
+
+        The frontend treats null as "not navigable" and disables the chip, so
+        the key has to be present rather than omitted.
+        """
+        record = RelatedRecord(transcript_id=1, label="Budget Debate", chunk_id=2)
+        dump = record.model_dump()
+        assert dump["sitting_id"] is None
+        assert dump["record_id"] is None
 
     def test_recommendations_defaults_to_empty(self) -> None:
         """AskResponse.recommendations defaults to empty list.
