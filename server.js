@@ -58,6 +58,7 @@ const searchRoutes = require("./routes/search");
 const askRoutes = require("./routes/ask");
 const dashboardRoutes = require("./routes/dashboard");
 const settingsRoutes = require("./routes/settings");
+const dictionaryRoutes = require("./routes/dictionary");
 const khayaProvider = require("./providers/khaya");
 const { sliceAndConcatAudio } = require("./lib/hybrid/audio-slicer");
 
@@ -491,9 +492,18 @@ async function formatTranscriptionResponse(transcriptionResponse, modelName) {
   if (POSTPROCESS_MODE === 'off') return degradedResponse(rawTranscript, rawWords, meta, duration, 'disabled');
   if (POSTPROCESS_MODE === 'js') return legacyPostprocess(rawTranscript, rawWords, meta, duration);
 
-  // python mode
+  // python mode — fetch custom dictionary for postprocess options
   const correlationId = crypto.randomUUID();
-  const result = await postprocess(rawTranscript, rawWords, {}, correlationId);
+  let customDictionary = [];
+  try {
+    const settingsResult = await db.query("SELECT custom_dictionary FROM app_settings WHERE id = 1");
+    customDictionary = settingsResult.rows[0]?.custom_dictionary || [];
+  } catch (_err) {
+    // Non-fatal — proceed without dictionary if DB lookup fails
+    console.warn("[postprocess] Failed to fetch custom dictionary:", _err.message);
+  }
+  const options = customDictionary.length > 0 ? { customDictionary } : {};
+  const result = await postprocess(rawTranscript, rawWords, options, correlationId);
   if (!result.ok) {
     logDegraded(result, correlationId);
     return degradedResponse(rawTranscript, rawWords, meta, duration, 'skipped');
@@ -652,6 +662,7 @@ app.use(searchRoutes(authMiddleware, db));
 app.use(askRoutes(authMiddleware, db));
 app.use(dashboardRoutes(authMiddleware, db));
 app.use(settingsRoutes(authMiddleware, db));
+app.use(dictionaryRoutes(authMiddleware, db));
 
 // ============================================================================
 // AUDIO PROXY — allows the frontend WaveformPlayer to load remote audio
