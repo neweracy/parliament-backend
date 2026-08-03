@@ -146,7 +146,25 @@ function requireSession(req, res, next) {
 
   try {
     const token = authHeader.slice(7);
-    jwt.verify(token, SESSION_SECRET);
+    const payload = jwt.verify(token, SESSION_SECRET);
+
+    // In legacy mode, attach a full admin user to req so requirePermission works.
+    // The legacy JWT is a simple session token without role claims,
+    // so we grant full access (matching the pre-RBAC behavior).
+    req.user = {
+      userId: payload.sub || 'legacy-session-user',
+      email: payload.email || 'session@localhost',
+      name: payload.name || 'Session User',
+      role: 'Admin',
+      permissions: [
+        'manage_users', 'system_config', 'create_sitting', 'assign_editor',
+        'certify_record', 'manage_templates', 'export_hansard', 'view_audit_trail',
+        'review_record', 'approve_certification', 'edit_record', 'upload_audio',
+        'rename_speakers', 'submit_for_review', 'export_drafts', 'view_records',
+        'search_hansard', 'export_published',
+      ],
+    };
+
     next();
   } catch (err) {
     return res.status(401).json({
