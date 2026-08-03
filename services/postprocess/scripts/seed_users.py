@@ -11,6 +11,8 @@ import os
 import sys
 from pathlib import Path
 
+import bcrypt
+
 # Allow running from the scripts/ directory or the postprocess root
 SCRIPT_DIR = Path(__file__).resolve().parent
 POSTPROCESS_ROOT = SCRIPT_DIR.parent
@@ -34,6 +36,7 @@ SEED_USERS = [
         "role": "Admin",
         "status": "Active",
         "department": "IT Department",
+        "password": "admin123",
     },
     {
         "id": "usr-chief-editor-001",
@@ -42,6 +45,7 @@ SEED_USERS = [
         "role": "Chief Editor",
         "status": "Active",
         "department": "Hansard Department",
+        "password": "editor123",
     },
     {
         "id": "usr-supervisor-001",
@@ -50,6 +54,7 @@ SEED_USERS = [
         "role": "Supervisor",
         "status": "Active",
         "department": "Hansard Department",
+        "password": "super123",
     },
     {
         "id": "usr-editor-001",
@@ -58,6 +63,7 @@ SEED_USERS = [
         "role": "Editor",
         "status": "Active",
         "department": "Hansard Department",
+        "password": "editor123",
     },
     {
         "id": "usr-viewer-001",
@@ -66,10 +72,16 @@ SEED_USERS = [
         "role": "Viewer",
         "status": "Active",
         "department": "Clerk's Office",
+        "password": "viewer123",
     },
 ]
 
 SEED_IDS = [u["id"] for u in SEED_USERS]
+
+
+def hash_password(plain: str) -> str:
+    """Hash a plaintext password with bcrypt (cost factor 10)."""
+    return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt(rounds=10)).decode("utf-8")
 
 
 def get_database_url() -> str:
@@ -81,20 +93,23 @@ def get_database_url() -> str:
 
 
 def seed(conn):
-    """Insert sample users (skip if already exist)."""
+    """Insert sample users with hashed passwords (skip if already exist)."""
     sql = """
-        INSERT INTO users (id, email, name, role, status, department, last_active)
-        VALUES (%(id)s, %(email)s, %(name)s, %(role)s, %(status)s, %(department)s, now())
-        ON CONFLICT (id) DO NOTHING
+        INSERT INTO users (id, email, name, role, status, department, last_active, password_hash)
+        VALUES (%(id)s, %(email)s, %(name)s, %(role)s, %(status)s, %(department)s, now(), %(password_hash)s)
+        ON CONFLICT (id) DO UPDATE SET password_hash = EXCLUDED.password_hash
     """
     with conn.cursor() as cur:
         for user in SEED_USERS:
-            cur.execute(sql, user)
+            params = {k: v for k, v in user.items() if k != "password"}
+            params["password_hash"] = hash_password(user["password"])
+            cur.execute(sql, params)
     conn.commit()
-    print(f"Seeded {len(SEED_USERS)} users (one per role)")
+    print(f"Seeded {len(SEED_USERS)} users (one per role) with passwords:")
+    print()
     for u in SEED_USERS:
-        print(f"  {u['role']:14s} -- {u['name']} <{u['email']}>")
-
+        print(f"  {u['role']:14s} -- {u['name']} <{u['email']}>  password: {u['password']}")
+    print()
 
 def remove(conn):
     """Remove all seeded sample users."""

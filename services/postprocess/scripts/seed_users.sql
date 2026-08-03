@@ -1,6 +1,12 @@
 -- seed_users.sql
 -- Populates the users table with one sample user per role.
 -- Run: psql $DATABASE_URL -f scripts/seed_users.sql
+--
+-- NOTE: This SQL version does NOT set passwords. For local password
+-- authentication, use the Python script instead:
+--   python scripts/seed_users.py
+-- The Python script hashes passwords with bcrypt and stores them in
+-- the password_hash column.
 
 INSERT INTO users (id, email, name, role, status, department, last_active) VALUES
   ('usr-admin-001',        'admin@parliament.gov.gh',        'Kwame Adjei',     'Admin',        'Active', 'IT Department',       now() - interval '5 minutes'),
