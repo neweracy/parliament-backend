@@ -59,6 +59,7 @@ const askRoutes = require("./routes/ask");
 const dashboardRoutes = require("./routes/dashboard");
 const settingsRoutes = require("./routes/settings");
 const dictionaryRoutes = require("./routes/dictionary");
+const usersRoutes = require("./routes/users");
 const khayaProvider = require("./providers/khaya");
 const { sliceAndConcatAudio } = require("./lib/hybrid/audio-slicer");
 
@@ -663,6 +664,7 @@ app.use(askRoutes(authMiddleware, db));
 app.use(dashboardRoutes(authMiddleware, db));
 app.use(settingsRoutes(authMiddleware, db));
 app.use(dictionaryRoutes(authMiddleware, db));
+app.use(usersRoutes(authMiddleware, db));
 
 // ============================================================================
 // AUDIO PROXY — allows the frontend WaveformPlayer to load remote audio
