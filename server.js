@@ -61,6 +61,12 @@ const settingsRoutes = require("./routes/settings");
 const khayaProvider = require("./providers/khaya");
 const { sliceAndConcatAudio } = require("./lib/hybrid/audio-slicer");
 
+// --- Local: authentication & RBAC ---
+const { createCognitoAuth } = require("./middleware/cognito-auth");
+const { loadPermissions } = require("./lib/rbac-config");
+// eslint-disable-next-line no-unused-vars -- used by route modules registered in task 4.4
+const requirePermission = require("./middleware/require-permission");
+
 // --- Local: package metadata ---
 const { version: APP_VERSION } = require("./package.json");
 
@@ -152,6 +158,41 @@ function requireSession(req, res, next) {
       },
     });
   }
+}
+
+// ============================================================================
+// AUTH MODE — cognito (Cognito JWT validation) | legacy (simple JWT session)
+// ============================================================================
+
+/**
+ * Resolves the active auth middleware based on AUTH_MODE env variable.
+ * - 'cognito': Uses Cognito JWKS-validated middleware with role/permission extraction
+ * - 'legacy' (default): Uses the existing requireSession JWT middleware
+ */
+const AUTH_MODE = process.env.AUTH_MODE === 'cognito' ? 'cognito' : 'legacy';
+
+/**
+ * The active authentication middleware passed to route factories.
+ * In 'cognito' mode, this validates Cognito JWTs and attaches req.user with
+ * userId, email, name, role, and permissions. In 'legacy' mode, this is the
+ * existing requireSession middleware.
+ */
+let authMiddleware;
+
+if (AUTH_MODE === 'cognito') {
+  const userPoolId = process.env.COGNITO_USER_POOL_ID;
+  const region = process.env.COGNITO_REGION;
+  const appClientId = process.env.COGNITO_APP_CLIENT_ID;
+
+  if (!userPoolId || !region || !appClientId) {
+    console.error('\n❌ ERROR: AUTH_MODE=cognito requires the following env vars:');
+    console.error('   COGNITO_USER_POOL_ID, COGNITO_REGION, COGNITO_APP_CLIENT_ID\n');
+    process.exit(1);
+  }
+
+  authMiddleware = createCognitoAuth({ userPoolId, region, appClientId });
+} else {
+  authMiddleware = requireSession;
 }
 
 // ============================================================================
@@ -514,7 +555,7 @@ app.get("/api/session", (_req, res) => {
  *
  * Protected by JWT session auth (requireSession middleware).
  */
-app.post("/api/transcription", requireSession, upload.single("file"), async (req, res) => {
+app.post("/api/transcription", authMiddleware, upload.single("file"), async (req, res) => {
   try {
     const { body, file } = req;
     const { url, model } = body;
@@ -583,7 +624,7 @@ app.get("/api/metadata", (_req, res) => {
 // KHAYA AI (GhanaNLP) ASR v3 - African Language Transcription
 // ============================================================================
 
-app.use("/api/khaya", khayaRoutes(requireSession, upload));
+app.use("/api/khaya", khayaRoutes(authMiddleware, upload));
 
 // ============================================================================
 // HYBRID CONFIDENCE TRANSCRIPTION - Deepgram + Khaya AI correction pipeline
@@ -596,21 +637,21 @@ const hybridDeps = {
   khayaConfigured: () => Boolean(khayaProvider.getApiKey()),
 };
 
-app.use("/api/transcription/hybrid", hybridRoutes(requireSession, upload, hybridDeps));
+app.use("/api/transcription/hybrid", hybridRoutes(authMiddleware, upload, hybridDeps));
 
 // ============================================================================
 // HANSARD CRUD ROUTES — Sittings, Records, and Audio
 // ============================================================================
 
-app.use(sittingsRoutes(requireSession, db));
-app.use(recordsRoutes(requireSession, db));
-app.use(audioRoutes(requireSession, db));
-app.use(transcriptionRoutes(requireSession, db));
-app.use(transcriptRoutes(requireSession, db));
-app.use(searchRoutes(requireSession, db));
-app.use(askRoutes(requireSession, db));
-app.use(dashboardRoutes(requireSession, db));
-app.use(settingsRoutes(requireSession, db));
+app.use(sittingsRoutes(authMiddleware, db));
+app.use(recordsRoutes(authMiddleware, db));
+app.use(audioRoutes(authMiddleware, db));
+app.use(transcriptionRoutes(authMiddleware, db));
+app.use(transcriptRoutes(authMiddleware, db));
+app.use(searchRoutes(authMiddleware, db));
+app.use(askRoutes(authMiddleware, db));
+app.use(dashboardRoutes(authMiddleware, db));
+app.use(settingsRoutes(authMiddleware, db));
 
 // ============================================================================
 // AUDIO PROXY — allows the frontend WaveformPlayer to load remote audio
@@ -679,7 +720,16 @@ const ADVERTISED_ROUTES = [
   { method: "GET", path: "/health", detail: "" },
 ];
 
-app.listen(CONFIG.port, CONFIG.host, () => {
+app.listen(CONFIG.port, CONFIG.host, async () => {
+  // Warm the RBAC permissions cache on startup
+  try {
+    await loadPermissions();
+    console.log('[rbac] Permissions cache loaded successfully');
+  } catch (err) {
+    console.warn('[rbac] Failed to load permissions on startup:', err.message);
+    console.warn('[rbac] Permissions will be loaded on first request');
+  }
+
   const divider = "=".repeat(70);
 
   console.log(`\n${divider}`);
@@ -690,6 +740,7 @@ app.listen(CONFIG.port, CONFIG.host, () => {
   }
 
   console.log(`⚙️  Post-processing mode: ${POSTPROCESS_MODE}`);
+  console.log(`🔐 Auth mode: ${AUTH_MODE}`);
 
   if (openApiYaml) {
     console.log(`📖 API Docs at http://localhost:${CONFIG.port}/docs`);
