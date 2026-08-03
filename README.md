@@ -32,8 +32,62 @@ The frontend is a React + TypeScript SPA (Vite, Tailwind CSS, daisyUI) with audi
 | `GET` | `/api/audio-proxy` | CORS-friendly remote audio proxy |
 | `GET` | `/health` | Health check |
 | `GET` | `/docs` | Swagger UI (OpenAPI spec) |
+| `GET` | `/api/settings` | Get app settings including export config |
+| `PATCH` | `/api/settings` | Update settings fields |
+| `GET` | `/api/settings/export` | Get export configuration |
+| `PATCH` | `/api/settings/export` | Update export configuration |
+| `GET` | `/api/dictionary` | Paginated dictionary list |
+| `POST` | `/api/dictionary` | Add dictionary term |
+| `DELETE` | `/api/dictionary/:term` | Remove dictionary term |
+| `POST` | `/api/dictionary/import` | Bulk CSV import |
+| `GET` | `/api/users` | List users (with search) |
+| `POST` | `/api/users/invite` | Invite user via Cognito |
+| `PATCH` | `/api/users/:userId/role` | Change user role |
+| `PATCH` | `/api/users/:userId/status` | Activate/deactivate user |
 
 All transcription endpoints require a valid JWT (obtain via `/api/session`).
+Settings, dictionary, and user management endpoints require appropriate RBAC permissions (see below).
+
+## Authentication & RBAC
+
+The backend supports two authentication modes, controlled by the `AUTH_MODE` environment variable:
+
+| Mode | Behavior |
+|------|----------|
+| `legacy` (default) | Existing `/api/session` JWT flow. All permissions granted — fully backward-compatible. |
+| `cognito` | Validates AWS Cognito JWTs (RS256 via jwks-rsa). Extracts role from `cognito:groups`. Enforces RBAC. |
+
+### Middleware
+
+- `middleware/cognito-auth.js` — Cognito JWT validation
+- `middleware/require-permission.js` — checks the user's role has the required permission before allowing access
+- `lib/rbac-config.js` — role-permission registry with 60s cache (backed by `rbac_config` table)
+
+### Roles & Permissions
+
+Five roles, highest to lowest precedence:
+
+| Role | Key Permissions |
+|------|----------------|
+| Admin | manage_users, system_config, + all below |
+| Chief Editor | manage_users, create_sitting, assign_editor, certify_record |
+| Supervisor | review_record, approve_certification, export_hansard |
+| Editor | edit_record, upload_audio, rename_speakers, submit_for_review |
+| Viewer | view_records, search_hansard, export_published |
+
+### Database (Migration 004)
+
+- `users` — local user cache (id, email, name, role, status, department, last_active)
+- `rbac_config` — updatable role-permission mappings (seeded with the 5 default roles)
+- `export_config` JSONB column on `app_settings` — PDF/DOCX export configuration
+
+### Seeding Test Users
+
+```bash
+cd services/postprocess
+python scripts/seed_users.py          # Seed one user per role
+python scripts/seed_users.py --remove # Remove seeded users
+```
 
 ## Quick Start
 
@@ -233,6 +287,10 @@ Set it to `true` and supply AWS credentials to enable the Bedrock refinement sta
 | `POSTPROCESS_URL` | No | Python service URL (default: `http://localhost:8082`) |
 | `PORT` | No | Backend port (default: `8081`) |
 | `SESSION_SECRET` | No | JWT signing secret (auto-generated if unset) |
+| `AUTH_MODE` | No | `legacy` (default) or `cognito` — controls authentication strategy |
+| `COGNITO_USER_POOL_ID` | If AUTH_MODE=cognito | AWS Cognito User Pool ID |
+| `COGNITO_REGION` | If AUTH_MODE=cognito | AWS region for Cognito |
+| `COGNITO_APP_CLIENT_ID` | If AUTH_MODE=cognito | Cognito App Client ID |
 
 ### Hybrid Pipeline Variables
 
