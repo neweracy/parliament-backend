@@ -68,6 +68,7 @@ const { createCognitoAuth } = require("./middleware/cognito-auth");
 const { loadPermissions } = require("./lib/rbac-config");
 // eslint-disable-next-line no-unused-vars -- used by route modules registered in task 4.4
 const requirePermission = require("./middleware/require-permission");
+const authRoutes = require("./routes/auth");
 
 // --- Local: package metadata ---
 const { version: APP_VERSION } = require("./package.json");
@@ -148,22 +149,36 @@ function requireSession(req, res, next) {
     const token = authHeader.slice(7);
     const payload = jwt.verify(token, SESSION_SECRET);
 
-    // In legacy mode, attach a full admin user to req so requirePermission works.
-    // The legacy JWT is a simple session token without role claims,
-    // so we grant full access (matching the pre-RBAC behavior).
-    req.user = {
-      userId: payload.sub || 'legacy-session-user',
-      email: payload.email || 'session@localhost',
-      name: payload.name || 'Session User',
-      role: 'Admin',
-      permissions: [
-        'manage_users', 'system_config', 'create_sitting', 'assign_editor',
-        'certify_record', 'manage_templates', 'export_hansard', 'view_audit_trail',
-        'review_record', 'approve_certification', 'edit_record', 'upload_audio',
-        'rename_speakers', 'submit_for_review', 'export_drafts', 'view_records',
-        'search_hansard', 'export_published',
-      ],
-    };
+    // If the JWT has role claims (issued by /api/auth/login), use them
+    // to build req.user with real role-based permissions.
+    // Otherwise (old anonymous session token from GET /api/session), fall back
+    // to full Admin access for backward compatibility.
+    if (payload.sub && payload.role) {
+      const { ROLE_PERMISSIONS } = require("./routes/auth");
+      const permissions = ROLE_PERMISSIONS[payload.role] || ROLE_PERMISSIONS['Viewer'] || [];
+      req.user = {
+        userId: payload.sub,
+        email: payload.email || 'unknown@localhost',
+        name: payload.name || 'Unknown User',
+        role: payload.role,
+        permissions,
+      };
+    } else {
+      // Legacy anonymous session token — grant full Admin access
+      req.user = {
+        userId: payload.sub || 'legacy-session-user',
+        email: payload.email || 'session@localhost',
+        name: payload.name || 'Session User',
+        role: 'Admin',
+        permissions: [
+          'manage_users', 'system_config', 'create_sitting', 'assign_editor',
+          'certify_record', 'manage_templates', 'export_hansard', 'view_audit_trail',
+          'review_record', 'approve_certification', 'edit_record', 'upload_audio',
+          'rename_speakers', 'submit_for_review', 'export_drafts', 'view_records',
+          'search_hansard', 'export_published',
+        ],
+      };
+    }
 
     next();
   } catch (err) {
@@ -555,6 +570,9 @@ function formatErrorResponse(error, statusCode = 500) {
 // ============================================================================
 // SESSION ROUTES - Auth endpoints (unprotected)
 // ============================================================================
+
+// Local password authentication (public — no auth middleware)
+app.use(authRoutes(db, { sessionSecret: SESSION_SECRET }));
 
 /**
  * GET /api/session — Issues a signed JWT for session authentication.
