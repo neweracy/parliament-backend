@@ -43,6 +43,20 @@ function formatRecord(row) {
 }
 
 /**
+ * Converts a DB row (with joined sitting fields) to a camelCase assigned-record object.
+ * Extends formatRecord with parent sitting metadata.
+ * @param {Object} row - Database row from hansard_record INNER JOIN sitting
+ * @returns {Object} camelCase assigned record object
+ */
+function formatAssignedRecord(row) {
+  return {
+    ...formatRecord(row),
+    sittingTitle: row.sitting_title,
+    sittingPriority: row.sitting_priority,
+  };
+}
+
+/**
  * Creates the Records router.
  * @param {Function} requireSession - JWT auth middleware
  * @param {Object} db - Database client with query(text, params) helper
@@ -286,11 +300,15 @@ module.exports = function recordsRoutes(requireSession, db) {
       }
 
       const result = await db.query(
-        "SELECT * FROM hansard_record WHERE assignee_name = $1 ORDER BY created_at DESC",
+        `SELECT hr.*, s.title AS sitting_title, s.priority AS sitting_priority
+         FROM hansard_record hr
+         INNER JOIN sitting s ON s.id = hr.sitting_id
+         WHERE hr.assignee_name = $1
+         ORDER BY hr.created_at DESC`,
         [userName]
       );
 
-      res.json({ data: result.rows.map(formatRecord) });
+      res.json({ data: result.rows.map(formatAssignedRecord) });
     } catch (err) {
       console.error("GET /api/records/assigned error:", err);
       res.status(500).json({
