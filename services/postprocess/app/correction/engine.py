@@ -103,7 +103,7 @@ def correct_single(
     if result is not None:
         return result
 
-    result = match_phonetic(text_lower, index)
+    result = match_phonetic(text_lower, index, snapshot)
     if result is not None:
         return result
 
@@ -117,7 +117,7 @@ def correct_single(
     if result is not None:
         return result
 
-    result = match_substring(text_lower, index)
+    result = match_substring(text_lower, index, snapshot)
     if result is not None:
         return result
 

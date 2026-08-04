@@ -170,12 +170,19 @@ def match_initials(text_lower: str, index: MatchIndex) -> MatchResult | None:
 # ---------------------------------------------------------------------------
 
 
-def match_phonetic(text_lower: str, index: MatchIndex) -> MatchResult | None:
+def match_phonetic(text_lower: str, index: MatchIndex, snapshot: DatasetSnapshot | None = None) -> MatchResult | None:
     """Compute phonetic_key, look up in phonetic_map.
 
     If multiple canonicals match, pick the one with lowest alias_ordinal.
     Returns confidence 0.90 on match.
+
+    Checks the Block_List before returning a match — common English words
+    that happen to share a phonetic key with an entity name are rejected.
     """
+    # Block_List guard — prevents false phonetic matches on common words
+    if snapshot is not None and is_blocked(text_lower, snapshot):
+        return None
+
     key = phonetic_key(text_lower)
     if not key:
         return None
@@ -277,15 +284,22 @@ def match_fuzzy(
 # ---------------------------------------------------------------------------
 
 
-def match_substring(text_lower: str, index: MatchIndex) -> MatchResult | None:
+def match_substring(text_lower: str, index: MatchIndex, snapshot: DatasetSnapshot | None = None) -> MatchResult | None:
     """Check if text is a substring of any canonical_map key.
 
     Only try when input length >= MIN_SUBSTRING_LENGTH (6).
     Returns confidence 0.80 on match.
 
+    Checks the Block_List before returning a match — common English words
+    that happen to be substrings of entity names are rejected.
+
     If multiple matches, pick the one with lowest alias_ordinal.
     """
     if len(text_lower) < MIN_SUBSTRING_LENGTH:
+        return None
+
+    # Block_List guard — prevents false substring matches on common words
+    if snapshot is not None and is_blocked(text_lower, snapshot):
         return None
 
     best_key: str | None = None
