@@ -163,30 +163,33 @@ describe('requirePermission — access denied (403)', () => {
 // ==========================================================================
 
 describe('requirePermission — 403 error message format', () => {
-  it('includes role name in error message', async () => {
+  it('uses generic message that does not leak role name', async () => {
     const app = buildApp('system_config', mockUser('Viewer'));
     const res = await request(app).get('/protected');
 
     assert.equal(res.status, 403);
-    assert.match(res.body.error.message, /Viewer/);
+    assert.equal(res.body.error.message, 'You do not have permission to perform this action');
+    // Should NOT contain role name or operation name in the generic message
+    assert.ok(!res.body.error.message.includes('Viewer'));
+    assert.ok(!res.body.error.message.includes('system_config'));
   });
 
-  it('includes required permission in error message', async () => {
+  it('uses generic message that does not leak permission name', async () => {
     const app = buildApp('system_config', mockUser('Editor'));
     const res = await request(app).get('/protected');
 
     assert.equal(res.status, 403);
-    assert.match(res.body.error.message, /system_config/);
+    assert.equal(res.body.error.message, 'You do not have permission to perform this action');
   });
 
-  it('includes both role and permission for Chief Editor denied manage_users is N/A (they have it)', async () => {
-    // Chief Editor DOES have manage_users, so test Supervisor instead
+  it('uses consistent error format across different denied roles', async () => {
     const app = buildApp('manage_users', mockUser('Supervisor'));
     const res = await request(app).get('/protected');
 
     assert.equal(res.status, 403);
-    assert.match(res.body.error.message, /Supervisor/);
-    assert.match(res.body.error.message, /manage_users/);
+    assert.equal(res.body.error.type, 'AuthorizationError');
+    assert.equal(res.body.error.code, 'INSUFFICIENT_PERMISSIONS');
+    assert.equal(res.body.error.message, 'You do not have permission to perform this action');
   });
 
   it('uses AuthorizationError type consistently', async () => {
@@ -238,15 +241,33 @@ describe('requirePermission — various role/permission combos', () => {
     assert.equal(resDenied.status, 403);
   });
 
-  it('returns 403 when req.user is not attached (no auth middleware ran)', async () => {
+  it('returns 401 when req.user is not attached (no auth middleware ran)', async () => {
     const app = buildApp('view_records', null);
     const res = await request(app).get('/protected');
 
-    assert.equal(res.status, 403);
-    assert.equal(res.body.error.code, 'INSUFFICIENT_PERMISSIONS');
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error.type, 'AuthenticationError');
+    assert.equal(res.body.error.code, 'MISSING_TOKEN');
+    assert.equal(res.body.error.message, 'Authentication required');
   });
 
-  it('returns 403 when req.user exists but permissions is not an array', async () => {
+  it('returns 401 when req.user exists but has no role', async () => {
+    const noRoleUser = {
+      userId: 'broken-user',
+      email: 'broken@test.com',
+      name: 'Broken',
+      role: undefined,
+      permissions: ['view_records'],
+    };
+    const app = buildApp('view_records', noRoleUser);
+    const res = await request(app).get('/protected');
+
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error.type, 'AuthenticationError');
+    assert.equal(res.body.error.code, 'MISSING_TOKEN');
+  });
+
+  it('returns 403 when req.user exists with unknown role that has no mapping', async () => {
     const brokenUser = {
       userId: 'broken-user',
       email: 'broken@test.com',
@@ -257,6 +278,25 @@ describe('requirePermission — various role/permission combos', () => {
     const app = buildApp('view_records', brokenUser);
     const res = await request(app).get('/protected');
 
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error.type, 'AuthorizationError');
+    assert.equal(res.body.error.code, 'INSUFFICIENT_PERMISSIONS');
+    assert.equal(res.body.error.message, 'You do not have permission to perform this action');
+  });
+
+  it('ignores permissions from user object and uses only server-side ROLE_PERMISSIONS', async () => {
+    // Create a user that has extra permissions on user.permissions that their role shouldn't have
+    const manipulatedUser = {
+      userId: 'viewer-001',
+      email: 'viewer@parliament.gov.gh',
+      name: 'Test Viewer',
+      role: 'Viewer',
+      permissions: ['system_config', 'manage_users', 'create_sitting'], // injected
+    };
+    const app = buildApp('system_config', manipulatedUser);
+    const res = await request(app).get('/protected');
+
+    // Should be denied because server-side ROLE_PERMISSIONS for Viewer doesn't include system_config
     assert.equal(res.status, 403);
   });
 });
