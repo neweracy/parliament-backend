@@ -41,7 +41,7 @@ function requestDeadline(timeoutMs = 5000) {
 
     // --- 2. Create AbortController for downstream cancellation ---
     const controller = new AbortController();
-    req.signal = controller.signal;
+    req.deadlineSignal = controller.signal;
     req.deadlineExceeded = false;
 
     // --- 3. Start the deadline timer ---

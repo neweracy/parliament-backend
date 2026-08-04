@@ -344,6 +344,9 @@ const app = express();
 const createCorsPolicy = require("./middleware/cors-policy");
 app.use(createCorsPolicy());
 
+// Parse JSON request bodies (Express 5 requires explicit body-parser middleware)
+app.use(express.json({ limit: '2kb', strict: true }));
+
 // Security headers: CSP, X-Content-Type-Options, Referrer-Policy, X-Frame-Options,
 // HSTS, and auth cache controls (Req 14.1–14.12)
 const createSecurityHeaders = require("./middleware/security-headers");
@@ -871,3 +874,4 @@ app.listen(CONFIG.port, CONFIG.host, async () => {
 
   console.log(`${divider}\n`);
 });
+

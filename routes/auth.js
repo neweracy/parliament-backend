@@ -159,14 +159,13 @@ function authRoutes(db, options = {}) {
     '/api/auth/login',
     loginValidator,
     rateLimiter,
-    requestDeadline(5000),
     async (req, res) => {
       try {
         const normalizedEmail = req.normalizedEmail;
         const password = req.submittedPassword;
 
         // Check if deadline already exceeded before DB work
-        if (req.signal && req.signal.aborted) {
+        if (req.deadlineSignal && req.deadlineSignal.aborted) {
           return; // requestDeadline middleware already sent 504
         }
 
@@ -177,7 +176,7 @@ function authRoutes(db, options = {}) {
         );
 
         // Check deadline after DB query
-        if (req.signal && req.signal.aborted) {
+        if (req.deadlineSignal && req.deadlineSignal.aborted) {
           return;
         }
 
@@ -193,7 +192,7 @@ function authRoutes(db, options = {}) {
         const passwordMatches = await bcrypt.compare(password, hashToCompare);
 
         // Check deadline after bcrypt
-        if (req.signal && req.signal.aborted) {
+        if (req.deadlineSignal && req.deadlineSignal.aborted) {
           return;
         }
 
@@ -223,7 +222,7 @@ function authRoutes(db, options = {}) {
           }
 
           // Check deadline after delay
-          if (req.signal && req.signal.aborted) {
+          if (req.deadlineSignal && req.deadlineSignal.aborted) {
             return;
           }
 
@@ -237,7 +236,7 @@ function authRoutes(db, options = {}) {
         clearOnSuccess(normalizedEmail);
 
         // Check deadline before issuing token
-        if (req.signal && req.signal.aborted) {
+        if (req.deadlineSignal && req.deadlineSignal.aborted) {
           return;
         }
 
@@ -258,7 +257,7 @@ function authRoutes(db, options = {}) {
             jti,
           },
           sessionSecret,
-          { algorithm: 'HS256', noTimestamp: true }
+          { algorithm: 'HS256' }
         );
 
         // Update last_active (non-blocking — don't let it delay the response)
@@ -273,7 +272,7 @@ function authRoutes(db, options = {}) {
         res.set('Pragma', 'no-cache');
 
         // Final deadline check before sending response
-        if (req.signal && req.signal.aborted) {
+        if (req.deadlineSignal && req.deadlineSignal.aborted) {
           return;
         }
 
