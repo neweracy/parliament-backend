@@ -122,9 +122,11 @@ const CONFIG = {
 
 /**
  * Session secret for signing JWTs.
+ * Must be externally supplied — no generated fallback.
+ * Full validation (encoding, length, prohibited values) is in lib/auth-config.js
+ * and will be wired through resolveSessionSecret in task 1.4.
  */
-const SESSION_SECRET =
-  process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
+const SESSION_SECRET = process.env.SESSION_SECRET;
 
 /** JWT expiry time (1 hour) */
 const JWT_EXPIRY = "1h";
