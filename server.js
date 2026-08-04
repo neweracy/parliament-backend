@@ -69,6 +69,7 @@ const { loadPermissions } = require("./lib/rbac-config");
 // eslint-disable-next-line no-unused-vars -- used by route modules registered in task 4.4
 const requirePermission = require("./middleware/require-permission");
 const authRoutes = require("./routes/auth");
+const { resolveAuthMode, resolveSessionSecret, resolveBcryptCost, generateDummyHash, resolveJwtLifetime } = require("./lib/auth-config");
 
 // --- Local: package metadata ---
 const { version: APP_VERSION } = require("./package.json");
@@ -117,19 +118,36 @@ const CONFIG = {
 };
 
 // ============================================================================
-// SESSION AUTH - JWT tokens for production security
+// AUTH CONFIGURATION — validated at startup before any listener binds
 // ============================================================================
 
 /**
- * Session secret for signing JWTs.
- * Must be externally supplied — no generated fallback.
- * Full validation (encoding, length, prohibited values) is in lib/auth-config.js
- * and will be wired through resolveSessionSecret in task 1.4.
+ * Resolve auth mode first — this may terminate the process.
+ * Must run before any express setup or listener binding.
  */
-const SESSION_SECRET = process.env.SESSION_SECRET;
+const AUTH_MODE = resolveAuthMode(process.env);
 
-/** JWT expiry time (1 hour) */
-const JWT_EXPIRY = "1h";
+/**
+ * Session secret for signing JWTs.
+ * In legacy mode: required, validated (encoding, length, prohibited values).
+ * In cognito mode: not used for local JWT signing, but validated if present.
+ */
+const SESSION_SECRET = AUTH_MODE === 'legacy'
+  ? resolveSessionSecret(process.env)
+  : (process.env.SESSION_SECRET ? resolveSessionSecret(process.env) : null);
+
+/**
+ * JWT lifetime in seconds (1–3600, default 900).
+ * Validated at startup; replaces the previous hardcoded "1h".
+ */
+const JWT_LIFETIME = resolveJwtLifetime(process.env);
+
+/**
+ * Bcrypt cost factor (12–14, default 12) and timing-equalization dummy hash.
+ * Used by the auth login route for credential verification.
+ */
+const BCRYPT_COST = resolveBcryptCost(process.env);
+const DUMMY_HASH = generateDummyHash(BCRYPT_COST);
 
 /**
  * Express middleware that validates JWT from Authorization header.
@@ -198,15 +216,8 @@ function requireSession(req, res, next) {
 }
 
 // ============================================================================
-// AUTH MODE — cognito (Cognito JWT validation) | legacy (simple JWT session)
+// AUTH MIDDLEWARE — select based on validated AUTH_MODE
 // ============================================================================
-
-/**
- * Resolves the active auth middleware based on AUTH_MODE env variable.
- * - 'cognito': Uses Cognito JWKS-validated middleware with role/permission extraction
- * - 'legacy' (default): Uses the existing requireSession JWT middleware
- */
-const AUTH_MODE = process.env.AUTH_MODE === 'cognito' ? 'cognito' : 'legacy';
 
 /**
  * The active authentication middleware passed to route factories.
@@ -570,23 +581,27 @@ function formatErrorResponse(error, statusCode = 500) {
 }
 
 // ============================================================================
-// SESSION ROUTES - Auth endpoints (unprotected)
+// SESSION ROUTES - Auth endpoints (conditionally mounted based on AUTH_MODE)
 // ============================================================================
 
-// Local password authentication (public — no auth middleware)
-app.use(authRoutes(db, { sessionSecret: SESSION_SECRET }));
+if (AUTH_MODE === 'legacy') {
+  // Local password authentication (public — no auth middleware)
+  app.use(authRoutes(db, { sessionSecret: SESSION_SECRET, jwtLifetime: JWT_LIFETIME, bcryptCost: BCRYPT_COST, dummyHash: DUMMY_HASH }));
 
-/**
- * GET /api/session — Issues a signed JWT for session authentication.
- */
-app.get("/api/session", (_req, res) => {
-  const token = jwt.sign(
-    { iat: Math.floor(Date.now() / 1000) },
-    SESSION_SECRET,
-    { expiresIn: JWT_EXPIRY }
-  );
-  res.json({ token });
-});
+  // In legacy mode, the anonymous GET /api/session endpoint is disabled.
+  // It previously minted tokens without credentials — now returns 410 Gone.
+  app.get("/api/session", (_req, res) => {
+    res.status(410).json({
+      error: {
+        type: "AuthenticationError",
+        code: "ENDPOINT_REMOVED",
+        message: "Anonymous session tokens are no longer issued. Use POST /api/auth/login.",
+      },
+    });
+  });
+}
+// In cognito mode: neither authRoutes nor GET /api/session are mounted.
+// Requests to those paths will naturally return 404.
 
 // ============================================================================
 // API ROUTES - Define your API endpoints here
@@ -762,7 +777,10 @@ app.get('/health', (_req, res) => {
  * Keep in sync when adding an endpoint — see the backend guide convention.
  */
 const ADVERTISED_ROUTES = [
-  { method: "GET", path: "/api/session", detail: "" },
+  ...(AUTH_MODE === 'legacy' ? [
+    { method: "POST", path: "/api/auth/login", detail: "(legacy mode)" },
+    { method: "GET", path: "/api/session", detail: "(disabled — returns 410)" },
+  ] : []),
   { method: "POST", path: "/api/transcription", detail: "(auth required) [Deepgram]" },
   { method: "POST", path: "/api/transcription/hybrid", detail: "(auth required) [Hybrid: Deepgram + Khaya]" },
   { method: "POST", path: "/api/khaya/transcription", detail: "(auth required) [Khaya AI]" },
