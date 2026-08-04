@@ -137,6 +137,17 @@ function createTestMiddleware() {
       });
     }
 
+    // Reject tokens not using RS256 before key verification (defense-in-depth).
+    if (decoded.header.alg !== 'RS256') {
+      return res.status(401).json({
+        error: {
+          type: 'AuthenticationError',
+          code: 'INVALID_TOKEN',
+          message: 'Invalid authentication token',
+        },
+      });
+    }
+
     // Use the test public key
     let payload;
     try {
@@ -485,6 +496,136 @@ describe('cognitoAuth middleware', () => {
       assert.equal(res.status, 200);
       assert.equal(res.body.user.name, 'fallback_user');
     });
+  });
+});
+
+// ==========================================================================
+// HS256 local token rejection tests (Requirement 17.10)
+// ==========================================================================
+
+describe('cognitoAuth middleware — HS256 local token rejection', () => {
+  it('returns 401 for HS256-signed tokens (locally-signed JWT in Cognito mode)', async () => {
+    const app = buildApp();
+    // Create an HS256 token like the local auth system would issue
+    const localSecret = 'a'.repeat(64); // simulated SESSION_SECRET
+    const localToken = jwt.sign(
+      {
+        sub: 'user-local-123',
+        email: 'admin@parliament.gov.gh',
+        name: 'Admin User',
+        role: 'Admin',
+        iss: 'parliament-gateway',
+        aud: 'hansard-spa',
+        jti: 'local-jti-abc123',
+      },
+      localSecret,
+      { algorithm: 'HS256', header: { alg: 'HS256', kid: 'local-kid' } }
+    );
+
+    const res = await request(app)
+      .get('/protected')
+      .set('Authorization', `Bearer ${localToken}`);
+
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error.code, 'INVALID_TOKEN');
+  });
+
+  it('returns 401 for HS256 token without kid header', async () => {
+    const app = buildApp();
+    const localSecret = 'b'.repeat(64);
+    const localToken = jwt.sign(
+      {
+        sub: 'user-local-456',
+        email: 'editor@parliament.gov.gh',
+        name: 'Editor User',
+        role: 'Editor',
+        iss: 'parliament-gateway',
+        aud: 'hansard-spa',
+        jti: 'local-jti-def456',
+      },
+      localSecret,
+      { algorithm: 'HS256' }
+    );
+
+    const res = await request(app)
+      .get('/protected')
+      .set('Authorization', `Bearer ${localToken}`);
+
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error.code, 'INVALID_TOKEN');
+  });
+
+  it('returns 401 for HS256 token even with valid Cognito-like claims', async () => {
+    const app = buildApp();
+    // Attempt to craft an HS256 token with Cognito-like issuer/audience
+    const localSecret = 'c'.repeat(64);
+    const localToken = jwt.sign(
+      {
+        sub: 'user-spoof',
+        email: 'admin@parliament.gov.gh',
+        name: 'Spoofed Admin',
+        'cognito:groups': ['admin'],
+        iss: ISSUER,
+        aud: TEST_CONFIG.appClientId,
+      },
+      localSecret,
+      { algorithm: 'HS256', header: { alg: 'HS256', kid: 'test-kid-001' } }
+    );
+
+    const res = await request(app)
+      .get('/protected')
+      .set('Authorization', `Bearer ${localToken}`);
+
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error.code, 'INVALID_TOKEN');
+  });
+
+  it('returns 401 for alg:none token (algorithm downgrade attack)', async () => {
+    const app = buildApp();
+    // Create an unsigned token (alg: none)
+    const header = Buffer.from(JSON.stringify({ alg: 'none', kid: 'test-kid-001' })).toString('base64url');
+    const payload = Buffer.from(JSON.stringify({
+      sub: 'user-none',
+      email: 'hacker@evil.com',
+      name: 'None Alg',
+      'cognito:groups': ['admin'],
+      iss: ISSUER,
+      aud: TEST_CONFIG.appClientId,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    })).toString('base64url');
+    const unsignedToken = `${header}.${payload}.`;
+
+    const res = await request(app)
+      .get('/protected')
+      .set('Authorization', `Bearer ${unsignedToken}`);
+
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error.code, 'INVALID_TOKEN');
+  });
+
+  it('returns 401 for HS384 token', async () => {
+    const app = buildApp();
+    const localSecret = 'd'.repeat(64);
+    const localToken = jwt.sign(
+      {
+        sub: 'user-hs384',
+        email: 'test@parliament.gov.gh',
+        name: 'HS384 User',
+        role: 'Admin',
+        iss: ISSUER,
+        aud: TEST_CONFIG.appClientId,
+      },
+      localSecret,
+      { algorithm: 'HS384', header: { alg: 'HS384', kid: 'test-kid-001' } }
+    );
+
+    const res = await request(app)
+      .get('/protected')
+      .set('Authorization', `Bearer ${localToken}`);
+
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error.code, 'INVALID_TOKEN');
   });
 });
 

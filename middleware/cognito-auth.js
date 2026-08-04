@@ -171,6 +171,18 @@ function createCognitoAuth({ userPoolId, region, appClientId }) {
       });
     }
 
+    // Reject tokens not using RS256 before JWKS lookup (defense-in-depth).
+    // This explicitly blocks HS256 local tokens from being accepted in Cognito mode.
+    if (decoded.header.alg !== 'RS256') {
+      return res.status(401).json({
+        error: {
+          type: 'AuthenticationError',
+          code: 'INVALID_TOKEN',
+          message: 'Invalid authentication token',
+        },
+      });
+    }
+
     // 3. Fetch the signing key from JWKS
     let signingKey;
     try {
