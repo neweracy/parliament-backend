@@ -22,7 +22,6 @@ require("dotenv").config({ override: true });
 
 // --- Third-party ---
 const { createClient } = require("@deepgram/sdk");
-const cors = require("cors");
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
@@ -341,8 +340,9 @@ const upload = multer({ storage: storage });
 // Initialize Express app
 const app = express();
 
-// Enable CORS (wildcard is safe -- same-origin via Vite proxy / Caddy in production)
-app.use(cors());
+// CORS: exact-origin policy from FRONTEND_ORIGINS (Req 13.9–13.16)
+const createCorsPolicy = require("./middleware/cors-policy");
+app.use(createCorsPolicy());
 
 // ============================================================================
 // API DOCS - Swagger UI serving the OpenAPI spec
