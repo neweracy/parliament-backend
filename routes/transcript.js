@@ -10,6 +10,7 @@
 "use strict";
 
 const express = require("express");
+const requirePermission = require("../middleware/require-permission");
 
 /**
  * Maximum allowed transcript text size in bytes (1 MB).
@@ -45,6 +46,7 @@ module.exports = function transcriptRoutes(requireSession, db) {
   router.get(
     "/api/sittings/:sittingId/records/:recordId/transcript",
     requireSession,
+    requirePermission("view_records"),
     async (req, res) => {
       try {
         const { recordId } = req.params;
@@ -105,6 +107,7 @@ module.exports = function transcriptRoutes(requireSession, db) {
   router.patch(
     "/api/sittings/:sittingId/records/:recordId/transcript",
     requireSession,
+    requirePermission("edit_record"),
     express.json({ limit: "2mb" }),
     async (req, res) => {
       try {

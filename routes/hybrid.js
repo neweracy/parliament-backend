@@ -10,6 +10,7 @@
 const express = require("express");
 const { loadHybridConfig } = require("../lib/hybrid/config");
 const { runHybridPipeline } = require("../lib/hybrid/pipeline");
+const requirePermission = require("../middleware/require-permission");
 
 /**
  * @typedef {import('../lib/hybrid/pipeline').HybridDeps} HybridDeps
@@ -32,7 +33,7 @@ function createRouter(requireSession, upload, deps) {
    * Body (multipart/form-data):
    *   - file: Audio file
    */
-  router.post("/", requireSession, upload.single("file"), async (req, res) => {
+  router.post("/", requireSession, requirePermission("upload_audio"), upload.single("file"), async (req, res) => {
     try {
       const { file } = req;
 

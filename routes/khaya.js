@@ -7,6 +7,7 @@
 
 const express = require("express");
 const khaya = require("../providers/khaya");
+const requirePermission = require("../middleware/require-permission");
 
 /**
  * Creates the Khaya AI router.
@@ -25,7 +26,7 @@ function createRouter(requireSession, upload) {
    *   - file: Audio file
    *   - language: Language code (e.g., "tw", "ee", "gaa", "dag")
    */
-  router.post("/transcription", requireSession, upload.single("file"), async (req, res) => {
+  router.post("/transcription", requireSession, requirePermission("upload_audio"), upload.single("file"), async (req, res) => {
     try {
       const { file, body } = req;
       const { language } = body;
@@ -70,7 +71,7 @@ function createRouter(requireSession, upload) {
    *
    * Returns supported languages for Khaya AI ASR v3.
    */
-  router.get("/languages", async (req, res) => {
+  router.get("/languages", requireSession, requirePermission("view_records"), async (req, res) => {
     try {
       const languages = await khaya.getLanguages();
       res.json(languages);

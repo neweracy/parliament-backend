@@ -13,6 +13,7 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const requirePermission = require("../middleware/require-permission");
 
 /**
  * Allowed audio MIME types for upload validation (Requirement 4.3).
@@ -84,6 +85,7 @@ module.exports = function audioRoutes(requireSession, db) {
   router.post(
     "/api/sittings/:sittingId/records/:recordId/audio",
     requireSession,
+    requirePermission("upload_audio"),
     function handleUpload(req, res, next) {
       upload.single("file")(req, res, function (err) {
         if (err) {
@@ -191,6 +193,7 @@ module.exports = function audioRoutes(requireSession, db) {
   router.get(
     "/api/sittings/:sittingId/records/:recordId/audio",
     requireSession,
+    requirePermission("view_records"),
     async (req, res) => {
       try {
         const { sittingId, recordId } = req.params;

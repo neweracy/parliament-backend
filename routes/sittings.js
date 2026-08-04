@@ -11,6 +11,8 @@
 
 const express = require("express");
 
+const requirePermission = require("../middleware/require-permission");
+
 /**
  * Converts a snake_case DB row to a camelCase sitting object for the API response.
  * @param {Object} row - Database row
@@ -84,7 +86,7 @@ module.exports = function sittingsRoutes(requireSession, db) {
    * Query params: page (default 1), pageSize (default 20), status, sessionType, dateFrom, dateTo
    * Excludes Archived sittings by default unless status=Archived is explicitly requested.
    */
-  router.get("/api/sittings", requireSession, async (req, res) => {
+  router.get("/api/sittings", requireSession, requirePermission("view_records"), async (req, res) => {
     try {
       const page = Math.max(1, parseInt(req.query.page, 10) || 1);
       const pageSize = Math.max(1, Math.min(100, parseInt(req.query.pageSize, 10) || 20));
@@ -184,7 +186,7 @@ module.exports = function sittingsRoutes(requireSession, db) {
    *
    * Creates a new sitting and returns the created object with a server-generated ID.
    */
-  router.post("/api/sittings", requireSession, express.json(), async (req, res) => {
+  router.post("/api/sittings", requireSession, requirePermission("create_sitting"), express.json(), async (req, res) => {
     try {
       const {
         title,
@@ -250,7 +252,7 @@ module.exports = function sittingsRoutes(requireSession, db) {
    *
    * Returns a single sitting with its associated hansard records.
    */
-  router.get("/api/sittings/:id", requireSession, async (req, res) => {
+  router.get("/api/sittings/:id", requireSession, requirePermission("view_records"), async (req, res) => {
     try {
       const { id } = req.params;
 
@@ -296,7 +298,7 @@ module.exports = function sittingsRoutes(requireSession, db) {
    * Partial update of mutable sitting fields.
    * Allowed fields: title, description, status, priority, presidingOfficer
    */
-  router.patch("/api/sittings/:id", requireSession, express.json(), async (req, res) => {
+  router.patch("/api/sittings/:id", requireSession, requirePermission("create_sitting"), express.json(), async (req, res) => {
     try {
       const { id } = req.params;
       const { title, description, status, priority, presidingOfficer } = req.body;
@@ -374,7 +376,7 @@ module.exports = function sittingsRoutes(requireSession, db) {
    * Soft-deletes a sitting by setting its status to Archived.
    * Returns 204 No Content on success.
    */
-  router.delete("/api/sittings/:id", requireSession, express.json(), async (req, res) => {
+  router.delete("/api/sittings/:id", requireSession, requirePermission("create_sitting"), express.json(), async (req, res) => {
     try {
       const { id } = req.params;
 

@@ -10,6 +10,7 @@
 "use strict";
 
 const express = require("express");
+const requirePermission = require("../middleware/require-permission");
 
 /**
  * Postprocessing Service base URL.
@@ -97,7 +98,7 @@ function askRoutes(requireSession, _db) {
    * Returns the generated answer with citations and source chunks.
    * Enforces a 30-second timeout — returns 504 if exceeded.
    */
-  router.post("/api/ask", requireSession, express.json(), async (req, res) => {
+  router.post("/api/ask", requireSession, requirePermission("search_hansard"), express.json(), async (req, res) => {
     try {
       const { question, entityFilter, dateFrom, dateTo, speaker, conversationHistory } = req.body;
 

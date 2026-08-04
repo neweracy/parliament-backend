@@ -10,6 +10,7 @@
 "use strict";
 
 const express = require("express");
+const requirePermission = require("../middleware/require-permission");
 
 /**
  * Derives avatar initials from a person's name (max 2 characters).
@@ -51,7 +52,7 @@ module.exports = function dashboardRoutes(requireSession, db) {
    * - recentActivity: most recently touched records, newest first
    * - teamWorkload: record counts grouped by assignee
    */
-  router.get("/api/dashboard/stats", requireSession, async (req, res) => {
+  router.get("/api/dashboard/stats", requireSession, requirePermission("view_records"), async (req, res) => {
     try {
       // Run all queries in parallel for better performance
       const [

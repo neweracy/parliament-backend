@@ -27,41 +27,14 @@ const requestDeadline = require('../middleware/request-deadline');
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 /**
- * Role → Permissions mapping (server-authoritative).
- * Client-side permissions are convenience only; the gateway enforces these.
+ * Role → Permissions mapping and the set of roles permitted to log in.
+ *
+ * Imported from lib/permissions.js rather than redeclared here. A local copy
+ * previously drifted from the enforcement map, so the permissions array in the
+ * login response disagreed with what requirePermission actually granted —
+ * Chief Editors were told they lacked manage_users while the API allowed it.
  */
-const ROLE_PERMISSIONS = {
-  'Admin': [
-    'manage_users', 'system_config', 'create_sitting', 'assign_editor',
-    'certify_record', 'manage_templates', 'export_hansard', 'view_audit_trail',
-    'review_record', 'approve_certification', 'edit_record', 'upload_audio',
-    'rename_speakers', 'submit_for_review', 'export_drafts', 'view_records',
-    'search_hansard', 'export_published',
-  ],
-  'Chief Editor': [
-    'create_sitting', 'assign_editor', 'certify_record', 'manage_templates',
-    'export_hansard', 'view_audit_trail', 'review_record', 'approve_certification',
-    'edit_record', 'upload_audio', 'rename_speakers', 'submit_for_review',
-    'export_drafts', 'view_records', 'search_hansard', 'export_published',
-  ],
-  'Supervisor': [
-    'review_record', 'approve_certification', 'edit_record', 'upload_audio',
-    'rename_speakers', 'submit_for_review', 'export_drafts', 'view_records',
-    'search_hansard', 'export_published',
-  ],
-  'Editor': [
-    'edit_record', 'upload_audio', 'rename_speakers', 'submit_for_review',
-    'export_drafts', 'view_records', 'search_hansard', 'export_published',
-  ],
-  'Viewer': [
-    'view_records', 'search_hansard', 'export_published',
-  ],
-};
-
-/**
- * Roles that are allowed to authenticate via local login.
- */
-const ALLOWLISTED_ROLES = new Set(['Admin', 'Chief Editor', 'Supervisor', 'Editor', 'Viewer']);
+const { ROLE_PERMISSIONS, ALLOWLISTED_ROLES } = require('../lib/permissions');
 
 /**
  * The identical response body returned for ALL credential failure causes.
@@ -137,7 +110,9 @@ function sleep(ms) {
 function authRoutes(db, options = {}) {
   const router = express.Router();
 
-  const { sessionSecret, jwtLifetime = 900, bcryptCost, dummyHash } = options;
+  // bcryptCost is validated and consumed at startup to derive dummyHash; the
+  // router itself only needs the resulting hash.
+  const { sessionSecret, jwtLifetime = 900, dummyHash } = options;
 
   // Fail closed: if critical config is missing, refuse to mount
   if (!sessionSecret || !dummyHash) {
@@ -287,7 +262,7 @@ function authRoutes(db, options = {}) {
             permissions,
           },
         });
-      } catch (err) {
+      } catch (_err) {
         // Unexpected error — fail closed (no token, no credential details)
         if (!res.headersSent) {
           return res.status(500).json({

@@ -14,6 +14,7 @@ const express = require("express");
 const crypto = require("crypto");
 
 const { transcribeStoredAudio } = require("../lib/transcription-pipeline");
+const requirePermission = require("../middleware/require-permission");
 
 /**
  * Postprocessing Service base URL (for RAG ingestion trigger).
@@ -59,6 +60,7 @@ module.exports = function transcriptionRoutes(requireSession, db) {
   router.post(
     "/api/sittings/:sittingId/records/:recordId/transcribe",
     requireSession,
+    requirePermission("upload_audio"),
     async (req, res) => {
       try {
         const { sittingId, recordId } = req.params;
@@ -142,6 +144,7 @@ module.exports = function transcriptionRoutes(requireSession, db) {
   router.get(
     "/api/sittings/:sittingId/records/:recordId/transcription-status",
     requireSession,
+    requirePermission("view_records"),
     async (req, res) => {
       try {
         const { sittingId, recordId } = req.params;

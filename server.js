@@ -65,7 +65,6 @@ const { sliceAndConcatAudio } = require("./lib/hybrid/audio-slicer");
 // --- Local: authentication & RBAC ---
 const { createCognitoAuth } = require("./middleware/cognito-auth");
 const { loadPermissions } = require("./lib/rbac-config");
-// eslint-disable-next-line no-unused-vars -- used by route modules registered in task 4.4
 const requirePermission = require("./middleware/require-permission");
 const authRoutes = require("./routes/auth");
 const { resolveAuthMode, resolveSessionSecret, resolveBcryptCost, generateDummyHash, resolveJwtLifetime } = require("./lib/auth-config");
@@ -245,7 +244,7 @@ function requireSession(req, res, next) {
     };
 
     next();
-  } catch (err) {
+  } catch (_err) {
     return res.status(401).json({
       error: {
         type: "AuthenticationError",
@@ -673,7 +672,7 @@ if (AUTH_MODE === 'legacy') {
  *
  * Protected by JWT session auth (requireSession middleware).
  */
-app.post("/api/transcription", authMiddleware, upload.single("file"), async (req, res) => {
+app.post("/api/transcription", authMiddleware, requirePermission("upload_audio"), upload.single("file"), async (req, res) => {
   try {
     const { body, file } = req;
     const { url, model } = body;
@@ -778,14 +777,70 @@ app.use(usersRoutes(authMiddleware, db));
 // that would otherwise be blocked by CORS (e.g. Deepgram static examples).
 // ============================================================================
 
-app.get("/api/audio-proxy", async (req, res) => {
-  const audioUrl = req.query.url;
-  if (!audioUrl) {
-    return res.status(400).json(formatErrorResponse(new Error("Missing url query parameter"), 400));
+/**
+ * Hostnames and IP ranges the proxy refuses to fetch.
+ *
+ * Without this the endpoint is a server-side request forgery primitive: any
+ * caller could reach cloud instance metadata (169.254.169.254), the internal
+ * Postprocessing Service, or Postgres, using the Gateway's network position.
+ */
+const BLOCKED_HOST_PATTERNS = [
+  /^localhost$/i,
+  /^127\./,                              // IPv4 loopback
+  /^0\./,                                // "this network"
+  /^10\./,                               // RFC1918 private
+  /^192\.168\./,                         // RFC1918 private
+  /^172\.(1[6-9]|2\d|3[01])\./,          // RFC1918 private
+  /^169\.254\./,                         // link-local, incl. cloud metadata
+  /^::1$/,                               // IPv6 loopback
+  /^\[?::1\]?$/,
+  /^f[cd][0-9a-f]{2}:/i,                 // IPv6 unique-local
+  /^fe80:/i,                             // IPv6 link-local
+  /\.internal$/i,
+  /\.local$/i,
+];
+
+/**
+ * Validates a proxy target, rejecting anything that is not a plain public
+ * http(s) URL.
+ *
+ * @param {unknown} rawUrl
+ * @returns {{ ok: true, url: URL } | { ok: false, reason: string }}
+ */
+function validateProxyTarget(rawUrl) {
+  if (typeof rawUrl !== "string" || rawUrl.length === 0) {
+    return { ok: false, reason: "Missing url query parameter" };
   }
 
+  let parsed;
   try {
-    const upstream = await fetch(audioUrl);
+    parsed = new URL(rawUrl);
+  } catch {
+    return { ok: false, reason: "url is not a valid absolute URL" };
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { ok: false, reason: "Only http and https URLs may be proxied" };
+  }
+
+  const host = parsed.hostname;
+  if (BLOCKED_HOST_PATTERNS.some((pattern) => pattern.test(host))) {
+    return { ok: false, reason: "Target host is not permitted" };
+  }
+
+  return { ok: true, url: parsed };
+}
+
+app.get("/api/audio-proxy", authMiddleware, requirePermission("view_records"), async (req, res) => {
+  const validation = validateProxyTarget(req.query.url);
+  if (!validation.ok) {
+    return res.status(400).json(formatErrorResponse(new Error(validation.reason), 400));
+  }
+  const audioUrl = validation.url.toString();
+
+  try {
+    // redirect: 'error' so a public URL cannot 302 into a blocked internal host.
+    const upstream = await fetch(audioUrl, { redirect: "error" });
     if (!upstream.ok) {
       return res.status(upstream.status).json(
         formatErrorResponse(new Error(`Upstream returned ${upstream.status}`), upstream.status)

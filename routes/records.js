@@ -10,6 +10,7 @@
 "use strict";
 
 const express = require("express");
+const requirePermission = require("../middleware/require-permission");
 
 /**
  * Converts a snake_case DB row to a camelCase record object for the API response.
@@ -71,7 +72,7 @@ module.exports = function recordsRoutes(requireSession, db) {
    * Creates a new Hansard record within the specified sitting.
    * Returns the created record with a server-generated ID.
    */
-  router.post("/api/sittings/:sittingId/records", requireSession, express.json(), async (req, res) => {
+  router.post("/api/sittings/:sittingId/records", requireSession, requirePermission("create_sitting"), express.json(), async (req, res) => {
     try {
       const { sittingId } = req.params;
       const {
@@ -143,7 +144,7 @@ module.exports = function recordsRoutes(requireSession, db) {
    *
    * Returns a single Hansard record by ID within the specified sitting.
    */
-  router.get("/api/sittings/:sittingId/records/:id", requireSession, async (req, res) => {
+  router.get("/api/sittings/:sittingId/records/:id", requireSession, requirePermission("view_records"), async (req, res) => {
     try {
       const { sittingId, id } = req.params;
 
@@ -183,7 +184,7 @@ module.exports = function recordsRoutes(requireSession, db) {
    *
    * Validates that Published status requires a non-empty corrected transcript.
    */
-  router.patch("/api/sittings/:sittingId/records/:id", requireSession, express.json(), async (req, res) => {
+  router.patch("/api/sittings/:sittingId/records/:id", requireSession, requirePermission("edit_record"), express.json(), async (req, res) => {
     try {
       const { sittingId, id } = req.params;
       const { title, status, assigneeName, assigneeAvatar, assigneeRole, visibility } = req.body;
@@ -285,7 +286,7 @@ module.exports = function recordsRoutes(requireSession, db) {
    * Returns all Hansard records assigned to the authenticated user.
    * User identity is passed via the x-user-name header.
    */
-  router.get("/api/records/assigned", requireSession, async (req, res) => {
+  router.get("/api/records/assigned", requireSession, requirePermission("view_records"), async (req, res) => {
     try {
       const userName = req.headers["x-user-name"];
 

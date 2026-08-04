@@ -11,6 +11,7 @@
 "use strict";
 
 const express = require("express");
+const requirePermission = require("../middleware/require-permission");
 
 /**
  * Maximum allowed search limit (results per query).
@@ -53,7 +54,7 @@ module.exports = function searchRoutes(requireSession, db) {
    *
    * Returns the search results from the RAG pipeline.
    */
-  router.post("/api/search", requireSession, express.json(), async (req, res) => {
+  router.post("/api/search", requireSession, requirePermission("search_hansard"), express.json(), async (req, res) => {
     try {
       const { query, entityFilter, dateFrom, dateTo, speaker, limit } = req.body;
 
@@ -189,7 +190,7 @@ module.exports = function searchRoutes(requireSession, db) {
    * Returns typeahead suggestions: distinct entity names and speaker labels
    * from indexed transcript chunks.
    */
-  router.get("/api/search/suggestions", requireSession, async (req, res) => {
+  router.get("/api/search/suggestions", requireSession, requirePermission("search_hansard"), async (req, res) => {
     try {
       // Get distinct entity names from transcript_chunk
       const entitiesResult = await db.query(

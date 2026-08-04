@@ -3,6 +3,9 @@
 const jwt = require('jsonwebtoken');
 const jwksRsa = require('jwks-rsa');
 
+// Authorization matrix lives in exactly one place — see lib/permissions.js.
+const { ROLE_PERMISSIONS, getPermissionsForRole } = require('../lib/permissions');
+
 /**
  * Group-to-role precedence map (highest first).
  * First match wins when a user belongs to multiple groups.
@@ -14,38 +17,6 @@ const GROUP_ROLE_MAP = [
   { group: 'editor', role: 'Editor' },
   { group: 'viewer', role: 'Viewer' },
 ];
-
-/**
- * Default permissions per role. Used inline until lib/rbac-config.js is available.
- * Matches the design.md permission table exactly.
- */
-const ROLE_PERMISSIONS = {
-  'Admin': [
-    'manage_users', 'system_config', 'create_sitting', 'assign_editor',
-    'certify_record', 'manage_templates', 'export_hansard', 'view_audit_trail',
-    'review_record', 'approve_certification', 'edit_record', 'upload_audio',
-    'rename_speakers', 'submit_for_review', 'export_drafts', 'view_records',
-    'search_hansard', 'export_published',
-  ],
-  'Chief Editor': [
-    'manage_users', 'create_sitting', 'assign_editor', 'certify_record',
-    'manage_templates', 'export_hansard', 'view_audit_trail', 'review_record',
-    'edit_record', 'upload_audio', 'rename_speakers', 'submit_for_review',
-    'export_drafts', 'view_records', 'search_hansard', 'export_published',
-  ],
-  'Supervisor': [
-    'review_record', 'approve_certification', 'export_hansard',
-    'view_audit_trail', 'export_drafts', 'view_records', 'search_hansard',
-    'export_published',
-  ],
-  'Editor': [
-    'edit_record', 'upload_audio', 'rename_speakers', 'submit_for_review',
-    'export_drafts', 'view_records', 'search_hansard', 'export_published',
-  ],
-  'Viewer': [
-    'view_records', 'search_hansard', 'export_published',
-  ],
-};
 
 /**
  * Resolves the highest-precedence role from a list of Cognito groups.
@@ -66,16 +37,6 @@ function resolveRole(groups) {
   }
 
   return 'Viewer';
-}
-
-/**
- * Returns the permissions array for a given role.
- *
- * @param {string} role - Role name
- * @returns {string[]} - Array of permission identifiers
- */
-function getPermissionsForRole(role) {
-  return ROLE_PERMISSIONS[role] || ROLE_PERMISSIONS['Viewer'];
 }
 
 /**
