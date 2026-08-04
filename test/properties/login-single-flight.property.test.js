@@ -8,7 +8,7 @@
  * Tests the request-deadline middleware's guarantees:
  * - At most one response is ever sent per request (no double-write)
  * - When deadline fires, the response is exactly 504 with the standard body
- * - req.signal.aborted is true after deadline fires
+ * - req.deadlineSignal.aborted is true after deadline fires
  * - Guard releases on settlement (success, failure, timeout)
  *
  * **Validates: Requirements 2.4**
@@ -42,11 +42,17 @@ const TIMEOUT_RESPONSE = Object.freeze({
  */
 function createMocks() {
   const req = new EventEmitter();
-  req.destroyed = false;
+  // Node auto-destroys a request stream once its body has been consumed, which
+  // a body parser does before requestDeadline runs. The middleware must not
+  // treat that as a client disconnect, so the mock reflects the real state.
+  req.destroyed = true;
   req.headers = {};
 
   const res = new EventEmitter();
   res.headersSent = false;
+  res.destroyed = false;
+  res.writableEnded = false;
+  res.writableFinished = false;
   let statusCode = null;
   let responseBody = null;
   let responseCount = 0;
@@ -59,6 +65,8 @@ function createMocks() {
     responseCount++;
     responseBody = body;
     res.headersSent = true;
+    res.writableEnded = true;
+    res.writableFinished = true;
     res.emit('finish');
     return res;
   };
@@ -86,7 +94,7 @@ async function simulateHandler(req, res, delayMs, outcome) {
   await new Promise(resolve => setTimeout(resolve, delayMs));
 
   // Cooperative abort check
-  if (req.signal && req.signal.aborted) {
+  if (req.deadlineSignal && req.deadlineSignal.aborted) {
     return;
   }
 
@@ -204,7 +212,7 @@ describe('Property 4: Login submission is single-flight', () => {
 
   describe('Signal is aborted after deadline fires', () => {
 
-    it('req.signal.aborted is true when handler runs after deadline', async () => {
+    it('req.deadlineSignal.aborted is true when handler runs after deadline', async () => {
       await fc.assert(
         fc.asyncProperty(
           fc.integer({ min: 10, max: 40 }),   // short deadline
@@ -218,13 +226,13 @@ describe('Property 4: Login submission is single-flight', () => {
             middleware(req, res, () => {});
 
             // Signal should not be aborted immediately
-            assert.equal(req.signal.aborted, false);
+            assert.equal(req.deadlineSignal.aborted, false);
 
             // Wait for deadline to fire
             await new Promise(resolve => setTimeout(resolve, deadlineMs + 10));
 
             // Signal should now be aborted
-            assert.equal(req.signal.aborted, true, 'Signal should be aborted after deadline');
+            assert.equal(req.deadlineSignal.aborted, true, 'Signal should be aborted after deadline');
             assert.equal(req.deadlineExceeded, true);
           }
         ),
@@ -232,7 +240,7 @@ describe('Property 4: Login submission is single-flight', () => {
       );
     });
 
-    it('req.signal.aborted is false when handler runs before deadline', async () => {
+    it('req.deadlineSignal.aborted is false when handler runs before deadline', async () => {
       await fc.assert(
         fc.asyncProperty(
           fc.integer({ min: 80, max: 200 }),   // generous deadline
@@ -247,7 +255,7 @@ describe('Property 4: Login submission is single-flight', () => {
             await new Promise(resolve => setTimeout(resolve, handlerDelayMs));
 
             // Signal should NOT be aborted yet
-            assert.equal(req.signal.aborted, false, 'Signal should not be aborted before deadline');
+            assert.equal(req.deadlineSignal.aborted, false, 'Signal should not be aborted before deadline');
             assert.equal(req.deadlineExceeded, false);
 
             // Send response (triggers cleanup which clears timer)
@@ -318,7 +326,7 @@ describe('Property 4: Login submission is single-flight', () => {
 
   describe('Cooperative abort: handler discards late results after deadline', () => {
 
-    it('handler produces no response when req.signal.aborted is true', async () => {
+    it('handler produces no response when req.deadlineSignal.aborted is true', async () => {
       await fc.assert(
         fc.asyncProperty(
           fc.integer({ min: 20, max: 50 }),  // extra delay after deadline
@@ -337,7 +345,7 @@ describe('Property 4: Login submission is single-flight', () => {
             // Simulate handler that checks signal before responding
             await new Promise(resolve => setTimeout(resolve, handlerDelayMs));
 
-            if (req.signal && req.signal.aborted) {
+            if (req.deadlineSignal && req.deadlineSignal.aborted) {
               // Cooperative: do NOT send response — this is correct behavior
             } else {
               handlerReachedResponse = true;
@@ -409,7 +417,7 @@ describe('Property 4: Login submission is single-flight', () => {
 
   describe('Client disconnect aborts the signal', () => {
 
-    it('req close event aborts the signal and cleans up', async () => {
+    it('res close event (without finish) aborts the signal and cleans up', async () => {
       await fc.assert(
         fc.asyncProperty(
           fc.integer({ min: 100, max: 300 }),  // deadline (generous)
@@ -421,14 +429,14 @@ describe('Property 4: Login submission is single-flight', () => {
             middleware(req, res, () => {});
 
             // Signal should not be aborted yet
-            assert.equal(req.signal.aborted, false);
+            assert.equal(req.deadlineSignal.aborted, false);
 
-            // Simulate client disconnect
+            // Simulate client disconnect (res emits 'close' without 'finish')
             await new Promise(resolve => setTimeout(resolve, disconnectAfterMs));
-            req.emit('close');
+            res.emit('close');
 
             // Signal should be aborted after client disconnect
-            assert.equal(req.signal.aborted, true, 'Signal should abort on client disconnect');
+            assert.equal(req.deadlineSignal.aborted, true, 'Signal should abort on client disconnect');
           }
         ),
         { numRuns: 20 }

@@ -159,6 +159,7 @@ function authRoutes(db, options = {}) {
     '/api/auth/login',
     loginValidator,
     rateLimiter,
+    requestDeadline(5000),
     async (req, res) => {
       try {
         const normalizedEmail = req.normalizedEmail;

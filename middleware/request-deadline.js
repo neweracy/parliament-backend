@@ -35,7 +35,13 @@ const TIMEOUT_RESPONSE = Object.freeze({
 function requestDeadline(timeoutMs = 5000) {
   return function requestDeadlineMiddleware(req, res, next) {
     // --- 1. Reject already-aborted client connections ---
-    if (req.destroyed) {
+    //
+    // Guard on the response, not the request. Node auto-destroys a readable
+    // stream once it has been fully consumed, so after a body parser such as
+    // express.json() runs, `req.destroyed` is always true even though the
+    // client is still connected and waiting. `res.destroyed` only becomes true
+    // when the connection itself is gone.
+    if (res.destroyed || res.writableEnded) {
       return; // Client is gone; do not send a response or proceed
     }
 
@@ -61,9 +67,19 @@ function requestDeadline(timeoutMs = 5000) {
     }
 
     // --- 4. Client disconnect handling ---
-    function onClientClose() {
+    //
+    // Listen on the response, not the request. A request stream emits 'close'
+    // as soon as it has been fully consumed — which a body parser does before
+    // this middleware runs — so `req.on('close')` would abort the controller
+    // immediately and make every downstream abort check short-circuit, leaving
+    // the request hanging with no response. The response only emits 'close'
+    // when the connection itself goes away.
+    function onConnectionClose() {
       clearTimeout(timer);
-      controller.abort();
+      // A normal finish also emits 'close'; only abort if we never replied.
+      if (!res.writableFinished) {
+        controller.abort();
+      }
       cleanup();
     }
 
@@ -75,11 +91,11 @@ function requestDeadline(timeoutMs = 5000) {
 
     // --- 6. Cleanup listeners to avoid leaks ---
     function cleanup() {
-      req.removeListener('close', onClientClose);
+      res.removeListener('close', onConnectionClose);
       res.removeListener('finish', onResponseFinish);
     }
 
-    req.on('close', onClientClose);
+    res.on('close', onConnectionClose);
     res.on('finish', onResponseFinish);
 
     next();
