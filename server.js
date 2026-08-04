@@ -59,6 +59,7 @@ const dashboardRoutes = require("./routes/dashboard");
 const settingsRoutes = require("./routes/settings");
 const dictionaryRoutes = require("./routes/dictionary");
 const usersRoutes = require("./routes/users");
+const accountRoutes = require("./routes/account");
 const khayaProvider = require("./providers/khaya");
 const { sliceAndConcatAudio } = require("./lib/hybrid/audio-slicer");
 
@@ -771,6 +772,10 @@ app.use(dashboardRoutes(authMiddleware, db));
 app.use(settingsRoutes(authMiddleware, db));
 app.use(dictionaryRoutes(authMiddleware, db));
 app.use(usersRoutes(authMiddleware, db));
+
+// Self-service account routes. Separate from usersRoutes because these always
+// act on req.user's own row and therefore need no manage_users permission.
+app.use(accountRoutes(authMiddleware, db, { bcryptCost: BCRYPT_COST, authMode: AUTH_MODE }));
 
 // ============================================================================
 // AUDIO PROXY — allows the frontend WaveformPlayer to load remote audio
