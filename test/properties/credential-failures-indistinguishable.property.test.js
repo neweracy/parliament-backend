@@ -23,8 +23,6 @@ const request = require('supertest');
 
 // Mock the rate-limiter to eliminate progressive delays that would make tests slow
 const rateLimiterModule = require('../../middleware/rate-limiter');
-const originalGetProgressiveDelay = rateLimiterModule.getProgressiveDelay;
-const originalRecordFailure = rateLimiterModule.recordFailure;
 
 // Override to disable delays — we test rate limiting separately
 rateLimiterModule.getProgressiveDelay = () => 0;
@@ -142,85 +140,6 @@ function createDbResultForCause(cause) {
     default:
       return { rows: [] };
   }
-}
-
-/**
- * Creates a test Express app with the auth route, using mocked dependencies.
- *
- * @param {object} options
- * @param {Function} options.dbQuery - Mock db.query function
- * @param {Function} options.bcryptCompare - Mock bcrypt.compare function
- * @returns {object} - { app, bcryptCompare }
- */
-function createTestApp(options) {
-  const { dbQuery, bcryptCompare } = options;
-
-  // We need to intercept bcrypt.compare — the auth route uses it from the bcrypt module.
-  // We'll monkey-patch bcrypt in the module cache.
-  const bcrypt = require('bcrypt');
-  const originalCompare = bcrypt.compare;
-  bcrypt.compare = bcryptCompare;
-
-  // Create a mock DB pool
-  const db = { query: dbQuery };
-
-  // Create the auth router with test options
-  const authRoutes = require('../../routes/auth');
-  const router = authRoutes(db, {
-    sessionSecret: 'a'.repeat(64), // 64-char hex string
-    jwtLifetime: 900,
-    bcryptCost: 12,
-    dummyHash: DUMMY_HASH,
-  });
-
-  const app = express();
-  app.use(router);
-
-  // Return cleanup function
-  return {
-    app,
-    cleanup: () => {
-      bcrypt.compare = originalCompare;
-    },
-  };
-}
-
-/**
- * Simulates the login-validator middleware by directly setting the expected
- * req properties that the auth handler consumes.
- *
- * We bypass the raw body parsing by pre-mounting middleware that sets the
- * normalized values.
- */
-function createTestAppWithBypassedValidator(options) {
-  const { dbQuery, bcryptCompare, email, password } = options;
-
-  const bcrypt = require('bcrypt');
-  const originalCompare = bcrypt.compare;
-  bcrypt.compare = bcryptCompare;
-
-  const db = { query: dbQuery };
-
-  const authRoutes = require('../../routes/auth');
-  const router = authRoutes(db, {
-    sessionSecret: 'a'.repeat(64),
-    jwtLifetime: 900,
-    bcryptCost: 12,
-    dummyHash: DUMMY_HASH,
-  });
-
-  const app = express();
-
-  // Bypass login-validator and rate-limiter by pre-setting expected properties
-  // and sending a raw POST that the real validator would accept
-  app.use(router);
-
-  return {
-    app,
-    cleanup: () => {
-      bcrypt.compare = originalCompare;
-    },
-  };
 }
 
 // ─── Property Tests ──────────────────────────────────────────────────────────
@@ -370,7 +289,13 @@ describe('Property 5: Credential failures are publicly indistinguishable', () =>
         .set('Content-Type', 'application/json')
         .send(JSON.stringify({ email: 'test@parliament.gov.gh', password: 'anypassword' }));
 
-      responses.push({ cause, status: res.status, body: JSON.stringify(res.body), headers: res.headers });
+      responses.push({
+        cause,
+        status: res.status,
+        body: JSON.stringify(res.body),
+        headers: res.headers,
+        bcryptCalls: bcryptCallCount,
+      });
     }
 
     // All statuses must be identical (401)
@@ -388,6 +313,14 @@ describe('Property 5: Credential failures are publicly indistinguishable', () =>
       JSON.stringify(EXPECTED_FAILURE_BODY),
       'Response body must match CREDENTIAL_FAILURE_BODY'
     );
+
+    // Every cause must perform exactly one real-or-dummy bcrypt comparison
+    for (const r of responses) {
+      assert.equal(
+        r.bcryptCalls, 1,
+        `Cause '${r.cause}' should make exactly 1 bcrypt.compare call, got ${r.bcryptCalls}`
+      );
+    }
   });
 
   it('no account existence info leaks in headers for any failure cause', async () => {

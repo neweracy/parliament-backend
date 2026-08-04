@@ -140,6 +140,8 @@ describe('Property 4: Login submission is single-flight', () => {
             // Handler responded before deadline
             assert.equal(getResponseCount(), 1, 'Exactly one response should be sent');
             assert.notEqual(getStatus(), 504, 'Handler should beat deadline');
+            assert.notDeepStrictEqual(getBody(), TIMEOUT_RESPONSE,
+              'Body should come from the handler, not the deadline');
 
             if (outcome === 'success') assert.equal(getStatus(), 200);
             else if (outcome === 'failure') assert.equal(getStatus(), 401);
@@ -203,6 +205,9 @@ describe('Property 4: Login submission is single-flight', () => {
             // And at least one response was produced
             assert.ok(getResponseCount() >= 1,
               'At least one response should be produced');
+            // The single response is either the handler's 200 or the deadline's 504
+            assert.ok([200, 504].includes(getStatus()),
+              `Expected status 200 (handler) or 504 (deadline), got ${getStatus()}`);
           }
         ),
         { numRuns: 50 }
@@ -217,9 +222,7 @@ describe('Property 4: Login submission is single-flight', () => {
         fc.asyncProperty(
           fc.integer({ min: 10, max: 40 }),   // short deadline
           fc.integer({ min: 20, max: 60 }),   // extra delay
-          async (deadlineMs, extraDelay) => {
-            const handlerDelayMs = deadlineMs + extraDelay;
-
+          async (deadlineMs, _extraDelay) => {
             const { req, res } = createMocks();
             const middleware = requestDeadline(deadlineMs);
 
@@ -331,7 +334,7 @@ describe('Property 4: Login submission is single-flight', () => {
         fc.asyncProperty(
           fc.integer({ min: 20, max: 50 }),  // extra delay after deadline
           fc.constantFrom('success', 'failure', 'error'),
-          async (extraDelay, outcome) => {
+          async (extraDelay, _outcome) => {
             const deadlineMs = 10;
             const handlerDelayMs = deadlineMs + extraDelay;
 

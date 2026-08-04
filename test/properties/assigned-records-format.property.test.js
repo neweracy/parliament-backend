@@ -84,7 +84,7 @@ function passThrough(req, res, next) { next(); }
  */
 function createAssignedRecordsDb(rows) {
   return {
-    query(text, params) {
+    query(text, _params) {
       // The INNER JOIN query for assigned records
       if (text.includes('FROM hansard_record hr') && text.includes('INNER JOIN sitting')) {
         return Promise.resolve({ rows });

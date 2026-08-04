@@ -22,7 +22,7 @@ const fc = require('fast-check');
 const { EventEmitter } = require('events');
 
 const loginValidator = require('../../middleware/login-validator');
-const { MAX_BODY_BYTES, MAX_EMAIL_CHARS, MAX_PASSWORD_BYTES } = require('../../middleware/login-validator');
+const { MAX_BODY_BYTES, MAX_PASSWORD_BYTES } = require('../../middleware/login-validator');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -196,7 +196,7 @@ describe('Property 3: Login request is bounded and secret-safe', () => {
           // Only proceed if body is within size limit
           if (Buffer.byteLength(body, 'utf8') > MAX_BODY_BYTES) return;
 
-          const { res, nextCalled, req } = await runValidator(body);
+          const { nextCalled, req } = await runValidator(body);
 
           assert.strictEqual(nextCalled, true, 'Expected next() to be called for valid input');
           // Normalized email should be trim().toLowerCase()
@@ -211,9 +211,7 @@ describe('Property 3: Login request is bounded and secret-safe', () => {
     it('exact boundary email (254 chars) passes validation', async () => {
       await fc.assert(
         fc.asyncProperty(
-          fc.nat({ max: 240 }).map((n) => {
-            const localLen = Math.max(1, Math.min(n, 240));
-            const local = 'a'.repeat(localLen);
+          fc.nat({ max: 240 }).map((_n) => {
             const suffix = '@b.co'; // 5 chars
             // 254 total
             const needed = 254 - suffix.length;

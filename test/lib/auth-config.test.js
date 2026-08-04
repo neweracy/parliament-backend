@@ -588,10 +588,7 @@ describe('resolveSessionSecret', () => {
   describe('non-conforming encoding causes termination', () => {
     it('exits for string with invalid hex characters (not base64 either)', () => {
       const { resolveSessionSecret } = loadAuthConfig();
-      // 'g' is not hex and if mixed with non-base64 chars
-      const badValue = 'g'.repeat(64); // not hex, check if it's valid base64...
-      // 'g' is valid base64 char, so this would be valid base64 but not valid hex
-      // Let's use something that's neither hex nor proper base64
+      // Use something that is neither hex nor proper base64
       const reallyBad = '!@#$%^&*()'.repeat(7); // 70 chars, neither hex nor base64
       assert.throws(
         () => resolveSessionSecret({ SESSION_SECRET: reallyBad }),
@@ -637,7 +634,6 @@ describe('resolveSessionSecret', () => {
 
   describe('decoded length outside 32-128 bytes causes termination', () => {
     it('exits when base64 decodes to less than 32 bytes', () => {
-      const { resolveSessionSecret } = loadAuthConfig();
       // Need a base64 value that is 64-256 chars but decodes to < 32 bytes
       // A pure base64 value that decodes to 31 bytes would be 44 chars (too short)
       // We need base64 of at least 64 chars that decodes to < 32 bytes — impossible

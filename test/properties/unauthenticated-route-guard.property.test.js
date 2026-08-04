@@ -87,22 +87,6 @@ const PROTECTED_ROUTES = [
   { method: 'patch', path: '/api/users/user-1/status' },
 ];
 
-/**
- * Unauthenticated states that must all result in 401.
- * Each produces a different Authorization header (or lack thereof).
- */
-const UNAUTHENTICATED_STATES = [
-  { label: 'no-header', header: undefined },
-  { label: 'empty-header', header: '' },
-  { label: 'bearer-no-token', header: 'Bearer ' },
-  { label: 'bearer-garbage', header: 'Bearer not.a.valid.jwt' },
-  { label: 'wrong-scheme-basic', header: 'Basic dXNlcjpwYXNz' },
-  { label: 'wrong-scheme-token', header: 'Token abc123' },
-  { label: 'expired-token', header: null }, // built dynamically below
-  { label: 'wrong-secret-token', header: null }, // built dynamically below
-  { label: 'wrong-algorithm-token', header: null }, // built dynamically below
-];
-
 // The real session secret used by requireSession in tests
 const TEST_SECRET = 'a'.repeat(64); // 64 hex chars = 32 bytes
 
