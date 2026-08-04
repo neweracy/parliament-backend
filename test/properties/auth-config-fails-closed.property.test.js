@@ -448,8 +448,9 @@ describe('Property 1: Authentication configuration fails closed', () => {
               result.reason === 'missing-cognito-config' || result.reason === 'partial-cognito-config',
               'Reason must be a safe enum, not env var values'
             );
-            // Reason must not contain actual env values
-            if (domain) {
+            // Reason must not contain actual env values (skip if domain
+            // coincidentally equals a reason enum value)
+            if (domain && domain !== 'missing-cognito-config' && domain !== 'partial-cognito-config') {
               assert.ok(!result.reason.includes(domain),
                 'Reason must not contain env var value');
             }
