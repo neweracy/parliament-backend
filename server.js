@@ -167,38 +167,83 @@ function requireSession(req, res, next) {
 
   try {
     const token = authHeader.slice(7);
-    const payload = jwt.verify(token, SESSION_SECRET);
 
-    // If the JWT has role claims (issued by /api/auth/login), use them
-    // to build req.user with real role-based permissions.
-    // Otherwise (old anonymous session token from GET /api/session), fall back
-    // to full Admin access for backward compatibility.
-    if (payload.sub && payload.role) {
-      const { ROLE_PERMISSIONS } = require("./routes/auth");
-      const permissions = ROLE_PERMISSIONS[payload.role] || ROLE_PERMISSIONS['Viewer'] || [];
-      req.user = {
-        userId: payload.sub,
-        email: payload.email || 'unknown@localhost',
-        name: payload.name || 'Unknown User',
-        role: payload.role,
-        permissions,
-      };
-    } else {
-      // Legacy anonymous session token — grant full Admin access
-      req.user = {
-        userId: payload.sub || 'legacy-session-user',
-        email: payload.email || 'session@localhost',
-        name: payload.name || 'Session User',
-        role: 'Admin',
-        permissions: [
-          'manage_users', 'system_config', 'create_sitting', 'assign_editor',
-          'certify_record', 'manage_templates', 'export_hansard', 'view_audit_trail',
-          'review_record', 'approve_certification', 'edit_record', 'upload_audio',
-          'rename_speakers', 'submit_for_review', 'export_drafts', 'view_records',
-          'search_hansard', 'export_published',
-        ],
-      };
+    // Pin algorithm to HS256; validate issuer, audience, and clock skew
+    const payload = jwt.verify(token, SESSION_SECRET, {
+      algorithms: ['HS256'],
+      issuer: 'parliament-gateway',
+      audience: 'hansard-spa',
+      clockTolerance: 30, // ±30s skew for iat/exp
+    });
+
+    // Validate iat: must be present and exp must not exceed iat + 3600s
+    if (typeof payload.iat !== 'number' || typeof payload.exp !== 'number') {
+      return res.status(401).json({
+        error: {
+          type: "AuthenticationError",
+          code: "INVALID_TOKEN",
+          message: "Invalid session token",
+        },
+      });
     }
+    if (payload.exp <= payload.iat || (payload.exp - payload.iat) > 3600) {
+      return res.status(401).json({
+        error: {
+          type: "AuthenticationError",
+          code: "INVALID_TOKEN",
+          message: "Invalid session token",
+        },
+      });
+    }
+
+    // Validate sub: non-empty string, 1–128 UTF-8 bytes
+    if (!payload.sub || typeof payload.sub !== 'string' || Buffer.byteLength(payload.sub, 'utf8') > 128) {
+      return res.status(401).json({
+        error: {
+          type: "AuthenticationError",
+          code: "INVALID_TOKEN",
+          message: "Invalid session token",
+        },
+      });
+    }
+
+    // Validate jti: non-empty ASCII string, 16–128 characters
+    if (
+      !payload.jti ||
+      typeof payload.jti !== 'string' ||
+      payload.jti.length < 16 ||
+      payload.jti.length > 128
+    ) {
+      return res.status(401).json({
+        error: {
+          type: "AuthenticationError",
+          code: "INVALID_TOKEN",
+          message: "Invalid session token",
+        },
+      });
+    }
+
+    // Validate role: must be in the server allowlist
+    const { ROLE_PERMISSIONS, ALLOWLISTED_ROLES } = require("./routes/auth");
+    if (!payload.role || !ALLOWLISTED_ROLES.has(payload.role)) {
+      return res.status(401).json({
+        error: {
+          type: "AuthenticationError",
+          code: "INVALID_TOKEN",
+          message: "Invalid session token",
+        },
+      });
+    }
+
+    // Derive permissions exclusively from server-side map; never from JWT or request
+    const permissions = ROLE_PERMISSIONS[payload.role] || [];
+    req.user = {
+      userId: payload.sub,
+      email: payload.email || '',
+      name: payload.name || '',
+      role: payload.role,
+      permissions,
+    };
 
     next();
   } catch (err) {
@@ -206,10 +251,7 @@ function requireSession(req, res, next) {
       error: {
         type: "AuthenticationError",
         code: "INVALID_TOKEN",
-        message:
-          err.name === "TokenExpiredError"
-            ? "Session expired, please refresh the page"
-            : "Invalid session token",
+        message: "Invalid session token",
       },
     });
   }
