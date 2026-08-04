@@ -344,6 +344,15 @@ const app = express();
 const createCorsPolicy = require("./middleware/cors-policy");
 app.use(createCorsPolicy());
 
+// Security headers: CSP, X-Content-Type-Options, Referrer-Policy, X-Frame-Options,
+// HSTS, and auth cache controls (Req 14.1–14.12)
+const createSecurityHeaders = require("./middleware/security-headers");
+app.use(createSecurityHeaders({
+  authMode: AUTH_MODE,
+  cognitoDomain: process.env.COGNITO_DOMAIN,
+  isProduction: process.env.NODE_ENV === 'production',
+}));
+
 // ============================================================================
 // API DOCS - Swagger UI serving the OpenAPI spec
 // ============================================================================
