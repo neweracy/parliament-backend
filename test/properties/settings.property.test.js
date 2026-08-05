@@ -25,14 +25,30 @@ const settingsRoutes = require('../../routes/settings');
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const VALID_ENGINES = ['deepgram', 'khaya', 'hybrid'];
-const VALID_LANGUAGES = ['en', 'tw', 'ga', 'ee', 'ha'];
+const ALLOWED_LANGUAGES_BY_ENGINE = {
+  deepgram: ['en'],
+  khaya: ['tw', 'ga', 'ee', 'ha'],
+  hybrid: ['en', 'tw', 'ga', 'ee', 'ha'],
+};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
- * No-op auth middleware for testing.
+ * Admin auth middleware for testing.
  */
-function passThrough(req, res, next) { next(); }
+function passThrough(req, res, next) {
+  req.user = {
+    userId: 'test-user',
+    email: 'admin@test.com',
+    name: 'Test Admin',
+    role: 'Admin',
+    permissions: [
+      'system_config', 'view_records', 'manage_users',
+      'create_sitting', 'edit_record', 'export_hansard',
+    ],
+  };
+  next();
+}
 
 /**
  * Creates a mock DB that simulates the app_settings singleton row.
@@ -147,28 +163,29 @@ describe('Property 21: Settings validation', () => {
     }
   });
 
-  it('accepts defaultLanguage iff value ∈ {en, tw, ga, ee, ha}', async () => {
+  it('accepts defaultLanguage iff value is allowed for the selected engine', async () => {
     await fc.assert(
       fc.asyncProperty(
+        fc.constantFrom(...VALID_ENGINES),
         fc.string({ minLength: 1, maxLength: 10 }),
-        async (lang) => {
+        async (engine, lang) => {
           const app = createTestApp();
 
           const res = await request(app)
             .patch('/api/settings')
-            .send({ defaultLanguage: lang });
+            .send({ transcriptionEngine: engine, defaultLanguage: lang });
 
-          const isValid = VALID_LANGUAGES.includes(lang);
+          const isValid = ALLOWED_LANGUAGES_BY_ENGINE[engine].includes(lang);
 
           if (isValid) {
             assert.equal(
               res.status, 200,
-              `Valid language '${lang}' should be accepted (got ${res.status})`
+              `Valid language '${lang}' for engine '${engine}' should be accepted (got ${res.status})`
             );
           } else {
             assert.equal(
               res.status, 422,
-              `Invalid language '${lang}' should be rejected with 422 (got ${res.status})`
+              `Invalid language '${lang}' for engine '${engine}' should be rejected with 422 (got ${res.status})`
             );
             assert.equal(res.body.error.code, 'VALIDATION_ERROR');
           }
@@ -178,18 +195,20 @@ describe('Property 21: Settings validation', () => {
     );
   });
 
-  it('accepts all known valid languages', async () => {
-    for (const lang of VALID_LANGUAGES) {
-      const app = createTestApp();
+  it('accepts all known valid languages for each engine', async () => {
+    for (const [engine, languages] of Object.entries(ALLOWED_LANGUAGES_BY_ENGINE)) {
+      for (const lang of languages) {
+        const app = createTestApp();
 
-      const res = await request(app)
-        .patch('/api/settings')
-        .send({ defaultLanguage: lang });
+        const res = await request(app)
+          .patch('/api/settings')
+          .send({ transcriptionEngine: engine, defaultLanguage: lang });
 
-      assert.equal(
-        res.status, 200,
-        `Known valid language '${lang}' should be accepted (got ${res.status})`
-      );
+        assert.equal(
+          res.status, 200,
+          `Known valid language '${lang}' should be accepted for engine '${engine}' (got ${res.status})`
+        );
+      }
     }
   });
 

@@ -24,6 +24,16 @@ const MAX_LIMIT = 50;
 const DEFAULT_LIMIT = 10;
 
 /**
+ * Default number of AI recommendations when not provided.
+ */
+const DEFAULT_RECOMMENDATION_LIMIT = 5;
+
+/**
+ * Maximum number of AI recommendations to return.
+ */
+const MAX_RECOMMENDATION_LIMIT = 8;
+
+/**
  * Postprocessing Service base URL.
  */
 const POSTPROCESS_URL = process.env.POSTPROCESS_URL || "http://localhost:8082";
@@ -42,6 +52,62 @@ const POSTPROCESS_TOKEN = process.env.POSTPROCESS_TOKEN || "";
  */
 module.exports = function searchRoutes(requireSession, db) {
   const router = express.Router();
+
+  /**
+   * Build a grounded recommendation prompt for the RAG agent.
+   * @param {string} query - Current user query or partial input
+   * @returns {string}
+   */
+  function buildRecommendationPrompt(query) {
+    const trimmed = (query || "").trim();
+    if (!trimmed) {
+      return [
+        "Suggest concise transcript search queries to help a researcher start exploring this parliamentary corpus.",
+        "For each recommendation, put ONLY the exact search query inside markdown bold markers like **budget allocation education**.",
+        "Do not include explanations inside the bold text.",
+      ].join(" ");
+    }
+
+    return [
+      `The researcher is currently looking for: "${trimmed}".`,
+      "Based only on the transcribed parliamentary record, suggest concise search queries that are likely to return useful results.",
+      "Prioritise topics, speakers, sittings, and dates that exist in the corpus.",
+      "For each recommendation, put ONLY the exact search query inside markdown bold markers like **budget allocation education**.",
+      "Do not include explanations inside the bold text.",
+    ].join(" ");
+  }
+
+  /**
+   * Extract and sanitize recommendation items from /rag/ask response.
+   * @param {any} raw - Upstream JSON body
+   * @param {number} limit - Max items to return
+   * @returns {{ text: string, reason: string }[]}
+   */
+  function mapRecommendationItems(raw, limit) {
+    const pickDisplayText = (value) => {
+      const text = typeof value === "string" ? value.trim() : "";
+      if (!text) return "";
+
+      const matches = [...text.matchAll(/\*\*(.*?)\*\*/g)]
+        .map((m) => (m[1] || "").trim())
+        .filter(Boolean);
+
+      if (matches.length > 0) {
+        return matches.join(" ");
+      }
+
+      return "";
+    };
+
+    return (raw?.recommendations || [])
+      .filter(Boolean)
+      .map((r) => ({
+        text: pickDisplayText(r.text),
+        reason: typeof r.reason === "string" ? r.reason.trim() : "",
+      }))
+      .filter((r) => r.text.length > 0)
+      .slice(0, limit);
+  }
 
   /**
    * POST /api/search
@@ -213,6 +279,104 @@ module.exports = function searchRoutes(requireSession, db) {
           type: "ServerError",
           code: "INTERNAL_ERROR",
           message: "Failed to retrieve search suggestions",
+        },
+      });
+    }
+  });
+
+  /**
+   * POST /api/search/recommendations
+   *
+   * Generates AI-backed search recommendations grounded in transcript data.
+   * Internally proxies to /rag/ask and returns only recommendation items.
+   *
+   * Body: { query?, entityFilter?, dateFrom?, dateTo?, speaker?, limit? }
+   */
+  router.post("/api/search/recommendations", requireSession, requirePermission("search_hansard"), express.json(), async (req, res) => {
+    try {
+      const { query, entityFilter, dateFrom, dateTo, speaker, limit } = req.body || {};
+
+      let effectiveLimit = DEFAULT_RECOMMENDATION_LIMIT;
+      if (limit !== undefined && limit !== null) {
+        const parsed = Number(limit);
+        if (!Number.isNaN(parsed) && parsed > 0) {
+          effectiveLimit = Math.min(parsed, MAX_RECOMMENDATION_LIMIT);
+        }
+      }
+
+      const askBody = {
+        question: buildRecommendationPrompt(typeof query === "string" ? query : ""),
+      };
+
+      if (Array.isArray(entityFilter) && entityFilter.length > 0) askBody.entity_filter = entityFilter;
+      if (dateFrom) askBody.date_from = dateFrom;
+      if (dateTo) askBody.date_to = dateTo;
+      if (speaker) askBody.speaker = speaker;
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+
+      try {
+        const upstream = await fetch(`${POSTPROCESS_URL}/rag/ask`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${POSTPROCESS_TOKEN}`,
+          },
+          body: JSON.stringify(askBody),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+
+        if (!upstream.ok) {
+          const errBody = await upstream.text();
+          console.error("Postprocessing /rag/ask (recommendations) error:", upstream.status, errBody);
+          return res.status(upstream.status >= 500 ? 502 : upstream.status).json({
+            error: {
+              type: "ServerError",
+              code: "RAG_RECOMMENDATIONS_FAILED",
+              message: "Recommendation service returned an error",
+            },
+          });
+        }
+
+        const raw = await upstream.json();
+        return res.json({
+          recommendations: mapRecommendationItems(raw, effectiveLimit),
+          latencyMs: raw?.latency_ms ?? raw?.latencyMs ?? 0,
+        });
+      } catch (fetchErr) {
+        clearTimeout(timeout);
+        if (fetchErr.name === "AbortError") {
+          return res.status(504).json({
+            error: {
+              type: "ServerError",
+              code: "RAG_TIMEOUT",
+              message: "Recommendation request timed out",
+            },
+          });
+        }
+        throw fetchErr;
+      }
+    } catch (err) {
+      console.error("POST /api/search/recommendations error:", err);
+
+      if (err.cause?.code === "ECONNREFUSED" || err.cause?.code === "ENOTFOUND") {
+        return res.status(503).json({
+          error: {
+            type: "ServiceUnavailable",
+            code: "RAG_UNAVAILABLE",
+            message: "Recommendation service is unavailable. The Postprocessing Service is not reachable.",
+          },
+        });
+      }
+
+      return res.status(500).json({
+        error: {
+          type: "ServerError",
+          code: "INTERNAL_ERROR",
+          message: "Failed to generate search recommendations",
         },
       });
     }

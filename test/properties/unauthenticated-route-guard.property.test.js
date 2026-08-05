@@ -63,6 +63,7 @@ const PROTECTED_ROUTES = [
   // Search and Ask
   { method: 'post', path: '/api/search' },
   { method: 'get', path: '/api/search/suggestions' },
+  { method: 'post', path: '/api/search/recommendations' },
   { method: 'post', path: '/api/ask' },
 
   // Dashboard

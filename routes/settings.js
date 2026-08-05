@@ -15,7 +15,15 @@ const requirePermission = require("../middleware/require-permission");
 // ─── Allowed Values ──────────────────────────────────────────────────────────
 
 const ALLOWED_TRANSCRIPTION_ENGINES = new Set(["deepgram", "khaya", "hybrid"]);
-const ALLOWED_LANGUAGES = new Set(["en", "tw", "ga", "ee", "ha"]);
+const LANGUAGE_OPTIONS_BY_ENGINE = {
+  deepgram: ["en"],
+  khaya: ["tw", "ga", "ee", "ha"],
+  hybrid: ["en", "tw", "ga", "ee", "ha"],
+};
+
+function getAllowedLanguagesForEngine(engine) {
+  return LANGUAGE_OPTIONS_BY_ENGINE[engine] || [];
+}
 
 // ─── Export Config Validation Constants ──────────────────────────────────────
 
@@ -216,15 +224,36 @@ module.exports = function settingsRoutes(requireSession, db) {
         });
       }
 
-      // Validate defaultLanguage
-      if (defaultLanguage !== undefined && !ALLOWED_LANGUAGES.has(defaultLanguage)) {
-        return res.status(422).json({
-          error: {
-            type: "ValidationError",
-            code: "VALIDATION_ERROR",
-            message: `Invalid default_language value: '${defaultLanguage}'. Allowed values: ${[...ALLOWED_LANGUAGES].join(", ")}`,
-          },
-        });
+      let effectiveEngine = transcriptionEngine;
+      if (defaultLanguage !== undefined) {
+        const currentSettings = await db.query("SELECT transcription_engine FROM app_settings WHERE id = 1");
+        if (currentSettings.rows.length === 0) {
+          return res.status(404).json({
+            error: {
+              type: "NotFoundError",
+              code: "SETTINGS_NOT_FOUND",
+              message: "Settings not found",
+            },
+          });
+        }
+
+        if (!effectiveEngine) {
+          effectiveEngine = currentSettings.rows[0].transcription_engine;
+        }
+      }
+
+      // Validate defaultLanguage against the selected engine
+      if (defaultLanguage !== undefined) {
+        const allowedLanguages = getAllowedLanguagesForEngine(effectiveEngine);
+        if (!allowedLanguages.includes(defaultLanguage)) {
+          return res.status(422).json({
+            error: {
+              type: "ValidationError",
+              code: "VALIDATION_ERROR",
+              message: `Invalid default_language value: '${defaultLanguage}' for engine '${effectiveEngine}'. Allowed values: ${allowedLanguages.join(", ")}`,
+            },
+          });
+        }
       }
 
       // Validate autoSaveIntervalS
@@ -432,7 +461,8 @@ module.exports = function settingsRoutes(requireSession, db) {
 
 // Export validation sets and helpers for testing
 module.exports.ALLOWED_TRANSCRIPTION_ENGINES = ALLOWED_TRANSCRIPTION_ENGINES;
-module.exports.ALLOWED_LANGUAGES = ALLOWED_LANGUAGES;
+module.exports.LANGUAGE_OPTIONS_BY_ENGINE = LANGUAGE_OPTIONS_BY_ENGINE;
+module.exports.getAllowedLanguagesForEngine = getAllowedLanguagesForEngine;
 module.exports.ALLOWED_PAGE_SIZES = ALLOWED_PAGE_SIZES;
 module.exports.ALLOWED_TEMPLATE_VARIABLES = ALLOWED_TEMPLATE_VARIABLES;
 module.exports.validateExportConfig = validateExportConfig;

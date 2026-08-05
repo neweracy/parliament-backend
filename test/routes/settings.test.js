@@ -286,6 +286,67 @@ describe('PATCH /api/settings/export', () => {
   });
 });
 
+// ─── PATCH /api/settings ─────────────────────────────────────────────────────
+
+describe('PATCH /api/settings', () => {
+  it('rejects Khaya languages when Deepgram is the current engine', async () => {
+    const db = createMockDb([{ rows: [SAMPLE_SETTINGS_ROW] }]);
+    const app = buildApp(db);
+
+    const res = await request(app)
+      .patch('/api/settings')
+      .send({ defaultLanguage: 'tw' });
+
+    assert.equal(res.status, 422);
+    assert.equal(res.body.error.code, 'VALIDATION_ERROR');
+    assert.ok(res.body.error.message.includes("engine 'deepgram'"));
+  });
+
+  it('accepts Khaya languages when the engine is Khaya', async () => {
+    const db = createMockDb([
+      { rows: [SAMPLE_SETTINGS_ROW] },
+      {
+        rows: [{
+          ...SAMPLE_SETTINGS_ROW,
+          transcription_engine: 'khaya',
+          default_language: 'tw',
+        }],
+      },
+    ]);
+    const app = buildApp(db);
+
+    const res = await request(app)
+      .patch('/api/settings')
+      .send({ transcriptionEngine: 'khaya', defaultLanguage: 'tw' });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.transcriptionEngine, 'khaya');
+    assert.equal(res.body.defaultLanguage, 'tw');
+  });
+
+  it('accepts English when the engine is hybrid', async () => {
+    const db = createMockDb([
+      { rows: [SAMPLE_SETTINGS_ROW] },
+      {
+        rows: [{
+          ...SAMPLE_SETTINGS_ROW,
+          transcription_engine: 'hybrid',
+          default_language: 'en',
+        }],
+      },
+    ]);
+    const app = buildApp(db);
+
+    const res = await request(app)
+      .patch('/api/settings')
+      .send({ transcriptionEngine: 'hybrid', defaultLanguage: 'en' });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.transcriptionEngine, 'hybrid');
+    assert.equal(res.body.defaultLanguage, 'en');
+  });
+});
+
 // ─── RBAC permission enforcement ─────────────────────────────────────────────
 
 describe('RBAC enforcement on settings routes', () => {
@@ -293,7 +354,6 @@ describe('RBAC enforcement on settings routes', () => {
     const db = createMockDb([]);
     const app = express();
 
-    // Viewer auth middleware
     function viewerAuth(req, res, next) {
       req.user = {
         userId: 'viewer-1',

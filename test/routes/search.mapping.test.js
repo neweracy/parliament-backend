@@ -19,6 +19,11 @@ const request = require("supertest");
 const searchRoutes = require("../../routes/search");
 
 function passThrough(req, res, next) {
+  req.user = {
+    userId: "test-user",
+    role: "Admin",
+    permissions: ["search_hansard"],
+  };
   next();
 }
 
