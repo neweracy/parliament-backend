@@ -10,7 +10,11 @@ import re
 
 import structlog
 
-from app.rag.recommendations import Citation, RecommendationItem
+from app.rag.recommendations import (
+    TARGET_SUGGESTION_COUNT,
+    Citation,
+    RecommendationItem,
+)
 from app.rag.retriever import RetrievedChunk
 
 logger = structlog.get_logger("rag.parsing")
@@ -18,9 +22,62 @@ logger = structlog.get_logger("rag.parsing")
 # Deterministic text returned when the model invocation raises
 GENERATION_FAILURE_TEXT = "Unable to generate an answer at this time. Please try again later."
 
+# Applied when a recommendation line omits its "| reason" half. Non-empty by
+# construction so a parsed item always satisfies the non-empty-reason contract.
+DEFAULT_RECOMMENDATION_REASON = "Related to the current discussion"
+
 # Citation markers, e.g. "[42]" — stripped from the answer on the zero-context
 # path, where nothing is citable and a marker could only be a dead reference
 _CITATION_MARKER_RE = re.compile(r"\[\d+\]")
+
+# The RECOMMENDATIONS: heading that closes an answer, optionally preceded by
+# markdown heading hashes and followed by a colon.
+_RECOMMENDATIONS_HEADING_RE = re.compile(
+    r"\n*(?:#{0,3}\s*)?RECOMMENDATIONS\s*:?\s*\n",
+    re.IGNORECASE,
+)
+
+# List marker: a dash, bullet, numbered prefix, or a lone asterisk. The
+# lookahead stops a `**bold**` opener from being eaten as a bullet, which would
+# strand the second asterisk inside the captured text.
+_LIST_MARKER = r"(?:[-•]|\*(?!\*)|\d+[.)])"
+
+# "- text | reason", "* text", "1. text | reason" — bullet or numbered.
+_BULLET_LINE_RE = re.compile(
+    rf"^\s*{_LIST_MARKER}\s*(.+?)(?:\s*\|\s*(.+))?$",
+    re.MULTILINE,
+)
+
+# As above, but the leading marker is optional. Blank lines never match because
+# the text group requires at least one non-whitespace character.
+_BARE_LINE_RE = re.compile(
+    rf"^\s*{_LIST_MARKER}?\s*(\S.*?)(?:\s*\|\s*(.+))?$",
+    re.MULTILINE,
+)
+
+# Markdown emphasis wrappers: **bold**, *italic*, __bold__, _italic_, `code`.
+_EMPHASIS_RE = re.compile(r"(\*\*|__|\*|_|`)(.+?)\1", re.DOTALL)
+
+
+def _strip_emphasis(value: str) -> str:
+    """Remove markdown emphasis wrappers and collapse whitespace.
+
+    Applied to both halves of a recommendation line so `**budget allocation**`
+    and `budget allocation` normalise to the same text. Runs repeatedly to
+    unwrap nesting such as `**_term_**`, and drops any stray leftover markers
+    so an unbalanced wrapper cannot leak into the UI.
+    """
+    text = value.strip()
+    for _ in range(3):
+        unwrapped = _EMPHASIS_RE.sub(r"\2", text)
+        if unwrapped == text:
+            break
+        text = unwrapped
+    text = text.replace("**", "").replace("__", "").replace("`", "")
+    # An unbalanced wrapper leaves a single marker behind; drop it at the edges
+    # rather than letting it surface in the UI.
+    text = text.strip().strip("*_").strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def parse_citations(answer_text: str) -> list[int]:
@@ -97,43 +154,87 @@ def validate_citations(
     return citations
 
 
+def parse_recommendation_lines(
+    block: str,
+    *,
+    limit: int,
+    default_reason: str = DEFAULT_RECOMMENDATION_REASON,
+    allow_bare_lines: bool = False,
+) -> list[RecommendationItem]:
+    """Parse `text | reason` lines out of a recommendation block.
+
+    The single parser for every recommendation the model emits, whether the
+    block came from the `RECOMMENDATIONS:` section of an answer or from a
+    dedicated search-recommendation call. Sharing it is what keeps the two
+    paths from drifting: previously the search path scraped `**bold**` markers
+    with its own regex in the gateway and silently dropped anything unbolded.
+
+    Markdown emphasis is stripped rather than required. Models bold the term
+    inconsistently, so treating `**budget allocation**` and `budget
+    allocation` as the same input removes a whole class of empty-result bugs.
+
+    Args:
+        block: Raw text containing one recommendation per line.
+        limit: Maximum items to return. Zero or negative yields an empty list.
+        default_reason: Reason applied when a line omits the `| reason` part.
+            Never empty, so a parsed item always has a non-empty reason.
+        allow_bare_lines: When True, lines without a leading bullet or number
+            are also accepted. Used by the search path, whose prompt asks for
+            plain `query | reason` lines. Left False for answer parsing so
+            trailing prose after the block cannot be mistaken for an item.
+
+    Returns:
+        At most `limit` RecommendationItem objects, each with non-empty `text`
+        and non-empty `reason`, in the order they appeared.
+    """
+    if limit <= 0:
+        return []
+
+    pattern = _BARE_LINE_RE if allow_bare_lines else _BULLET_LINE_RE
+
+    items: list[RecommendationItem] = []
+    for line_match in pattern.finditer(block):
+        text = _strip_emphasis(line_match.group(1))
+        reason = _strip_emphasis(line_match.group(2) or "") or default_reason
+
+        if not text:
+            continue
+
+        items.append(RecommendationItem(text=text, reason=reason))
+        if len(items) == limit:
+            break
+
+    return items
+
+
 def split_recommendations(
     raw_answer: str,
+    *,
+    limit: int = TARGET_SUGGESTION_COUNT,
 ) -> tuple[str, list[RecommendationItem]]:
-    """Split the raw Claude response into answer text and recommendations.
+    """Split the raw model response into answer text and recommendations.
 
     Looks for a RECOMMENDATIONS: section at the end of the response.
     Returns the answer text (without the recommendations section) and
     a list of parsed RecommendationItem objects.
-    """
-    recommendations: list[RecommendationItem] = []
 
-    # Find the RECOMMENDATIONS section (case-insensitive)
-    rec_pattern = re.compile(
-        r"\n*(?:#{0,3}\s*)?RECOMMENDATIONS\s*:?\s*\n",
-        re.IGNORECASE,
-    )
-    match = rec_pattern.search(raw_answer)
+    Args:
+        raw_answer: The unmodified model response.
+        limit: Maximum recommendations to return. Defaults to the same
+            TARGET_SUGGESTION_COUNT the builder tops up to, so the parse cap
+            and the assembly cap can no longer disagree.
+
+    Returns:
+        The answer text with the recommendations block removed, and at most
+        `limit` parsed items.
+    """
+    match = _RECOMMENDATIONS_HEADING_RE.search(raw_answer)
 
     if not match:
-        return raw_answer.strip(), recommendations
+        return raw_answer.strip(), []
 
-    # Everything before the marker is the answer
+    # Everything before the marker is the answer; everything after is the block.
     answer_text = raw_answer[: match.start()].strip()
-
-    # Everything after is the recommendations block
     rec_block = raw_answer[match.end() :]
 
-    # Parse individual recommendation lines
-    # Format: "- [question] | [reason]" or "- [question]"
-    line_pattern = re.compile(r"^[-•*]\s*(.+?)(?:\s*\|\s*(.+))?$", re.MULTILINE)
-
-    for line_match in line_pattern.finditer(rec_block):
-        text = line_match.group(1).strip()
-        reason = (line_match.group(2) or "Related to the current discussion").strip()
-
-        if text:
-            recommendations.append(RecommendationItem(text=text, reason=reason))
-
-    # Limit to 3 recommendations
-    return answer_text, recommendations[:3]
+    return answer_text, parse_recommendation_lines(rec_block, limit=limit)
