@@ -1,8 +1,18 @@
 """Deterministic recommendation derivation — no language model involved.
 
-Derives Suggested_Question and Related_Record items from data the retriever
-already returned, so a recommendation set costs nothing extra and stays
-grounded in the corpus.
+Derives Suggested_Question, Search_Query, and Related_Record items from data the
+retriever already returned, so a recommendation set costs nothing extra and
+stays grounded in the corpus.
+
+Two suggestion flavours share one builder, one dedup key, and one "exactly
+`count` items" guarantee:
+
+- `suggestions()` yields prose follow-up questions for the Q&A assistant.
+- `search_queries()` yields keyword terms for the search box.
+
+The LLM-backed search path in `app.rag.search_recommendations` uses
+`search_queries()` as its fallback and top-up source, which is what makes the
+never-empty guarantee hold all the way out to the gateway.
 
 `RecommendationBuilder` is pure: no I/O, no model call, deterministic for a
 given input. The one piece of data it needs that is not already in hand —
@@ -30,6 +40,14 @@ logger = structlog.get_logger("rag.recommendations")
 
 TARGET_SUGGESTION_COUNT = 3
 MAX_RELATED_RECORDS = 3
+
+# Search-query recommendation counts. These are the single source of truth for
+# the whole stack: the gateway clamps to MAX_SEARCH_RECOMMENDATION_COUNT and
+# defaults to TARGET_SEARCH_RECOMMENDATION_COUNT, and the frontend requests a
+# value inside that band. Keeping the numbers here stops the three layers from
+# drifting the way they did when each held its own cap.
+TARGET_SEARCH_RECOMMENDATION_COUNT = 5
+MAX_SEARCH_RECOMMENDATION_COUNT = 8
 
 # Hint lookup bounds. Only a handful of candidates are ever consumed — the
 # builder stops as soon as it has `count` distinct suggestions — so these are
@@ -161,11 +179,29 @@ _STATIC_SUGGESTIONS: tuple[tuple[str, str], ...] = (
 )
 
 
+_STATIC_SEARCH_SUGGESTIONS: tuple[tuple[str, str], ...] = (
+    (
+        "budget allocation",
+        "Appropriation and spending debates are among the most frequently recorded",
+    ),
+    (
+        "committee report",
+        "Committee findings are tabled and debated across many sittings",
+    ),
+    (
+        "standing orders procedure",
+        "Reveals how parliamentary rules and processes are discussed in the record",
+    ),
+)
+
+
 def normalise_question(text: str) -> str:
     """Casefold, collapse whitespace, strip trailing punctuation.
 
     Used as the dedup key for suggestion distinctness and for excluding
-    questions already present in the conversation history.
+    questions already present in the conversation history. Search-query
+    candidates share this key so a term and the same term with different
+    spacing or a trailing question mark never both appear in one set.
     """
     return re.sub(r"\s+", " ", text).strip().rstrip("?.!").strip().casefold()
 
@@ -322,6 +358,84 @@ def _hint_candidates(corpus_hints: CorpusHints | None) -> Iterator[tuple[str, st
             )
 
 
+def _search_chunk_candidates(chunks: Iterable[Document]) -> Iterator[tuple[str, str]]:
+    """Yield (query, reason) pairs of search TERMS drawn from the given chunks.
+
+    The question streams above phrase candidates as prose ("What did X say
+    about Y?") because they are dropped into a chat box. These are typed into a
+    search box instead, so they are bare keyword phrases — the form that
+    actually retrieves well against the hybrid index.
+    """
+    for chunk in chunks:
+        meta = chunk.metadata
+        speaker = _clean(meta.get("speaker"))
+        entities = [e for e in (_clean(v) for v in (meta.get("entity_names") or [])) if e]
+        sitting_title = _clean(meta.get("sitting_title"))
+        record_title = _clean(meta.get("record_title"))
+
+        for entity in entities:
+            yield (entity, f"{entity} appears in the retrieved proceedings")
+            if speaker:
+                yield (
+                    f"{speaker} {entity}",
+                    f"Narrows the record to {speaker} on {entity}",
+                )
+
+        if speaker:
+            yield (speaker, f"{speaker} is on the record in these proceedings")
+
+        if record_title:
+            yield (record_title, f"Matches the record titled {record_title}")
+
+        if sitting_title:
+            yield (sitting_title, f"Scopes the search to {sitting_title}")
+
+
+def _search_hint_candidates(corpus_hints: CorpusHints | None) -> Iterator[tuple[str, str]]:
+    """Yield (query, reason) pairs of search terms from corpus-wide hints.
+
+    Used when the retrieved chunks yield too few candidates, or when nothing
+    was retrieved at all. Every value named here exists in the corpus, so the
+    suggested term is guaranteed to match something.
+    """
+    if corpus_hints is None:
+        return
+
+    for entity in (_clean(v) for v in corpus_hints.entities):
+        if entity:
+            yield (entity, f"{entity} appears in the parliamentary record")
+
+    for speaker in (_clean(v) for v in corpus_hints.speakers):
+        if speaker:
+            yield (speaker, f"{speaker} appears in the parliamentary record")
+
+
+def _search_filler_candidates() -> Iterator[tuple[str, str]]:
+    """Yield an unbounded stream of distinct, generic search terms.
+
+    Mirrors `_filler_candidates` for the search path: it is what makes the
+    "exactly `count` items" guarantee total even when the corpus is empty and
+    every static entry has been excluded.
+    """
+    topics = (
+        "motion",
+        "statement",
+        "question time",
+        "bill reading",
+        "ministerial response",
+        "point of order",
+        "adjournment",
+        "vote",
+    )
+    for index in itertools.count(0):
+        topic = topics[index % len(topics)]
+        round_number = index // len(topics)
+        # The first pass yields the bare topic; later passes qualify it so every
+        # emitted term stays distinct under `normalise_question`.
+        term = topic if round_number == 0 else f"{topic} {_ordinal(round_number + 1)} session"
+        yield (term, "A common category of parliamentary business to explore")
+
+
 def _ordinal(value: int) -> str:
     """Return the English ordinal form of a positive integer."""
     if value % 100 in (11, 12, 13):
@@ -394,6 +508,65 @@ class RecommendationBuilder:
             _hint_candidates(corpus_hints),
             iter(_STATIC_SUGGESTIONS),
             _filler_candidates(),
+        )
+
+        picked: list[RecommendationItem] = []
+        for candidate_text, reason in candidates:
+            key = normalise_question(candidate_text)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            picked.append(_make_item(candidate_text, reason))
+            if len(picked) == count:
+                break
+
+        return picked
+
+    def search_queries(
+        self,
+        *,
+        chunks: list[Document] | None = None,
+        corpus_hints: CorpusHints | None = None,
+        exclude: list[str] | None = None,
+        count: int = TARGET_SEARCH_RECOMMENDATION_COUNT,
+    ) -> list[RecommendationItem]:
+        """Return `count` distinct search-query suggestions.
+
+        The search-box counterpart to `suggestions()`. Same guarantee, same
+        precedence shape, same dedup key — only the candidate phrasing differs:
+        these are keyword terms to type into the search box rather than prose
+        questions to send to the assistant.
+
+        Source precedence: chunk metadata → corpus hints → static set →
+        unbounded filler. The filler stream never runs dry, so the returned list
+        always has exactly `count` items, each with non-empty `text` and
+        `reason`, each distinct from the others and from every `exclude` entry
+        under `normalise_question`.
+
+        Args:
+            chunks: Retrieved chunks as Document objects to mine for entity,
+                speaker, record, and sitting values. May be empty or None.
+            corpus_hints: Corpus-wide entity and speaker names, used when the
+                chunks yield too few candidates.
+            exclude: Query text that must not be returned — typically the
+                model's own suggestions plus the query the user already typed.
+            count: Exact number of items to return. Zero or negative yields an
+                empty list.
+
+        Returns:
+            Exactly `count` RecommendationItem objects, or fewer only when
+            `count` is not positive.
+        """
+        if count <= 0:
+            return []
+
+        seen: set[str] = {normalise_question(value) for value in (exclude or [])}
+
+        candidates = itertools.chain(
+            _search_chunk_candidates(chunks or []),
+            _search_hint_candidates(corpus_hints),
+            iter(_STATIC_SEARCH_SUGGESTIONS),
+            _search_filler_candidates(),
         )
 
         picked: list[RecommendationItem] = []
