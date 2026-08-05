@@ -1,7 +1,8 @@
-"""RAG API endpoints — search, ask, and ingest.
+"""RAG API endpoints — search, recommendations, ask, and ingest.
 
-Exposes the RAG pipeline via three POST endpoints:
+Exposes the RAG pipeline via four POST endpoints:
 - POST /rag/search — hybrid retrieval over indexed transcript chunks
+- POST /rag/recommendations — search-query suggestions for the search box
 - POST /rag/ask — grounded Q&A with citations
 - POST /rag/ingest — trigger async ingestion for a transcript
 
@@ -23,8 +24,13 @@ from pydantic import BaseModel, Field
 from app.deps import verify_service_token
 from app.rag.agent import HansardChatAgent
 from app.rag.ingestion import TranscriptIngestionWorker
-from app.rag.recommendations import fetch_corpus_hints
+from app.rag.recommendations import (
+    MAX_SEARCH_RECOMMENDATION_COUNT,
+    TARGET_SEARCH_RECOMMENDATION_COUNT,
+    fetch_corpus_hints,
+)
 from app.rag.retriever import HybridRetriever, RetrievalFilters
+from app.rag.search_recommendations import generate_search_recommendations
 
 logger = structlog.get_logger("rag.router")
 
@@ -144,6 +150,56 @@ class Recommendation(BaseModel):
     reason: str = Field(..., description="Why this is relevant")
 
 
+class SearchRecommendationRequest(BaseModel):
+    """Request body for POST /rag/recommendations.
+
+    `query` is optional because the search box asks for recommendations before
+    the user has typed anything — that call yields entry points into the corpus
+    rather than refinements of a query.
+    """
+
+    query: str | None = Field(
+        default=None, description="What the researcher has typed so far, if anything"
+    )
+    entity_filter: list[str] | None = Field(default=None, description="Filter by entity names")
+    date_from: date | None = Field(
+        default=None, description="Include only chunks from sittings on or after this date"
+    )
+    date_to: date | None = Field(
+        default=None, description="Include only chunks from sittings on or before this date"
+    )
+    speaker: str | None = Field(default=None, description="Filter by speaker label")
+    limit: int | None = Field(
+        default=TARGET_SEARCH_RECOMMENDATION_COUNT,
+        ge=1,
+        le=MAX_SEARCH_RECOMMENDATION_COUNT,
+        description=(
+            f"Number of recommendations to return "
+            f"(default {TARGET_SEARCH_RECOMMENDATION_COUNT}, "
+            f"max {MAX_SEARCH_RECOMMENDATION_COUNT})"
+        ),
+    )
+
+
+class SearchRecommendationResponse(BaseModel):
+    """Response body for POST /rag/recommendations.
+
+    `recommendations` always holds exactly the requested count — the generator
+    tops up from the deterministic builder when the model returns too few, so
+    consumers never have to handle an empty set.
+    """
+
+    recommendations: list[Recommendation] = Field(default_factory=list)
+    latency_ms: float = 0.0
+    source: str = Field(
+        default="deterministic",
+        description="'model', 'mixed', or 'deterministic' — where the items came from",
+    )
+    model_used: bool = Field(
+        default=False, description="Whether the model call ran and returned usable text"
+    )
+
+
 class RelatedRecord(BaseModel):
     """A sitting, record, or speaker behind the answer."""
 
@@ -248,6 +304,59 @@ async def rag_search(body: SearchRequest, request: Request) -> SearchResponse:
         results=results,
         total_matched=len(results),
         latency_ms=round(latency_ms, 1),
+    )
+
+
+@router.post("/recommendations", response_model=SearchRecommendationResponse)
+async def rag_recommendations(
+    body: SearchRecommendationRequest, request: Request
+) -> SearchRecommendationResponse:
+    """Suggest search queries for the search box.
+
+    Unlike /rag/ask this never returns 503 when the chat model is unconfigured.
+    A search box that silently stops offering suggestions is a worse failure than
+    one offering deterministic corpus-grounded terms, and the generator always
+    has those to fall back on.
+
+    Filters are forwarded to the grounding retrieval so suggestions stay inside
+    the slice of the record the user is currently looking at.
+    """
+    session_factory = request.app.state.session_factory
+    settings = request.app.state.settings
+    chat_model = getattr(request.app.state, "chat_model", None)
+
+    filters: RetrievalFilters | None = None
+    if any([body.entity_filter, body.date_from, body.date_to, body.speaker]):
+        filters = RetrievalFilters(
+            entity_names=body.entity_filter,
+            date_from=body.date_from,
+            date_to=body.date_to,
+            speaker=body.speaker,
+        )
+
+    embeddings = request.app.state.embeddings
+    retriever = HybridRetriever(session_factory, embeddings, settings)
+
+    corpus_hints = await fetch_corpus_hints(session_factory)
+
+    count = body.limit if body.limit is not None else TARGET_SEARCH_RECOMMENDATION_COUNT
+
+    result = await generate_search_recommendations(
+        chat_model=chat_model,
+        query=body.query,
+        retriever=retriever,
+        filters=filters,
+        corpus_hints=corpus_hints,
+        count=count,
+    )
+
+    return SearchRecommendationResponse(
+        recommendations=[
+            Recommendation(text=item.text, reason=item.reason) for item in result.recommendations
+        ],
+        latency_ms=round(result.latency_ms, 1),
+        source=result.source,
+        model_used=result.model_used,
     )
 
 
