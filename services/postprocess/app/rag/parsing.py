@@ -7,6 +7,7 @@ validation and recommendation extraction cannot drift between the two.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 import structlog
 
@@ -238,3 +239,28 @@ def split_recommendations(
     rec_block = raw_answer[match.end() :]
 
     return answer_text, parse_recommendation_lines(rec_block, limit=limit)
+
+
+def message_text(message: Any) -> str:
+    """Flatten a model message's content to text.
+
+    A tool-calling model may return content as a list of blocks rather than a
+    plain string, so handling only the string case would drop the answer.
+
+    Shared by the conversational agent and the search-recommendation generator
+    so both read model output the same way.
+    """
+    content = getattr(message, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif (
+                isinstance(block, dict) and "text" in block and block.get("type") in (None, "text")
+            ):
+                parts.append(block["text"])
+        return "".join(parts)
+    return str(content)

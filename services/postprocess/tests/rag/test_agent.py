@@ -12,8 +12,8 @@ from app.rag.agent import (
     HansardChatAgent,
     _format_passages,
     _make_search_tool,
-    _message_text,
 )
+from app.rag.parsing import message_text
 from app.rag.retriever import RetrievedChunk
 
 
@@ -89,24 +89,24 @@ class TestFormatPassages:
 
 
 # ---------------------------------------------------------------------------
-# _message_text
+# message_text
 # ---------------------------------------------------------------------------
 
 
 class TestMessageText:
     def test_plain_string(self):
         message = AIMessage(content="Hello there.")
-        assert _message_text(message) == "Hello there."
+        assert message_text(message) == "Hello there."
 
     def test_list_of_text_blocks(self):
         message = AIMessage(
             content=[{"type": "text", "text": "Hello "}, {"type": "text", "text": "world."}]
         )
-        assert _message_text(message) == "Hello world."
+        assert message_text(message) == "Hello world."
 
     def test_list_of_bare_strings(self):
         message = AIMessage(content=["Hello ", "world."])
-        assert _message_text(message) == "Hello world."
+        assert message_text(message) == "Hello world."
 
 
 # ---------------------------------------------------------------------------

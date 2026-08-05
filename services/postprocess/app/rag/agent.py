@@ -29,6 +29,7 @@ from langchain_core.tools import tool
 
 from app.rag.parsing import (
     GENERATION_FAILURE_TEXT,
+    message_text,
     parse_citations,
     split_recommendations,
     strip_citation_markers,
@@ -189,28 +190,6 @@ def _make_search_tool(retriever: Any, filters: RetrievalFilters | None, collecto
     return search_hansard
 
 
-def _message_text(message: Any) -> str:
-    """Flatten a message's content to text.
-
-    A tool-calling model may return content as a list of blocks rather than a
-    plain string, so handling only the string case would drop the answer.
-    """
-    content = getattr(message, "content", "")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif (
-                isinstance(block, dict) and "text" in block and block.get("type") in (None, "text")
-            ):
-                parts.append(block["text"])
-        return "".join(parts)
-    return str(content)
-
-
 class HansardChatAgent:
     """Conversational agent over the transcribed parliamentary record.
 
@@ -282,7 +261,7 @@ class HansardChatAgent:
                 {"messages": messages},
                 config={"recursion_limit": _RECURSION_LIMIT},
             )
-            raw_answer = _message_text(result["messages"][-1])
+            raw_answer = message_text(result["messages"][-1])
         except Exception:
             logger.error(
                 "rag.agent.invocation_failed",
