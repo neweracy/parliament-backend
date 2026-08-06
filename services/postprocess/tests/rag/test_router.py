@@ -11,12 +11,28 @@ Covers:
 
 from __future__ import annotations
 
+from datetime import date
+from types import SimpleNamespace
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
+
+from app.deps import verify_service_token
+from app.rag.recommendations import (
+    MAX_SEARCH_RECOMMENDATION_COUNT,
+    TARGET_SEARCH_RECOMMENDATION_COUNT,
+)
 from app.rag.router import (
     AskRequest,
     AskResponse,
     ChatMessage,
     RelatedRecord,
+    SearchRecommendationRequest,
+    SearchRecommendationResponse,
 )
+from app.rag.router import router as rag_router
 
 # ---------------------------------------------------------------------------
 # AskResponse contract: related_records serialisation (Requirement 4.5)
@@ -255,3 +271,117 @@ class TestCorpusHintsAlwaysFetched:
         assert "fetch_corpus_hints(session_factory)" in source
         # The old conditional gate must not have resurfaced.
         assert "if not chunks" not in source
+
+
+# ---------------------------------------------------------------------------
+# Search recommendation contract
+# ---------------------------------------------------------------------------
+
+
+class TestSearchRecommendationRequest:
+    """The limit band must match the one the gateway clamps to."""
+
+    def test_limit_defaults_to_target_count(self) -> None:
+        assert SearchRecommendationRequest().limit == TARGET_SEARCH_RECOMMENDATION_COUNT
+
+    def test_query_is_optional(self) -> None:
+        # The search box asks for suggestions before anything is typed.
+        assert SearchRecommendationRequest().query is None
+
+    def test_limit_accepts_the_whole_band(self) -> None:
+        for value in range(1, MAX_SEARCH_RECOMMENDATION_COUNT + 1):
+            assert SearchRecommendationRequest(limit=value).limit == value
+
+    def test_limit_rejects_values_outside_the_band(self) -> None:
+        for value in (0, -1, MAX_SEARCH_RECOMMENDATION_COUNT + 1):
+            with pytest.raises(ValidationError):
+                SearchRecommendationRequest(limit=value)
+
+    def test_filters_use_snake_case(self) -> None:
+        body = SearchRecommendationRequest(
+            query="health",
+            entity_filter=["Ministry of Health"],
+            date_from=date(2026, 1, 1),
+            date_to=date(2026, 12, 31),
+            speaker="Hon. Ama Mensah",
+        )
+
+        dumped = body.model_dump()
+        assert dumped["entity_filter"] == ["Ministry of Health"]
+        assert "date_from" in dumped and "date_to" in dumped
+        assert "entityFilter" not in dumped
+
+
+class TestSearchRecommendationResponse:
+    def test_defaults_are_safe(self) -> None:
+        response = SearchRecommendationResponse()
+
+        assert response.recommendations == []
+        assert response.latency_ms == 0.0
+        assert response.source == "deterministic"
+        assert response.model_used is False
+
+    def test_dump_uses_snake_case_for_model_used(self) -> None:
+        # The gateway maps model_used -> modelUsed, so the wire name matters.
+        dumped = SearchRecommendationResponse(model_used=True).model_dump()
+
+        assert dumped["model_used"] is True
+        assert "modelUsed" not in dumped
+
+
+class TestRecommendationsEndpointDegrades:
+    """POST /rag/recommendations must not mirror /rag/ask's 503.
+
+    A search box that stops offering suggestions reads as broken. The endpoint
+    has a deterministic builder to fall back on, so it answers 200 even with no
+    chat model and no reachable database.
+    """
+
+    @staticmethod
+    def _client(chat_model=None) -> TestClient:
+        app = FastAPI()
+        app.include_router(rag_router)
+        app.dependency_overrides[verify_service_token] = lambda: None
+
+        def broken_session_factory():
+            raise RuntimeError("no database in this test")
+
+        app.state.session_factory = broken_session_factory
+        app.state.settings = SimpleNamespace()
+        app.state.embeddings = None
+        app.state.chat_model = chat_model
+
+        return TestClient(app)
+
+    def test_returns_200_without_a_chat_model(self) -> None:
+        response = self._client().post("/rag/recommendations", json={"query": "health"})
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["source"] == "deterministic"
+        assert body["model_used"] is False
+        assert len(body["recommendations"]) == TARGET_SEARCH_RECOMMENDATION_COUNT
+        for item in body["recommendations"]:
+            assert item["text"].strip()
+            assert item["reason"].strip()
+
+    def test_returns_200_with_no_query(self) -> None:
+        response = self._client().post("/rag/recommendations", json={})
+
+        assert response.status_code == 200
+        assert len(response.json()["recommendations"]) == TARGET_SEARCH_RECOMMENDATION_COUNT
+
+    def test_honours_the_requested_limit(self) -> None:
+        client = self._client()
+
+        for value in (1, 3, MAX_SEARCH_RECOMMENDATION_COUNT):
+            response = client.post("/rag/recommendations", json={"query": "x", "limit": value})
+            assert response.status_code == 200
+            assert len(response.json()["recommendations"]) == value
+
+    def test_rejects_an_out_of_band_limit(self) -> None:
+        client = self._client()
+
+        for value in (0, MAX_SEARCH_RECOMMENDATION_COUNT + 1):
+            response = client.post("/rag/recommendations", json={"query": "x", "limit": value})
+            assert response.status_code == 422
