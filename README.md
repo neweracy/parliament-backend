@@ -1,22 +1,110 @@
-# Node Transcription
+# Ghana Parliament Hansard System
 
-A Node.js transcription backend powered by [Deepgram](https://deepgram.com) (Speech-to-Text) and [Khaya AI](https://translation.ghananlp.org) (Ghanaian languages), with a Ghana-focused entity correction post-processing pipeline. Includes rule-based datasets for locations, presidents/ministers, MPs, and political parties, plus an optional Amazon Bedrock (Claude) LLM pass for accuracy beyond the static datasets.
+A full-stack parliamentary transcription and research platform for the Ghana Parliament. Processes audio recordings of parliamentary sittings into structured, searchable, citable transcripts with an AI-powered research assistant.
 
-The frontend is a React + TypeScript SPA (Vite, Tailwind CSS, daisyUI) with audio waveform playback and real-time transcript display.
+Built with a three-tier architecture: a React SPA frontend, an Express 5 API gateway handling transcription and authentication, and a Python/FastAPI postprocessing service providing entity correction, RAG-based search, and conversational Q&A over the parliamentary record.
+
+## Tech Stack
+
+### Frontend (Hansard/)
+
+| Category | Technology |
+|----------|-----------|
+| Framework | React 18, TypeScript |
+| Build Tool | Vite 6 |
+| Styling | Tailwind CSS 4, Emotion (MUI theming) |
+| UI Components | Radix UI (20+ primitives), MUI Material 7, shadcn/ui patterns (CVA + clsx + tailwind-merge) |
+| Audio | WaveSurfer.js (waveform playback) |
+| Charts | Recharts |
+| Forms | React Hook Form |
+| Animation | Motion (Framer Motion) |
+| Markdown | react-markdown + remark-gfm |
+| Drag & Drop | react-dnd |
+| Testing | Vitest 4, Testing Library (React + DOM + user-event), fast-check (property-based) |
+
+### Backend Gateway (Express)
+
+| Category | Technology |
+|----------|-----------|
+| Runtime | Node.js 24 |
+| Framework | Express 5 |
+| ASR Providers | Deepgram SDK 4, Khaya AI (GhanaNLP) |
+| Audio Processing | ffmpeg-static |
+| Authentication | jsonwebtoken, jwks-rsa (Cognito RS256 validation), bcrypt |
+| AWS SDKs | @aws-sdk/client-bedrock-runtime, @aws-sdk/client-cognito-identity-provider |
+| Database | pg (PostgreSQL client) |
+| File Uploads | Multer 2 |
+| API Docs | swagger-ui-express |
+| Config | dotenv, TOML |
+| Testing | Node.js built-in test runner, fast-check (property-based), supertest, ESLint 9 |
+
+### Postprocessing Service (Python/FastAPI)
+
+| Category | Technology |
+|----------|-----------|
+| Framework | FastAPI 0.115, Uvicorn (ASGI) |
+| Validation | Pydantic 2, pydantic-settings |
+| Database | SQLAlchemy 2 (async), psycopg 3, Alembic (migrations) |
+| Vector Store | pgvector (cosine similarity, HNSW indexing) |
+| Full-Text Search | PostgreSQL tsvector + GIN index |
+| **LLM/AI** | **LangChain 1.3**, **LangChain-AWS 1.6** (ChatBedrock, BedrockEmbeddings) |
+| Agent Framework | LangChain Agents (`create_agent` with tool-based retrieval) |
+| Text Splitting | langchain-text-splitters (RecursiveCharacterTextSplitter) |
+| Embeddings | Amazon Titan Text Embeddings V2 (1024-dim vectors) |
+| LLM | Amazon Bedrock — Claude (via ChatBedrock async invocation) |
+| Retrieval | Hybrid search: LangChain BaseRetriever subclasses + Reciprocal Rank Fusion |
+| Entity Matching | RapidFuzz (fuzzy string matching), pybktree (BK-tree for edit distance) |
+| Observability | structlog (structured logging), aws-embedded-metrics (CloudWatch EMF) |
+| AWS | boto3 (credential probing, Bedrock calls) |
+| Auth | bcrypt (password hashing) |
+| Linting | Ruff (check + format, line-length=100, Python 3.12 target) |
+| Testing | pytest 8, pytest-asyncio, hypothesis (property-based), httpx |
+
+### Infrastructure & Deployment
+
+| Category | Technology |
+|----------|-----------|
+| Containerization | Docker (multi-stage: Go + Node 24 builder stages) |
+| Reverse Proxy | Caddy 2 (custom build with caddy-ratelimit module via xcaddy) |
+| Rate Limiting | Caddy rate-limit zones (session: 5 req/min, API: 120 req/min) |
+| Hosting | Fly.io |
+| Database | PostgreSQL 16 with pgvector + pg_trgm extensions |
+| Package Manager | pnpm 10 (via corepack) |
+| Orchestration | concurrently (multi-service dev startup) |
+| Migrations | Alembic (offline + online modes, manual SQL) |
+
+### AI/ML Pipeline
+
+| Component | Technology |
+|-----------|-----------|
+| Speech-to-Text | Deepgram (English), Khaya AI (Ghanaian languages: Twi, Ewe, Dagbani, etc.) |
+| Entity Correction | Rule-based datasets (Ghana locations, MPs, presidents, parties) + Bedrock LLM refinement |
+| RAG Ingestion | LangChain RecursiveCharacterTextSplitter → Titan V2 embeddings → pgvector storage |
+| RAG Retrieval | Hybrid: FulltextRetriever (tsvector) + VectorRetriever (pgvector cosine) → RRF fusion |
+| Conversational Agent | LangChain `create_agent` with `search_hansard` tool (model decides when to search) |
+| Grounded Answering | LangChain ChatBedrock with citation parsing and validation |
+| Recommendations | Deterministic derivation from retrieved chunks (no extra model call) + LLM-backed search suggestions |
 
 ## Architecture
 
 ```
-┌─────────────┐        ┌─────────────────┐        ┌──────────────────┐
-│   Frontend  │──API──▶│  Express Gateway │──ASR──▶│  Deepgram / Khaya│
-│  (React/TS) │        │   (server.js)   │        │   AI providers   │
-└─────────────┘        └────────┬────────┘        └──────────────────┘
-                                │
-                   ┌────────────┼────────────┐
-                   ▼            ▼            ▼
-            Rule-based     Year/Date     Bedrock LLM
-            Location       Correction    Post-processing
-            Correction                   (optional)
+┌──────────────────┐     ┌───────────────────────┐     ┌─────────────────────────┐
+│  Hansard (React) │────▶│  transcript-end       │────▶│  Postprocess Service    │
+│  SPA Frontend    │ API │  Express Gateway      │ HTTP│  Python/FastAPI          │
+│  Port 5173       │     │  Port 8081            │     │  Port 8082              │
+└──────────────────┘     └───────────┬───────────┘     └────────────┬────────────┘
+                                     │                              │
+                              ┌──────┴──────┐              ┌───────┴────────┐
+                              │ Deepgram    │              │ PostgreSQL 16  │
+                              │ Khaya AI    │              │ (pgvector)     │
+                              │ (ASR)       │              │ Port 5432      │
+                              └─────────────┘              └───────┬────────┘
+                                                                   │
+                                                           ┌───────┴────────┐
+                                                           │ Amazon Bedrock │
+                                                           │ (Claude + Titan│
+                                                           │  Embeddings)   │
+                                                           └────────────────┘
 ```
 
 ### API Endpoints
@@ -44,6 +132,13 @@ The frontend is a React + TypeScript SPA (Vite, Tailwind CSS, daisyUI) with audi
 | `POST` | `/api/users/invite` | Invite user via Cognito |
 | `PATCH` | `/api/users/:userId/role` | Change user role |
 | `PATCH` | `/api/users/:userId/status` | Activate/deactivate user |
+| `POST` | `/api/ask` | Conversational Q&A (proxied to RAG agent) |
+| `POST` | `/api/search` | Hybrid transcript search (proxied to RAG retriever) |
+| `POST` | `/api/search/recommendations` | Search-query suggestions |
+| `POST` | `/rag/search` | Direct hybrid retrieval over indexed chunks |
+| `POST` | `/rag/ask` | Grounded Q&A with citations via LangChain agent |
+| `POST` | `/rag/recommendations` | Search recommendations (LLM + deterministic) |
+| `POST` | `/rag/ingest` | Trigger async transcript ingestion |
 
 All transcription endpoints require a valid JWT (obtain via `/api/session`).
 Settings, dictionary, and user management endpoints require appropriate RBAC permissions (see below).
@@ -306,26 +401,65 @@ See `sample.env` for the full list with defaults.
 ## Project Structure
 
 ```
-├── server.js                 # Express API gateway
+├── server.js                 # Express 5 API gateway
 ├── lib/
 │   ├── location-correction/  # Rule-based Ghana entity correction
 │   ├── hybrid/               # Audio slicing for hybrid pipeline
+│   ├── rbac-config.js        # Role-permission registry (60s cache)
 │   ├── postprocess-client.js # Python service HTTP client
 │   └── postprocess-mode.js   # Mode dispatcher utilities
 ├── routes/
-│   ├── khaya.js              # Khaya AI route handlers
-│   └── hybrid.js             # Hybrid confidence pipeline routes
+│   ├── account.js            # User account routes
+│   ├── ask.js                # Q&A proxy to RAG agent
+│   ├── audio.js              # Audio upload & proxy
+│   ├── auth.js               # Session/JWT routes
+│   ├── dashboard.js          # Dashboard analytics
+│   ├── dictionary.js         # Custom dictionary CRUD
+│   ├── hybrid.js             # Hybrid confidence pipeline
+│   ├── khaya.js              # Khaya AI provider routes
+│   ├── records.js            # Hansard record CRUD
+│   ├── search.js             # Search proxy to RAG retriever
+│   ├── settings.js           # App settings & export config
+│   ├── sittings.js           # Sitting CRUD with pagination
+│   ├── transcript.js         # Transcript management
+│   ├── transcription.js      # Deepgram transcription + postprocess
+│   └── users.js              # User management (Cognito)
+├── middleware/
+│   ├── cognito-auth.js       # AWS Cognito JWT validation
+│   └── require-permission.js # RBAC permission guard
 ├── providers/
 │   └── khaya.js              # Khaya AI provider adapter
 ├── services/
-│   └── postprocess/          # Python postprocessing service
-├── frontend/                 # React/TS SPA (git submodule)
-├── contracts/                # API contracts & conformance tests (git submodule)
+│   └── postprocess/          # Python FastAPI service
+│       ├── app/
+│       │   ├── main.py       # FastAPI app with lifespan
+│       │   ├── config.py     # Pydantic settings
+│       │   ├── pipeline.py   # Entity correction pipeline
+│       │   ├── rag/
+│       │   │   ├── agent.py          # LangChain conversational agent
+│       │   │   ├── answerer.py       # Grounded answering chain (ChatBedrock)
+│       │   │   ├── clients.py        # LangChain client factory (ChatBedrock, BedrockEmbeddings)
+│       │   │   ├── ingestion.py      # Chunking + embedding worker
+│       │   │   ├── retriever.py      # FulltextRetriever + VectorRetriever + RRF
+│       │   │   ├── recommendations.py # Deterministic suggestion derivation
+│       │   │   ├── search_recommendations.py # LLM-backed search suggestions
+│       │   │   ├── parsing.py        # Citation & recommendation parsing
+│       │   │   └── router.py         # FastAPI RAG endpoints
+│       │   ├── correction/   # Entity correction logic
+│       │   ├── datasets/     # Ghana entity datasets (JSON/CSV)
+│       │   ├── history/      # Correction history writer
+│       │   ├── llm/          # Bedrock LLM correction pass
+│       │   ├── models/       # SQLAlchemy models
+│       │   ├── obs/          # Observability (CloudWatch EMF)
+│       │   └── years/        # Year/date correction
+│       ├── migrations/       # Alembic schema migrations
+│       ├── tests/            # pytest + hypothesis test suite
+│       └── pyproject.toml    # Python project config (hatchling)
 ├── deploy/
-│   ├── Dockerfile            # Multi-stage production build
-│   ├── Caddyfile             # Caddy reverse proxy config
+│   ├── Dockerfile            # Multi-stage build (Go + Node 24)
+│   ├── Caddyfile             # Caddy reverse proxy + rate limits
 │   └── start.sh             # Container entrypoint
-├── test/                     # Backend test suites
+├── test/                     # Backend test suites (Node.js)
 ├── bench/                    # Benchmark harness
 └── Makefile                  # Project automation
 ```
@@ -333,22 +467,36 @@ See `sample.env` for the full list with defaults.
 ## Testing
 
 ```bash
-make lint              # ESLint
-make test-unit         # Backend unit tests (eslint + node --test)
-make test-contracts    # Contract conformance tests (requires running app)
-make test-python       # Python postprocessing service tests
-make bench             # Benchmark harness against baseline
+# Backend (Node.js)
+pnpm test              # ESLint + node --test
+pnpm run lint          # ESLint only
+
+# Python Postprocessing
+cd services/postprocess
+.venv/Scripts/python.exe -m pytest -v          # Windows
+# source .venv/bin/activate && pytest -v       # macOS / Linux
+
+# Frontend (from parent project)
+cd ../Hansard && pnpm run test
 ```
 
-The project uses [fast-check](https://github.com/dubzzz/fast-check) for property-based testing and Node.js built-in test runner for unit tests.
+| Layer | Framework | Style |
+|-------|-----------|-------|
+| Frontend | Vitest 4 + Testing Library | Unit + component tests, co-located `*.test.ts` |
+| Backend | Node.js built-in test runner | Property-based (fast-check), integration (supertest) |
+| Python | pytest + hypothesis | Property-based, async (pytest-asyncio), HTTP (httpx) |
 
 ## Deployment
 
 Production deployment uses a multi-stage Docker build deployed to [Fly.io](https://fly.io):
 
-- Caddy reverse proxy (with rate limiting) serves the frontend and proxies API calls
-- Node.js backend runs behind Caddy on port 8081
-- Frontend is built at image time and served as static assets
+1. **Stage 1** — Custom Caddy binary built from Go with `xcaddy` + `caddy-ratelimit` module
+2. **Stage 2** — Frontend built with pnpm (Vite static output)
+3. **Stage 3** — Node 24 runtime with backend deps, Caddy binary, and built frontend
+
+Rate limiting zones:
+- `/api/session` — 5 requests/min per IP
+- `/api/*` — 120 requests/min per IP
 
 ```bash
 fly deploy
@@ -356,29 +504,13 @@ fly deploy
 
 ## Submodules
 
-| Submodule | Repository | Description |
-|-----------|-----------|-------------|
-| `frontend` | [transcription-html](https://github.com/deepgram-starters/transcription-html) | React/TypeScript frontend |
-| `contracts` | [starter-contracts](https://github.com/deepgram/starter-contracts) | API contracts & conformance tests |
+This repository is part of a parent project (`Parliament-Project`) that manages it as a Git submodule alongside the frontend:
 
-```bash
-make update            # Pull latest submodule commits
-make eject-frontend    # Convert frontend submodule to regular directory
-```
-
-## Make Targets
-
-| Target | Description |
-|--------|-------------|
-| `make init` | Initialize submodules + install all dependencies |
-| `make start` | Start backend + frontend in parallel |
-| `make start-backend` | Start backend only (port 8081) |
-| `make start-frontend` | Start frontend only (port 8080) |
-| `make update` | Update submodules to latest |
-| `make clean` | Remove node_modules and build artifacts |
-| `make status` | Show git and submodule status |
-| `make eject-frontend` | Eject frontend submodule to regular directory |
+| Submodule | Repository | Branch | Role |
+|-----------|-----------|--------|------|
+| `Hansard/` | bigdataghana/Hansard | `feat/backend-integration` | React TypeScript frontend |
+| `transcript-end/` | neweracy/node-transcription | `python-integration` | Express + Python backend (this repo) |
 
 ## License
 
-MIT — See [LICENSE](./LICENSE)
+MIT
