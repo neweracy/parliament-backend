@@ -283,12 +283,31 @@ module.exports = function recordsRoutes(requireSession, db) {
   /**
    * GET /api/records/assigned
    *
-   * Returns all Hansard records assigned to the authenticated user.
-   * User identity is passed via the x-user-name header.
+   * Returns Hansard assignment records.
+   *
+   * - Admin may request all assignments with ?scope=all.
+   * - All other roles receive only their own assignments, identified by the
+   *   x-user-name header.
    */
   router.get("/api/records/assigned", requireSession, requirePermission("view_records"), async (req, res) => {
     try {
+      const role = req.user?.role;
+      const scope = req.query?.scope;
+      const wantsAll = scope === "all";
+      const isAdmin = role === "Admin";
       const userName = req.headers["x-user-name"];
+
+      if (wantsAll && isAdmin) {
+        const result = await db.query(
+          `SELECT hr.*, s.title AS sitting_title, s.priority AS sitting_priority
+           FROM hansard_record hr
+           INNER JOIN sitting s ON s.id = hr.sitting_id
+           WHERE hr.assignee_name IS NOT NULL
+           ORDER BY hr.created_at DESC`
+        );
+
+        return res.json({ data: result.rows.map(formatAssignedRecord) });
+      }
 
       if (!userName) {
         return res.status(400).json({

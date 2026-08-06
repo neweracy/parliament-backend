@@ -36,18 +36,20 @@ function createMockDb(responses = []) {
   };
 }
 
-/**
- * A no-op requireSession middleware that always passes (simulates authenticated requests).
- */
-function passThrough(req, res, next) { next(); }
+function withUser(user) {
+  return function attachUser(req, res, next) {
+    req.user = user;
+    next();
+  };
+}
 
 /**
  * Builds an Express app with the records routes using the given db mock.
  */
-function buildApp(db) {
+function buildApp(db, requireSession = withUser({ role: 'Chief Editor' })) {
   const app = express();
   app.use(express.json());
-  app.use(recordsRoutes(passThrough, db));
+  app.use(recordsRoutes(requireSession, db));
   return app;
 }
 
@@ -80,6 +82,25 @@ const SAMPLE_JOINED_ROW = {
 };
 
 describe('GET /api/records/assigned', () => {
+  it('returns all assigned records for Admin when scope=all is requested', async () => {
+    const db = createMockDb([
+      { rows: [SAMPLE_JOINED_ROW] },
+    ]);
+    const app = buildApp(db, withUser({ role: 'Admin' }));
+
+    const res = await request(app)
+      .get('/api/records/assigned?scope=all');
+
+    assert.equal(res.status, 200);
+    assert.ok(Array.isArray(res.body.data));
+    assert.equal(res.body.data.length, 1);
+    assert.equal(res.body.data[0].assigneeName, 'Sarah Mensah');
+
+    const query = db.getCalls()[0];
+    assert.ok(query.text.includes('WHERE hr.assignee_name IS NOT NULL'));
+    assert.deepEqual(query.params, undefined);
+  });
+
   it('returns records with sittingTitle and sittingPriority from the joined sitting (happy path)', async () => {
     const db = createMockDb([
       { rows: [SAMPLE_JOINED_ROW] },
