@@ -8,9 +8,11 @@ Requirements: 1.1, 1.2, 1.3, 1.4, 1.6, 7.13, 7.14, 7.15, 9.8, 16.3
 
 from __future__ import annotations
 
+import os
 import time
 from contextlib import asynccontextmanager
 
+import sentry_sdk
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -31,6 +33,20 @@ from app.rag.clients import create_chat_model, create_embeddings, probe_credenti
 from app.rag.router import router as rag_router
 
 logger = structlog.get_logger("main")
+
+# ---------------------------------------------------------------------------
+# Sentry error monitoring (initializes only when SENTRY_DSN is set)
+# ---------------------------------------------------------------------------
+
+_sentry_dsn = os.environ.get("SENTRY_DSN")
+if _sentry_dsn:
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        environment=os.environ.get("SENTRY_ENVIRONMENT", "development"),
+        release=os.environ.get("SENTRY_RELEASE", "postprocess@0.1.0"),
+        traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+        send_default_pii=False,
+    )
 
 
 # ---------------------------------------------------------------------------

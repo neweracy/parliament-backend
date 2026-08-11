@@ -36,6 +36,7 @@
     "@aws-sdk/client-bedrock-runtime": "3.750.0",
     "@aws-sdk/client-cognito-identity-provider": "3.750.0",
     "@deepgram/sdk": "4.11.3",
+    "@sentry/node": "10.70.0",
     "bcrypt": "^6.0.0",
     "cors": "2.8.5",
     "dotenv": "17.2.3",

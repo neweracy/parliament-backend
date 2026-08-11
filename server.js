@@ -20,6 +20,20 @@
 
 require("dotenv").config({ override: true });
 
+// --- Sentry error monitoring (must init before other imports that may throw) ---
+const Sentry = require("@sentry/node");
+
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV || "development",
+    release: require("./package.json").version,
+    tracesSampleRate: parseFloat(process.env.SENTRY_TRACES_SAMPLE_RATE || "0.1"),
+    // Don't send PII (emails, IPs) unless explicitly opted in
+    sendDefaultPii: false,
+  });
+}
+
 // --- Third-party ---
 const { createClient } = require("@deepgram/sdk");
 const express = require("express");
@@ -881,6 +895,14 @@ app.get('/health', (_req, res) => {
     version: APP_VERSION,
   });
 });
+
+// ============================================================================
+// SENTRY ERROR HANDLER — must be registered after all routes, before listen
+// ============================================================================
+
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 // ============================================================================
 // SERVER START
