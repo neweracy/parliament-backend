@@ -40,12 +40,15 @@ function createSecurityHeaders(options = {}) {
   // Req 14.4: In local-dev mode, connect-src and form-action are just 'self'
   if (authMode === 'cognito' && cognitoDomain) {
     const cognitoOrigin = `https://${cognitoDomain}`;
-    cspDirectives.push(`connect-src 'self' ${cognitoOrigin}`);
+    cspDirectives.push(`connect-src 'self' blob: ${cognitoOrigin}`);
     cspDirectives.push(`form-action 'self' ${cognitoOrigin}`);
   } else {
-    cspDirectives.push("connect-src 'self'");
+    cspDirectives.push("connect-src 'self' blob:");
     cspDirectives.push("form-action 'self'");
   }
+
+  // Allow audio/video playback from same-origin and blob: URLs (WaveSurfer)
+  cspDirectives.push("media-src 'self' blob:");
 
   // Pre-compute the CSP value (Req 14.1: exactly one Content-Security-Policy header)
   const cspValue = cspDirectives.join('; ');
