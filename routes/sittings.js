@@ -380,17 +380,31 @@ module.exports = function sittingsRoutes(requireSession, db) {
   /**
    * DELETE /api/sittings/:id
    *
-   * Soft-deletes a sitting by setting its status to Archived.
+   * Removes a sitting. Behaviour depends on the `permanent` query parameter:
+   * - Default (no param or permanent=false): soft-deletes by archiving.
+   * - permanent=true: permanently deletes the sitting and cascades through
+   *   records, transcripts, and chunks. Irreversible.
+   *
+   * Both modes require create_sitting permission (Admin + Chief Editor).
    * Returns 204 No Content on success.
    */
   router.delete("/api/sittings/:id", requireSession, requirePermission("create_sitting"), express.json(), async (req, res) => {
     try {
       const { id } = req.params;
+      const permanent = req.query.permanent === "true";
 
-      const result = await db.query(
-        "UPDATE sitting SET status = 'Archived', updated_at = now() WHERE id = $1 RETURNING id",
-        [id]
-      );
+      let result;
+      if (permanent) {
+        result = await db.query(
+          "DELETE FROM sitting WHERE id = $1 RETURNING id",
+          [id]
+        );
+      } else {
+        result = await db.query(
+          "UPDATE sitting SET status = 'Archived', updated_at = now() WHERE id = $1 RETURNING id",
+          [id]
+        );
+      }
 
       if (result.rows.length === 0) {
         return res.status(404).json({
@@ -405,7 +419,7 @@ module.exports = function sittingsRoutes(requireSession, db) {
       res.status(204).send();
 
       // Broadcast live update
-      broadcast("sitting:deleted", { id: Number(id) });
+      broadcast(permanent ? "sitting:destroyed" : "sitting:deleted", { id: Number(id) });
     } catch (err) {
       console.error("DELETE /api/sittings/:id error:", err);
       res.status(500).json({
