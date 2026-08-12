@@ -299,14 +299,14 @@ class VectorRetriever(BaseRetriever):
                 tc.start_s,
                 tc.end_s,
                 tc.entity_names,
-                1 - (tc.embedding <=> :query_embedding::vector) AS score
+                1 - (tc.embedding <=> CAST(:query_embedding AS vector)) AS score
             FROM transcript_chunk tc
             JOIN transcript t ON t.id = tc.transcript_id
             JOIN hansard_record hr ON hr.id = t.record_id
             JOIN sitting s ON s.id = hr.sitting_id
             WHERE tc.embedding IS NOT NULL
             {filter_sql}
-            ORDER BY tc.embedding <=> :query_embedding::vector
+            ORDER BY tc.embedding <=> CAST(:query_embedding AS vector)
             LIMIT :pool_size
         """
 
