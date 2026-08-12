@@ -288,6 +288,48 @@ module.exports = function recordsRoutes(requireSession, db) {
   });
 
   /**
+   * DELETE /api/sittings/:sittingId/records/:id
+   *
+   * Permanently deletes a Hansard record and its associated transcripts/chunks.
+   * Only Admin and Chief Editor (via delete_record permission) may call this.
+   * Returns 204 No Content on success.
+   */
+  router.delete("/api/sittings/:sittingId/records/:id", requireSession, requirePermission("delete_record"), async (req, res) => {
+    try {
+      const { sittingId, id } = req.params;
+
+      const result = await db.query(
+        "DELETE FROM hansard_record WHERE id = $1 AND sitting_id = $2 RETURNING id",
+        [id, sittingId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          error: {
+            type: "NotFoundError",
+            code: "RECORD_NOT_FOUND",
+            message: `Record with id ${id} not found in sitting ${sittingId}`,
+          },
+        });
+      }
+
+      res.status(204).send();
+
+      // Broadcast live update
+      broadcast("record:deleted", { id: Number(id), sittingId: Number(sittingId) });
+    } catch (err) {
+      console.error("DELETE /api/sittings/:sittingId/records/:id error:", err);
+      res.status(500).json({
+        error: {
+          type: "ServerError",
+          code: "INTERNAL_ERROR",
+          message: "Failed to delete record",
+        },
+      });
+    }
+  });
+
+  /**
    * GET /api/records/assigned
    *
    * Returns Hansard assignment records.
