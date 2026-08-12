@@ -11,6 +11,7 @@
 
 const express = require("express");
 const requirePermission = require("../middleware/require-permission");
+const { broadcast } = require("../lib/ws-server");
 
 /**
  * Converts a snake_case DB row to a camelCase record object for the API response.
@@ -127,6 +128,9 @@ module.exports = function recordsRoutes(requireSession, db) {
       );
 
       res.status(201).json(formatRecord(result.rows[0]));
+
+      // Broadcast live update
+      broadcast("record:created", formatRecord(result.rows[0]));
     } catch (err) {
       console.error("POST /api/sittings/:sittingId/records error:", err);
       res.status(500).json({
@@ -268,6 +272,9 @@ module.exports = function recordsRoutes(requireSession, db) {
       }
 
       res.json(formatRecord(result.rows[0]));
+
+      // Broadcast live update
+      broadcast("record:updated", formatRecord(result.rows[0]));
     } catch (err) {
       console.error("PATCH /api/sittings/:sittingId/records/:id error:", err);
       res.status(500).json({

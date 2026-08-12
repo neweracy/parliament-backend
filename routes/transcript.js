@@ -11,6 +11,7 @@
 
 const express = require("express");
 const requirePermission = require("../middleware/require-permission");
+const { broadcast } = require("../lib/ws-server");
 
 /**
  * Maximum allowed transcript text size in bytes (1 MB).
@@ -182,6 +183,13 @@ module.exports = function transcriptRoutes(requireSession, db) {
         triggerIngestion(transcriptId);
 
         res.status(200).json({ version: newVersion });
+
+        // Broadcast live update
+        broadcast("transcript:updated", {
+          transcriptId,
+          recordId: Number(recordId),
+          version: newVersion,
+        });
       } catch (err) {
         console.error("PATCH /transcript error:", err);
         res.status(500).json({

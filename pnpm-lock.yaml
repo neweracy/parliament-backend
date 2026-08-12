@@ -56,6 +56,9 @@ importers:
       toml:
         specifier: 3.0.0
         version: 3.0.0
+      ws:
+        specifier: '8'
+        version: 8.18.3
     devDependencies:
       '@eslint/js':
         specifier: 9.39.0

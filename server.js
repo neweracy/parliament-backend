@@ -59,6 +59,9 @@ const { degradedResponse, mergeSuccess, logDegraded } = require("./lib/postproce
 // --- Local: database ---
 const db = require("./lib/db");
 
+// --- Local: WebSocket real-time updates ---
+const { initWebSocket, broadcast } = require("./lib/ws-server");
+
 // --- Local: routes and providers ---
 const khayaRoutes = require("./routes/khaya");
 const hybridRoutes = require("./routes/hybrid");
@@ -893,6 +896,7 @@ app.get('/health', (_req, res) => {
     uptime_seconds: Math.floor(process.uptime()),
     postprocess_mode: POSTPROCESS_MODE,
     version: APP_VERSION,
+    ws_clients: require("./lib/ws-server").getClientCount(),
   });
 });
 
@@ -925,7 +929,7 @@ const ADVERTISED_ROUTES = [
   { method: "GET", path: "/health", detail: "" },
 ];
 
-app.listen(CONFIG.port, CONFIG.host, async () => {
+const server = app.listen(CONFIG.port, CONFIG.host, async () => {
   // Warm the RBAC permissions cache on startup
   try {
     await loadPermissions();
@@ -955,5 +959,8 @@ app.listen(CONFIG.port, CONFIG.host, async () => {
   }
 
   console.log(`${divider}\n`);
+
+  // Initialize WebSocket server for live updates
+  initWebSocket(server);
 });
 

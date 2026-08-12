@@ -12,6 +12,7 @@
 const express = require("express");
 
 const requirePermission = require("../middleware/require-permission");
+const { broadcast } = require("../lib/ws-server");
 
 /**
  * Converts a snake_case DB row to a camelCase sitting object for the API response.
@@ -235,6 +236,9 @@ module.exports = function sittingsRoutes(requireSession, db) {
       );
 
       res.status(201).json(formatSitting(result.rows[0]));
+
+      // Broadcast live update
+      broadcast("sitting:created", formatSitting(result.rows[0]));
     } catch (err) {
       console.error("POST /api/sittings error:", err);
       res.status(500).json({
@@ -358,6 +362,9 @@ module.exports = function sittingsRoutes(requireSession, db) {
       }
 
       res.json(formatSitting(result.rows[0]));
+
+      // Broadcast live update
+      broadcast("sitting:updated", formatSitting(result.rows[0]));
     } catch (err) {
       console.error("PATCH /api/sittings/:id error:", err);
       res.status(500).json({
@@ -396,6 +403,9 @@ module.exports = function sittingsRoutes(requireSession, db) {
       }
 
       res.status(204).send();
+
+      // Broadcast live update
+      broadcast("sitting:deleted", { id: Number(id) });
     } catch (err) {
       console.error("DELETE /api/sittings/:id error:", err);
       res.status(500).json({

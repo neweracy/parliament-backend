@@ -15,6 +15,7 @@ const crypto = require("crypto");
 
 const { transcribeStoredAudio } = require("../lib/transcription-pipeline");
 const requirePermission = require("../middleware/require-permission");
+const { broadcast } = require("../lib/ws-server");
 
 /**
  * Postprocessing Service base URL (for RAG ingestion trigger).
@@ -348,9 +349,19 @@ async function completeTranscription(jobId, recordId, result, db) {
     [recordId]
   );
 
+  // Broadcast record status change
+  broadcast("record:updated", { id: Number(recordId), status: "Draft", progress: 100 });
+
   // Fire-and-forget: trigger RAG ingestion on the Postprocessing Service
   const transcriptId = insertResult.rows[0].id;
   triggerIngestion(transcriptId);
+
+  // Broadcast live update — transcription complete
+  broadcast("transcript:created", {
+    transcriptId,
+    recordId: Number(recordId),
+    version: nextVersion,
+  });
 
   // Update job state
   if (job) {
