@@ -1,10 +1,11 @@
-"""RAG API endpoints — search, recommendations, ask, and ingest.
+"""RAG API endpoints — search, recommendations, ask, ingest, and reindex.
 
-Exposes the RAG pipeline via four POST endpoints:
+Exposes the RAG pipeline via five POST endpoints:
 - POST /rag/search — hybrid retrieval over indexed transcript chunks
 - POST /rag/recommendations — search-query suggestions for the search box
 - POST /rag/ask — grounded Q&A with citations
 - POST /rag/ingest — trigger async ingestion for a transcript
+- POST /rag/reindex — bulk re-ingest transcripts with missing embeddings
 
 All endpoints are authenticated via the service token (same as /v1/postprocess).
 
@@ -20,6 +21,7 @@ import structlog
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from app.deps import verify_service_token
 from app.rag.agent import HansardChatAgent
@@ -510,4 +512,118 @@ async def rag_ingest(body: IngestRequest, request: Request) -> IngestResponse:
     return IngestResponse(
         status="queued",
         transcript_id=body.transcript_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bulk re-index endpoint — fixes the "NULL embedding" problem
+# ---------------------------------------------------------------------------
+
+
+class ReindexRequest(BaseModel):
+    """Request body for POST /rag/reindex."""
+
+    limit: int = Field(
+        default=50, ge=1, le=500, description="Max transcripts to re-ingest (default 50, max 500)"
+    )
+
+
+class ReindexResponse(BaseModel):
+    """Response body for POST /rag/reindex."""
+
+    status: str = "queued"
+    transcript_ids: list[int] = Field(default_factory=list)
+    total_unindexed_chunks: int = 0
+    message: str = ""
+
+
+@router.post("/reindex", status_code=202, response_model=ReindexResponse)
+async def rag_reindex(body: ReindexRequest, request: Request) -> ReindexResponse:
+    """Find transcripts with unindexed chunks and re-queue them for ingestion.
+
+    Identifies transcript_chunk rows where embedding IS NULL (meaning the
+    embedding failed during initial ingestion — typically because AWS
+    credentials were unavailable) and enqueues the owning transcripts for
+    re-ingestion.
+
+    This is idempotent: re-ingestion deletes existing chunks for a transcript
+    before storing new ones, so it is safe to call repeatedly.
+    """
+    session_factory = request.app.state.session_factory
+    settings = request.app.state.settings
+
+    # Find transcripts that have chunks without embeddings
+    try:
+        async with session_factory() as session:
+            result = await session.execute(
+                text(
+                    "SELECT DISTINCT tc.transcript_id, COUNT(*) AS unindexed_count "
+                    "FROM transcript_chunk tc "
+                    "WHERE tc.embedding IS NULL "
+                    "GROUP BY tc.transcript_id "
+                    "ORDER BY unindexed_count DESC "
+                    "LIMIT :limit"
+                ),
+                {"limit": body.limit},
+            )
+            rows = result.fetchall()
+    except Exception:
+        logger.error("rag.reindex.query_failed", exc_info=True)
+        return ReindexResponse(
+            status="error",
+            message="Failed to query unindexed chunks",
+        )
+
+    if not rows:
+        return ReindexResponse(
+            status="complete",
+            message="No transcripts with unindexed chunks found — all embeddings are present",
+        )
+
+    transcript_ids = [row[0] for row in rows]
+    total_unindexed = sum(row[1] for row in rows)
+
+    # Ensure the ingestion worker is running
+    ingestion_worker: TranscriptIngestionWorker | None = getattr(
+        request.app.state, "ingestion_worker", None
+    )
+
+    if ingestion_worker is None:
+        embeddings = request.app.state.embeddings
+        if embeddings is None:
+            return ReindexResponse(
+                status="error",
+                transcript_ids=transcript_ids,
+                total_unindexed_chunks=total_unindexed,
+                message=(
+                    "Cannot re-index: embedding client is not configured. "
+                    "Check that LLM_ENABLED=true and AWS credentials are available."
+                ),
+            )
+        ingestion_worker = TranscriptIngestionWorker(
+            session_factory, settings, embeddings=embeddings
+        )
+        ingestion_worker.start()
+        request.app.state.ingestion_worker = ingestion_worker
+
+    # Enqueue each transcript for re-ingestion
+    queued_count = 0
+    for transcript_id in transcript_ids:
+        ingestion_worker.enqueue(transcript_id)
+        queued_count += 1
+
+    logger.info(
+        "rag.reindex.queued",
+        transcript_count=queued_count,
+        total_unindexed_chunks=total_unindexed,
+    )
+
+    return ReindexResponse(
+        status="queued",
+        transcript_ids=transcript_ids,
+        total_unindexed_chunks=total_unindexed,
+        message=(
+            f"Queued {queued_count} transcripts for re-ingestion "
+            f"({total_unindexed} unindexed chunks)"
+        ),
     )

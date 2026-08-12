@@ -123,20 +123,36 @@ class TestChunkTextOnly:
         assert chunks[0].ordinal == 0
 
 
-class TestGenerateEmbedding:
+class TestEmbedChunks:
     @pytest.mark.asyncio
-    async def test_calls_embeddings(self, worker, mock_embeddings):
-        """_generate_embedding calls aembed_documents."""
-        result = await worker._generate_embedding("test text")
-        mock_embeddings.aembed_documents.assert_called_once_with(["test text"])
-        assert result == [0.1] * 1024
+    async def test_batch_embedding(self, worker, mock_embeddings):
+        """embed_chunks calls aembed_documents in batches."""
+        from app.rag.ingestion import Chunk
+
+        chunks = [
+            Chunk(text="test text 1", start_s=0.0, end_s=1.0, speaker=None, ordinal=0),
+            Chunk(text="test text 2", start_s=1.0, end_s=2.0, speaker=None, ordinal=1),
+        ]
+        mock_embeddings.aembed_documents.return_value = [[0.1] * 1024, [0.2] * 1024]
+
+        result = await worker.embed_chunks(chunks)
+
+        assert len(result) == 2
+        assert result[0] == [0.1] * 1024
+        assert result[1] == [0.2] * 1024
+        mock_embeddings.aembed_documents.assert_called()
 
     @pytest.mark.asyncio
-    async def test_no_embeddings_raises(self, mock_settings, mock_session_factory):
-        """_generate_embedding raises when embeddings not configured."""
+    async def test_no_embeddings_returns_all_none(self, mock_settings, mock_session_factory):
+        """embed_chunks returns all None when embeddings client is not configured."""
+        from app.rag.ingestion import Chunk
+
         worker = TranscriptIngestionWorker(mock_session_factory, mock_settings, embeddings=None)
-        with pytest.raises(RuntimeError, match="not configured"):
-            await worker._generate_embedding("test")
+        chunks = [
+            Chunk(text="test", start_s=0.0, end_s=1.0, speaker=None, ordinal=0),
+        ]
+        result = await worker.embed_chunks(chunks)
+        assert result == [None]
 
 
 class TestChunkTranscript:

@@ -20,6 +20,7 @@ Requirements: 2.1, 2.2, 2.3, 2.6, 3.5, 3.6, 4.9, 8.1, 8.2, 8.3, 8.4, 8.5
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -27,6 +28,7 @@ import structlog
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 
+from app.rag.circuit_breaker import CircuitBreaker
 from app.rag.parsing import (
     GENERATION_FAILURE_TEXT,
     message_text,
@@ -54,6 +56,13 @@ _MAX_HISTORY_MESSAGES = 20
 # Super-step ceiling for the agent loop. Each tool round trip costs roughly two,
 # so this allows several searches while still bounding a misbehaving model.
 _RECURSION_LIMIT = 12
+
+# Circuit breaker for the Bedrock model — shared across all agent instances
+# within a single worker process. Opens after 5 consecutive failures, recovers
+# after 60 seconds.
+_bedrock_breaker = CircuitBreaker(
+    name="bedrock_agent", failure_threshold=5, recovery_timeout_s=60.0
+)
 
 _NO_MATCH_TEXT = "No passages in the transcribed parliamentary record match that query."
 
@@ -235,6 +244,25 @@ class HansardChatAgent:
         history = list(conversation_history or [])[-_MAX_HISTORY_MESSAGES:]
         history_questions = [content for role, content in history if role == "user"]
 
+        # Circuit breaker: if Bedrock has been failing repeatedly, return a
+        # friendly message immediately rather than waiting for another timeout.
+        if not _bedrock_breaker.allow_request():
+            return finalise_answer(
+                builder=self._builder,
+                answer=(
+                    "The AI service is temporarily unavailable due to repeated "
+                    "errors. Please try again in a minute."
+                ),
+                citations=[],
+                context_chunks=[],
+                parsed=[],
+                hint_chunks=[],
+                corpus_hints=corpus_hints,
+                history_questions=history_questions,
+                grounded=False,
+                start_time=start_time,
+            )
+
         # Everything search_hansard retrieved this turn, in first-seen order.
         retrieved: list[RetrievedChunk] = []
 
@@ -257,12 +285,43 @@ class HansardChatAgent:
         )
 
         try:
-            result = await agent.ainvoke(
-                {"messages": messages},
-                config={"recursion_limit": _RECURSION_LIMIT},
+            # Wall-clock timeout bounds the full agent loop (multiple tool
+            # calls + model invocations). The gateway aborts at 30s, so this
+            # must finish well inside that window to return a structured error
+            # rather than a TCP reset.
+            timeout_s = (
+                self._settings.rag_agent_timeout_s if self._settings else 25
+            )
+            result = await asyncio.wait_for(
+                agent.ainvoke(
+                    {"messages": messages},
+                    config={"recursion_limit": _RECURSION_LIMIT},
+                ),
+                timeout=timeout_s,
             )
             raw_answer = message_text(result["messages"][-1])
+            _bedrock_breaker.record_success()
+        except TimeoutError:
+            _bedrock_breaker.record_failure()
+            logger.warning(
+                "rag.agent.timeout",
+                question_preview=question[:80],
+                timeout_s=timeout_s if "timeout_s" in dir() else 25,
+            )
+            return finalise_answer(
+                builder=self._builder,
+                answer="The request took too long to process. Please try a more specific question.",
+                citations=[],
+                context_chunks=retrieved,
+                parsed=[],
+                hint_chunks=retrieved,
+                corpus_hints=corpus_hints,
+                history_questions=history_questions,
+                grounded=False,
+                start_time=start_time,
+            )
         except Exception:
+            _bedrock_breaker.record_failure()
             logger.error(
                 "rag.agent.invocation_failed",
                 question_preview=question[:80],

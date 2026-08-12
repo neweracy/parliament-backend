@@ -236,8 +236,13 @@ class TranscriptIngestionWorker:
     async def embed_chunks(self, chunks: list[Chunk]) -> list[list[float] | None]:
         """Generate embeddings for chunks via Bedrock Titan Text Embeddings V2.
 
-        On failure per chunk: logs the error, returns None for that chunk's
-        embedding (marking it as unindexed), and continues processing.
+        Uses batch embedding (aembed_documents) for throughput — processes
+        chunks in batches of `rag_embedding_batch_size` (default 10). Each
+        batch is retried up to `rag_embedding_max_retries` times with
+        exponential backoff before falling back to per-chunk embedding.
+
+        On final failure per chunk: logs the error, returns None for that
+        chunk's embedding (marking it as unindexed), and continues.
 
         Args:
             chunks: List of Chunk objects to embed.
@@ -246,20 +251,43 @@ class TranscriptIngestionWorker:
             A list of embedding vectors (or None on failure) parallel to the
             input chunks list.
         """
+        if self._embeddings is None:
+            logger.warning("rag.ingestion.embeddings_not_configured")
+            return [None] * len(chunks)
+
+        batch_size = (
+            self._settings.rag_embedding_batch_size if self._settings else 10
+        )
+        max_retries = (
+            self._settings.rag_embedding_max_retries if self._settings else 2
+        )
+
         embeddings: list[list[float] | None] = []
 
-        for chunk in chunks:
-            try:
-                embedding = await self._generate_embedding(chunk.text)
-                embeddings.append(embedding)
-            except Exception:
-                logger.error(
-                    "rag.ingestion.embedding_failed",
-                    chunk_ordinal=chunk.ordinal,
-                    chunk_text_preview=chunk.text[:80],
-                    exc_info=True,
+        # Process in batches for throughput
+        for batch_start in range(0, len(chunks), batch_size):
+            batch = chunks[batch_start : batch_start + batch_size]
+            batch_texts = [chunk.text for chunk in batch]
+
+            batch_embeddings = await self._embed_batch_with_retry(
+                batch_texts, max_retries
+            )
+
+            if batch_embeddings is not None:
+                # Batch succeeded — all embeddings are valid
+                embeddings.extend(batch_embeddings)
+            else:
+                # Batch failed after retries — fall back to per-chunk embedding
+                logger.warning(
+                    "rag.ingestion.batch_failed_fallback_to_individual",
+                    batch_start=batch_start,
+                    batch_size=len(batch),
                 )
-                embeddings.append(None)
+                for chunk in batch:
+                    embedding = await self._embed_single_with_retry(
+                        chunk.text, chunk.ordinal, max_retries
+                    )
+                    embeddings.append(embedding)
 
         return embeddings
 
@@ -267,12 +295,68 @@ class TranscriptIngestionWorker:
     # Private helpers
     # -----------------------------------------------------------------------
 
-    async def _generate_embedding(self, text_content: str) -> list[float]:
-        """Generate embedding via BedrockEmbeddings."""
-        if self._embeddings is None:
-            raise RuntimeError("Embeddings client not configured")
-        result = await self._embeddings.aembed_documents([text_content])
-        return result[0]
+    async def _embed_batch_with_retry(
+        self,
+        texts: list[str],
+        max_retries: int,
+    ) -> list[list[float]] | None:
+        """Embed a batch of texts with exponential-backoff retry.
+
+        Returns the list of embedding vectors on success, or None if all
+        retries are exhausted.
+        """
+        for attempt in range(max_retries + 1):
+            try:
+                result = await self._embeddings.aembed_documents(texts)
+                return result
+            except Exception:
+                if attempt < max_retries:
+                    backoff = 2 ** attempt  # 1s, 2s, 4s...
+                    logger.warning(
+                        "rag.ingestion.batch_embedding_retry",
+                        attempt=attempt + 1,
+                        max_retries=max_retries,
+                        backoff_s=backoff,
+                        batch_size=len(texts),
+                    )
+                    await asyncio.sleep(backoff)
+                else:
+                    logger.error(
+                        "rag.ingestion.batch_embedding_exhausted",
+                        batch_size=len(texts),
+                        exc_info=True,
+                    )
+        return None
+
+    async def _embed_single_with_retry(
+        self,
+        text_content: str,
+        ordinal: int,
+        max_retries: int,
+    ) -> list[float] | None:
+        """Embed a single text with retry, returning None on final failure."""
+        for attempt in range(max_retries + 1):
+            try:
+                result = await self._embeddings.aembed_documents([text_content])
+                return result[0]
+            except Exception:
+                if attempt < max_retries:
+                    backoff = 2 ** attempt
+                    logger.warning(
+                        "rag.ingestion.single_embedding_retry",
+                        attempt=attempt + 1,
+                        ordinal=ordinal,
+                        backoff_s=backoff,
+                    )
+                    await asyncio.sleep(backoff)
+                else:
+                    logger.error(
+                        "rag.ingestion.embedding_failed",
+                        chunk_ordinal=ordinal,
+                        chunk_text_preview=text_content[:80],
+                        exc_info=True,
+                    )
+        return None
 
     def _group_speaker_turns(self, words: list[dict]) -> list[list[dict]]:
         """Group consecutive words by speaker into turns.

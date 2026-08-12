@@ -101,6 +101,15 @@ class Settings(BaseSettings):
     aws_region: str = "us-east-1"
     bedrock_model_id: str = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
+    # --- RAG agent ---
+    # Wall-clock timeout for the full agent loop (seconds). The gateway aborts
+    # at 30s, so this must be lower to allow a structured fallback.
+    rag_agent_timeout_s: int = 25
+    # Embedding batch size for ingestion (Titan supports up to 25 texts)
+    rag_embedding_batch_size: int = 10
+    # Retry attempts for failed embeddings during ingestion
+    rag_embedding_max_retries: int = 2
+
     # --- LLM Refiner ---
     llm_enabled: bool = True
     llm_chunk_size: int = 300
@@ -141,6 +150,9 @@ class Settings(BaseSettings):
             "LLM_MAX_PARALLEL": 3,
             "LLM_CHUNK_TIMEOUT_MS": 15000,
             "LLM_MAX_PROMPT_RECORDS": 50,
+            "RAG_AGENT_TIMEOUT_S": 25,
+            "RAG_EMBEDDING_BATCH_SIZE": 10,
+            "RAG_EMBEDDING_MAX_RETRIES": 2,
             "DB_POOL_SIZE": 5,
             "DB_MAX_OVERFLOW": 5,
             "DB_POOL_RECYCLE_SECONDS": 1800,
