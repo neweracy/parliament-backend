@@ -578,11 +578,29 @@ class TranscriptIngestionWorker:
             return None
 
     async def _delete_existing_chunks(self, transcript_id: int) -> None:
-        """Delete existing chunks for a transcript (for re-ingestion)."""
+        """Clear indexed chunks for this transcript's record, not just this version.
+
+        A transcript edit inserts a new `transcript` row rather than updating the
+        existing one, so scoping the delete to `transcript_id` alone left every
+        earlier version's chunks in the index. Retrieval has no notion of which
+        version supersedes which, so those rows kept competing with the text that
+        replaced them and kept accumulating on every save.
+
+        Deleting by record means the index holds exactly one generation of chunks
+        per record: the one being written now.
+        """
         try:
             async with self._session_factory() as session, session.begin():
                 await session.execute(
-                    text("DELETE FROM transcript_chunk WHERE transcript_id = :transcript_id"),
+                    text(
+                        "DELETE FROM transcript_chunk "
+                        "WHERE transcript_id IN ("
+                        "    SELECT id FROM transcript"
+                        "    WHERE record_id = ("
+                        "        SELECT record_id FROM transcript WHERE id = :transcript_id"
+                        "    )"
+                        ")"
+                    ),
                     {"transcript_id": transcript_id},
                 )
         except Exception:

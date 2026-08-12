@@ -129,6 +129,34 @@ def _build_filter_clauses(
 
 
 # ---------------------------------------------------------------------------
+# Latest-version restriction
+# ---------------------------------------------------------------------------
+
+# Transcripts are versioned: every edit inserts a new `transcript` row for the
+# same `record_id`, and ingestion indexes whatever version it was handed. Without
+# this join the index therefore holds chunks for every historical version at once,
+# and retrieval treats them as peers. Two things go wrong when it does:
+#
+#   1. Superseded text competes with the text that replaced it, so the assistant
+#      can quote and cite a passage the editor already corrected away.
+#   2. Near-identical chunks from sibling versions fill the candidate pool, which
+#      pushes genuinely different records out of the top results — the corpus
+#      looks far smaller than it is.
+#
+# Restricting both arms to the highest version per record makes "the record"
+# mean the current record, and frees the pool for distinct content.
+_LATEST_VERSION_JOIN = """
+            JOIN (
+                SELECT record_id, MAX(version) AS max_version
+                FROM transcript
+                GROUP BY record_id
+            ) latest
+              ON latest.record_id = t.record_id
+             AND latest.max_version = t.version
+"""
+
+
+# ---------------------------------------------------------------------------
 # FulltextRetriever — wraps PostgreSQL tsvector search
 # ---------------------------------------------------------------------------
 
@@ -187,6 +215,7 @@ class FulltextRetriever(BaseRetriever):
                 ts_rank(tc.tsv, plainto_tsquery('english', :query)) AS score
             FROM transcript_chunk tc
             JOIN transcript t ON t.id = tc.transcript_id
+            {_LATEST_VERSION_JOIN}
             JOIN hansard_record hr ON hr.id = t.record_id
             JOIN sitting s ON s.id = hr.sitting_id
             WHERE tc.tsv @@ plainto_tsquery('english', :query)
@@ -302,6 +331,7 @@ class VectorRetriever(BaseRetriever):
                 1 - (tc.embedding <=> CAST(:query_embedding AS vector)) AS score
             FROM transcript_chunk tc
             JOIN transcript t ON t.id = tc.transcript_id
+            {_LATEST_VERSION_JOIN}
             JOIN hansard_record hr ON hr.id = t.record_id
             JOIN sitting s ON s.id = hr.sitting_id
             WHERE tc.embedding IS NOT NULL
