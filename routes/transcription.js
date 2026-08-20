@@ -43,6 +43,58 @@ const jobs = new Map();
 const JOB_RETENTION_MS = 60000;
 
 /**
+ * Formats a duration in seconds as an "HH:MM:SS" string.
+ *
+ * Matches the format already used for `hansard_record.duration` elsewhere in
+ * the codebase (fixtures and tests use e.g. "01:30:00"), so existing frontend
+ * rendering needs no change to display it correctly.
+ *
+ * @param {number} durationS - Duration in seconds
+ * @returns {string}
+ */
+function formatDurationHMS(durationS) {
+  const totalSeconds = Math.max(0, Math.round(durationS));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+}
+
+/**
+ * Builds the SQL fragment, params, and broadcast payload for writing the
+ * record's actual audio duration once transcription reports one.
+ *
+ * ASR (Deepgram) reports the true audio length as `durationS`, but nothing
+ * previously copied it onto `hansard_record.duration`/`duration_hours` —
+ * those columns were set only from the optional creation-form fields and
+ * then never touched again, so every transcribed record kept showing "0m" (or
+ * whatever was typed at creation) regardless of how long the recording
+ * actually was. When ASR did not report a duration, the existing columns are
+ * left untouched rather than overwritten with a guess.
+ *
+ * @param {number|null|undefined} durationS - Audio duration in seconds, or
+ *   null/undefined when the ASR provider did not report one.
+ * @param {number} [paramOffset] - Number of positional params already used by
+ *   the caller's query, so this fragment's placeholders continue the sequence.
+ * @returns {{ setClause: string, params: number[], broadcastFields: object }}
+ */
+function buildDurationFields(durationS, paramOffset = 1) {
+  if (durationS === null || durationS === undefined || !Number.isFinite(durationS) || durationS <= 0) {
+    return { setClause: "", params: [], broadcastFields: {} };
+  }
+
+  const duration = formatDurationHMS(durationS);
+  const durationHours = durationS / 3600;
+
+  return {
+    setClause: `, duration = $${paramOffset + 1}, duration_hours = $${paramOffset + 2}`,
+    params: [duration, durationHours],
+    broadcastFields: { duration, durationHours },
+  };
+}
+
+/**
  * Creates the Transcription router.
  * @param {Function} requireSession - JWT auth middleware
  * @param {Object} db - Database client with query(text, params) helper
@@ -343,14 +395,31 @@ async function completeTranscription(jobId, recordId, result, db) {
     ]
   );
 
-  // Update record status to Draft with progress 100
+  // Update record status to Draft with progress 100, and — when ASR reported
+  // an audio duration — the record's own duration fields. Without this, the
+  // registry and sitting cards kept showing "0m" (or nothing) for every
+  // transcribed record: duration/durationHours were set only from the
+  // (optional) creation-form fields and never touched again, even though the
+  // real length was known the instant transcription finished. startTime/
+  // endTime are wall-clock proceedings times with no reliable relationship to
+  // audio length, so they are left as whatever was entered at creation.
+  const durationFields = buildDurationFields(result.durationS);
+
   await db.query(
-    "UPDATE hansard_record SET status = 'Draft', progress = 100, error = NULL, updated_at = now() WHERE id = $1",
-    [recordId]
+    `UPDATE hansard_record
+     SET status = 'Draft', progress = 100, error = NULL, updated_at = now()
+         ${durationFields.setClause}
+     WHERE id = $1`,
+    [recordId, ...durationFields.params]
   );
 
   // Broadcast record status change
-  broadcast("record:updated", { id: Number(recordId), status: "Draft", progress: 100 });
+  broadcast("record:updated", {
+    id: Number(recordId),
+    status: "Draft",
+    progress: 100,
+    ...durationFields.broadcastFields,
+  });
 
   // Fire-and-forget: trigger RAG ingestion on the Postprocessing Service
   const transcriptId = insertResult.rows[0].id;
@@ -421,6 +490,8 @@ function scheduleJobCleanup(jobId) {
 module.exports.completeTranscription = completeTranscription;
 module.exports.failTranscription = failTranscription;
 module.exports.jobs = jobs;
+module.exports.formatDurationHMS = formatDurationHMS;
+module.exports.buildDurationFields = buildDurationFields;
 
 /**
  * Fire-and-forget: sends a POST to the Postprocessing Service to trigger

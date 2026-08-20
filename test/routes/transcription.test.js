@@ -311,6 +311,116 @@ describe('completeTranscription helper', () => {
 
     jobs.clear();
   });
+
+  it('writes the real audio duration onto the record when ASR reports one', async () => {
+    const { completeTranscription, jobs } = require('../../routes/transcription');
+
+    jobs.set('job-dur', {
+      status: 'processing',
+      progress: 50,
+      recordId: '10',
+      sittingId: '1',
+      error: null,
+    });
+
+    const db = createMockDb([
+      { rows: [{ next_version: 1 }] },
+      { rows: [{ id: 1 }] },
+      { rows: [] },
+    ]);
+
+    // 625 seconds = 00:10:25, matching the real bug report of a ~10 minute
+    // recording that kept showing "0m" on the registry/sitting cards.
+    await completeTranscription('job-dur', '10', {
+      rawText: 'Raw text',
+      correctedText: 'Corrected text',
+      entities: [],
+      wordTimings: [],
+      durationS: 625,
+    }, db);
+
+    const updateCall = db.getCalls()[2];
+    assert.ok(updateCall.text.includes('duration = $2'));
+    assert.ok(updateCall.text.includes('duration_hours = $3'));
+    assert.deepEqual(updateCall.params, ['10', '00:10:25', 625 / 3600]);
+
+    jobs.clear();
+  });
+
+  it('leaves duration columns untouched when ASR reports no duration', async () => {
+    const { completeTranscription, jobs } = require('../../routes/transcription');
+
+    jobs.set('job-nodur', {
+      status: 'processing',
+      progress: 50,
+      recordId: '10',
+      sittingId: '1',
+      error: null,
+    });
+
+    const db = createMockDb([
+      { rows: [{ next_version: 1 }] },
+      { rows: [{ id: 1 }] },
+      { rows: [] },
+    ]);
+
+    await completeTranscription('job-nodur', '10', {
+      rawText: 'Raw text',
+      correctedText: 'Corrected text',
+      entities: [],
+      wordTimings: [],
+      durationS: null,
+    }, db);
+
+    const updateCall = db.getCalls()[2];
+    assert.ok(!updateCall.text.includes('duration ='));
+    assert.deepEqual(updateCall.params, ['10']);
+
+    jobs.clear();
+  });
+});
+
+describe('formatDurationHMS', () => {
+  const { formatDurationHMS } = require('../../routes/transcription');
+
+  it('formats seconds as zero-padded HH:MM:SS', () => {
+    assert.equal(formatDurationHMS(625), '00:10:25');
+    assert.equal(formatDurationHMS(3661), '01:01:01');
+    assert.equal(formatDurationHMS(59), '00:00:59');
+    assert.equal(formatDurationHMS(0), '00:00:00');
+  });
+
+  it('rounds fractional seconds', () => {
+    assert.equal(formatDurationHMS(90.6), '00:01:31');
+  });
+});
+
+describe('buildDurationFields', () => {
+  const { buildDurationFields } = require('../../routes/transcription');
+
+  it('returns a SET fragment and params for a positive duration', () => {
+    const fields = buildDurationFields(625);
+    assert.equal(fields.setClause, ', duration = $2, duration_hours = $3');
+    assert.deepEqual(fields.params, ['00:10:25', 625 / 3600]);
+    assert.deepEqual(fields.broadcastFields, {
+      duration: '00:10:25',
+      durationHours: 625 / 3600,
+    });
+  });
+
+  it('returns an empty fragment for null, undefined, zero, or negative durations', () => {
+    for (const value of [null, undefined, 0, -5, NaN]) {
+      const fields = buildDurationFields(value);
+      assert.equal(fields.setClause, '');
+      assert.deepEqual(fields.params, []);
+      assert.deepEqual(fields.broadcastFields, {});
+    }
+  });
+
+  it('offsets placeholder numbers by the given paramOffset', () => {
+    const fields = buildDurationFields(120, 3);
+    assert.equal(fields.setClause, ', duration = $4, duration_hours = $5');
+  });
 });
 
 describe('failTranscription helper', () => {
