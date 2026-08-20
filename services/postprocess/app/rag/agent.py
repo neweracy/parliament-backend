@@ -21,12 +21,16 @@ Requirements: 2.1, 2.2, 2.3, 2.6, 3.5, 3.6, 4.9, 8.1, 8.2, 8.3, 8.4, 8.5
 from __future__ import annotations
 
 import asyncio
+import calendar
+import re
 import time
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
 from langchain.agents import create_agent
 from langchain_core.tools import tool
+from sqlalchemy import text
 
 from app.rag.circuit_breaker import CircuitBreaker
 from app.rag.parsing import (
@@ -66,23 +70,44 @@ _bedrock_breaker = CircuitBreaker(
 
 _NO_MATCH_TEXT = "No passages in the transcribed parliamentary record match that query."
 
+# Items listed per find_recent_activity call, per scope (sittings, records).
+_MAX_RECENT_ITEMS = 15
+
+_MONTH_NAMES = {name.lower(): index for index, name in enumerate(calendar.month_name) if name}
+_MONTH_ABBR = {name.lower(): index for index, name in enumerate(calendar.month_abbr) if name}
+
 _SYSTEM_PROMPT = """You are the Parliamentary Research Assistant for the Ghana \
 Parliament Hansard Management System. You are a conversational assistant — talk \
 naturally, in plain prose.
 
-## Your tool
+## Your tools
 
 `search_hansard(query)` searches the transcribed parliamentary record and returns
-matching passages. Each passage is headed by a numeric chunk_id.
+matching passages. Each passage is headed by a numeric chunk_id. Use it for
+questions about the substance of proceedings.
+
+`find_recent_activity(period, scope)` looks up sittings, records, and audio
+uploads added to the registry — not what was said, but what was added and when.
+Use it for questions like "what was uploaded recently", "what new sittings or
+records were added", or "what records were added in July" / "in 2026-07".
+`period` accepts "recent" (default, last 7 days), "today", "this month", "last
+month", "last N days", "YYYY-MM", or a month name with an optional year.
+`scope` is "sittings", "records", "uploads" (records with an audio file), or
+"all" (default). This tool never needs citation markers — it reports registry
+metadata, not transcript content.
 
 ## Deciding whether to search
 
-Search when the user asks about the substance of proceedings — what was said,
-what was decided, what was debated, who spoke, when something happened. Turn
-their wording into focused search terms rather than passing the raw sentence,
-and resolve pronouns against the conversation before searching.
+Search `search_hansard` when the user asks about the substance of proceedings —
+what was said, what was decided, what was debated, who spoke, when something
+happened. Turn their wording into focused search terms rather than passing the
+raw sentence, and resolve pronouns against the conversation before searching.
 
-Do not search for:
+Use `find_recent_activity` when the user asks what is new in the registry
+itself — recent uploads, newly added sittings or records, or what was added in
+a given month — rather than what was discussed.
+
+Do not call either tool for:
 - greetings, thanks, or small talk
 - questions about you or about how to use this assistant
 - requests to rephrase, shorten, or explain your previous answer
@@ -90,7 +115,7 @@ Do not search for:
 Answer those directly and briefly. For a greeting or a capability question, say
 what you can look up in the parliamentary record.
 
-You may search more than once if the first query was too narrow or too broad.
+You may call a tool more than once if the first call was too narrow or too broad.
 
 ## Citing the record
 
@@ -104,13 +129,15 @@ Cite all supporting passages when several apply: [42][15].
 Cite only chunk_ids that `search_hansard` actually returned to you in this
 conversation. Never invent a chunk_id. Never attach a citation marker to a
 statement that did not come from the record, including anything you say in a
-conversational reply.
+conversational reply. `find_recent_activity` results are registry metadata, not
+transcript passages — never invent or attach a chunk_id citation to them.
 
-## When the search returns nothing
+## When a tool returns nothing
 
-Say plainly that the transcribed record contains nothing on the question, then
-offer one narrower and one broader way to ask it. Do not guess an answer and do
-not fall back on general knowledge about parliaments.
+Say plainly that the transcribed record (or the registry, for
+`find_recent_activity`) contains nothing on the question, then offer one
+narrower and one broader way to ask it. Do not guess an answer and do not fall
+back on general knowledge about parliaments.
 
 ## Recommendations
 
@@ -121,15 +148,16 @@ RECOMMENDATIONS:
 - <follow-up question> | <short reason it is relevant>
 - <follow-up question> | <short reason it is relevant>
 
-Base them on topics, speakers, dates, or sittings that came back from
-`search_hansard` and that the user has not already asked about. With nothing
+Base them on topics, speakers, dates, or sittings that came back from your
+tool calls and that the user has not already asked about. With nothing
 retrieved, suggest ways into the record instead.
 
 ## Hard limits
 
 - Never state a fact about proceedings that is not in a passage you retrieved.
 - Never cite a chunk_id you did not receive.
-- Do not speculate about what Parliament might have said.
+- Do not speculate about what Parliament might have said or about what is in
+  the registry beyond what a tool told you.
 """
 
 
@@ -199,6 +227,225 @@ def _make_search_tool(retriever: Any, filters: RetrievalFilters | None, collecto
     return search_hansard
 
 
+class _PeriodParseError(ValueError):
+    """Raised when a period string cannot be resolved to a date range."""
+
+
+def _month_bounds(year: int, month: int) -> tuple[datetime, datetime]:
+    """Return the [start, end) UTC bounds of a calendar month."""
+    start = datetime(year, month, 1, tzinfo=UTC)
+    if month == 12:
+        end = datetime(year + 1, 1, 1, tzinfo=UTC)
+    else:
+        end = datetime(year, month + 1, 1, tzinfo=UTC)
+    return start, end
+
+
+def _resolve_period(period: str, *, now: datetime) -> tuple[datetime, datetime, str]:
+    """Resolve a free-form period string to a `[start, end)` UTC range.
+
+    Accepts, case-insensitively: "recent"/"" (last 7 days), "today", "this
+    month", "last month", "last N days", "YYYY-MM", "YYYY-MM-DD..YYYY-MM-DD",
+    and a month name with an optional year (e.g. "July", "July 2026", "Jul").
+
+    Returns the range plus a human-readable label for the range, so the tool's
+    response can tell the model exactly what window it searched.
+
+    Raises:
+        _PeriodParseError: If the string does not match any known form.
+    """
+    raw = (period or "").strip().lower()
+
+    if raw in ("", "recent"):
+        start = now - timedelta(days=7)
+        return start, now, "the last 7 days"
+
+    if raw == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return start, now, "today"
+
+    if raw == "this month":
+        start, end = _month_bounds(now.year, now.month)
+        return start, min(end, now), f"{calendar.month_name[now.month]} {now.year}"
+
+    if raw == "last month":
+        first_of_this_month = now.replace(day=1)
+        last_month_end = first_of_this_month
+        prior = last_month_end - timedelta(days=1)
+        start, end = _month_bounds(prior.year, prior.month)
+        return start, end, f"{calendar.month_name[prior.month]} {prior.year}"
+
+    days_match = re.fullmatch(r"last (\d+) days?", raw)
+    if days_match:
+        n = int(days_match.group(1))
+        start = now - timedelta(days=n)
+        return start, now, f"the last {n} days"
+
+    iso_month_match = re.fullmatch(r"(\d{4})-(\d{2})", raw)
+    if iso_month_match:
+        year, month = int(iso_month_match.group(1)), int(iso_month_match.group(2))
+        if not 1 <= month <= 12:
+            raise _PeriodParseError(f"Invalid month in period '{period}'")
+        start, end = _month_bounds(year, month)
+        return start, min(end, now) if end > now else end, f"{calendar.month_name[month]} {year}"
+
+    range_match = re.fullmatch(r"(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})", raw)
+    if range_match:
+        start = datetime.strptime(range_match.group(1), "%Y-%m-%d").replace(tzinfo=UTC)
+        end = datetime.strptime(range_match.group(2), "%Y-%m-%d").replace(
+            tzinfo=UTC
+        ) + timedelta(days=1)
+        return start, end, f"{range_match.group(1)} to {range_match.group(2)}"
+
+    month_word_match = re.fullmatch(r"([a-z]+)\.?\s*(\d{4})?", raw)
+    if month_word_match:
+        month_token, year_token = month_word_match.groups()
+        month = _MONTH_NAMES.get(month_token) or _MONTH_ABBR.get(month_token)
+        if month:
+            year = int(year_token) if year_token else now.year
+            start, end = _month_bounds(year, month)
+            bounded_end = min(end, now) if end > now else end
+            return start, bounded_end, f"{calendar.month_name[month]} {year}"
+
+    raise _PeriodParseError(
+        f"Could not parse period '{period}'. Try 'recent', 'today', 'this month', "
+        "'last month', 'last N days', 'YYYY-MM', or a month name."
+    )
+
+
+_RECENT_ACTIVITY_SQL = """
+    SELECT
+        'sitting' AS kind,
+        s.id,
+        s.title,
+        NULL::text AS sitting_title,
+        s.created_at,
+        NULL::text AS audio_file_name
+    FROM sitting s
+    WHERE :want_sittings AND s.created_at >= :start AND s.created_at < :end
+
+    UNION ALL
+
+    SELECT
+        'record' AS kind,
+        hr.id,
+        hr.title,
+        s.title AS sitting_title,
+        hr.created_at,
+        hr.audio_file_name
+    FROM hansard_record hr
+    JOIN sitting s ON s.id = hr.sitting_id
+    WHERE :want_records
+      AND hr.created_at >= :start AND hr.created_at < :end
+      AND (NOT :uploads_only OR hr.audio_file_name IS NOT NULL)
+
+    ORDER BY created_at DESC
+    LIMIT :limit
+"""
+
+
+def _make_recent_activity_tool(session_factory: Any, now_fn=None):
+    """Build a `find_recent_activity` tool bound to one request's DB session.
+
+    Answers "what's new in the registry" questions directly from
+    `sitting.created_at` / `hansard_record.created_at` rather than through
+    transcript search — these are questions about what was added and when,
+    not about what was said. Kept as its own tool (rather than folded into
+    `search_hansard`) because it queries different tables entirely and never
+    produces citable chunk_ids.
+
+    `now_fn` is injectable for tests; defaults to `datetime.now(UTC)`.
+    """
+    clock = now_fn or (lambda: datetime.now(UTC))
+
+    @tool
+    async def find_recent_activity(period: str = "recent", scope: str = "all") -> str:
+        """Look up sittings and records added to the registry in a time window.
+
+        Use for "what's new" questions — recent uploads, newly added sittings or
+        records, or what was added in a given month — as distinct from what was
+        said in proceedings (use `search_hansard` for that).
+
+        Args:
+            period: Time window. Accepts "recent" (default, last 7 days),
+                "today", "this month", "last month", "last N days", "YYYY-MM",
+                "YYYY-MM-DD..YYYY-MM-DD", or a month name with an optional year
+                (e.g. "July", "July 2026").
+            scope: Which registry items to include: "sittings", "records",
+                "uploads" (records that have an audio file attached), or "all"
+                (default).
+
+        Returns:
+            A list of matching sittings/records with their creation dates, or a
+            note that nothing was added in that window.
+        """
+        now = clock()
+        try:
+            start, end, label = _resolve_period(period, now=now)
+        except _PeriodParseError as exc:
+            return str(exc)
+
+        scope_key = (scope or "all").strip().lower()
+        want_sittings = scope_key in ("all", "sittings")
+        want_records = scope_key in ("all", "records", "uploads")
+        uploads_only = scope_key == "uploads"
+
+        if not want_sittings and not want_records:
+            return (
+                f"Unknown scope '{scope}'. Use 'sittings', 'records', 'uploads', "
+                "or 'all'."
+            )
+
+        try:
+            async with session_factory() as session:
+                result = await session.execute(
+                    text(_RECENT_ACTIVITY_SQL),
+                    {
+                        "want_sittings": want_sittings,
+                        "want_records": want_records,
+                        "uploads_only": uploads_only,
+                        "start": start,
+                        "end": end,
+                        "limit": _MAX_RECENT_ITEMS,
+                    },
+                )
+                rows = result.fetchall()
+        except Exception:
+            logger.error(
+                "rag.agent.find_recent_activity_failed",
+                period=period,
+                scope=scope,
+                exc_info=True,
+            )
+            return "Could not look up recent registry activity right now."
+
+        logger.info(
+            "rag.agent.find_recent_activity",
+            period=period,
+            resolved_label=label,
+            scope=scope,
+            results=len(rows),
+        )
+
+        if not rows:
+            return f"Nothing was added to the registry in {label} ({scope_key})."
+
+        lines = [f"Added in {label} ({len(rows)} item(s), most recent first):"]
+        for kind, item_id, title, sitting_title, created_at, audio_file_name in rows:
+            when = created_at.strftime("%Y-%m-%d %H:%M UTC") if created_at else "unknown date"
+            if kind == "sitting":
+                lines.append(f"- Sitting #{item_id} \"{title}\" — created {when}")
+            else:
+                upload_note = f", audio: {audio_file_name}" if audio_file_name else ""
+                lines.append(
+                    f"- Record #{item_id} \"{title}\" (sitting: {sitting_title}) — "
+                    f"created {when}{upload_note}"
+                )
+        return "\n".join(lines)
+
+    return find_recent_activity
+
+
 class HansardChatAgent:
     """Conversational agent over the transcribed parliamentary record.
 
@@ -213,10 +460,17 @@ class HansardChatAgent:
         response = await agent.chat("What was said about the budget?")
     """
 
-    def __init__(self, chat_model: Any, retriever: Any, settings: Any = None) -> None:
+    def __init__(
+        self,
+        chat_model: Any,
+        retriever: Any,
+        settings: Any = None,
+        session_factory: Any = None,
+    ) -> None:
         self._chat_model = chat_model
         self._retriever = retriever
         self._settings = settings
+        self._session_factory = session_factory
         self._builder = RecommendationBuilder()
 
     async def chat(
@@ -266,9 +520,13 @@ class HansardChatAgent:
         # Everything search_hansard retrieved this turn, in first-seen order.
         retrieved: list[RetrievedChunk] = []
 
+        tools = [_make_search_tool(self._retriever, filters, retrieved)]
+        if self._session_factory is not None:
+            tools.append(_make_recent_activity_tool(self._session_factory))
+
         agent = create_agent(
             model=self._chat_model,
-            tools=[_make_search_tool(self._retriever, filters, retrieved)],
+            tools=tools,
             system_prompt=_SYSTEM_PROMPT,
         )
 

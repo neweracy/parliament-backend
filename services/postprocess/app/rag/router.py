@@ -411,7 +411,7 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
         conversation_history = [(m.role, m.content) for m in recent]
 
     # Generate a conversational, tool-driven answer with conversation context
-    agent = HansardChatAgent(chat_model, retriever, settings)
+    agent = HansardChatAgent(chat_model, retriever, settings, session_factory=session_factory)
     answer_response = await agent.chat(
         question=body.question,
         filters=filters,
