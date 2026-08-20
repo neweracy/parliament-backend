@@ -217,6 +217,22 @@ class RelatedRecord(BaseModel):
     record_id: int | None = None
 
 
+class RegistryReferenceItem(BaseModel):
+    """A sitting or record found by `find_recent_activity`.
+
+    Unlike `RelatedRecord`, this never carries a `chunk_id` or
+    `transcript_id` — it comes straight from the `sitting`/`hansard_record`
+    tables and may point at a sitting with no transcript at all yet.
+    """
+
+    kind: str = Field(..., description="'sitting' or 'record'")
+    id: int = Field(..., description="The sitting id or record id, matching `kind`")
+    title: str
+    sitting_id: int
+    record_id: int | None = None
+    created_at: str
+
+
 class AskResponse(BaseModel):
     """Response body for POST /rag/ask."""
 
@@ -230,6 +246,10 @@ class AskResponse(BaseModel):
     related_records: list[RelatedRecord] = Field(
         default_factory=list,
         description="Sittings, records, or speakers behind the answer",
+    )
+    registry_references: list[RegistryReferenceItem] = Field(
+        default_factory=list,
+        description="Sittings/records surfaced by find_recent_activity",
     )
     latency_ms: float
 
@@ -469,6 +489,18 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
         for r in answer_response.related_records
     ]
 
+    registry_references = [
+        RegistryReferenceItem(
+            kind=ref.kind,
+            id=ref.id,
+            title=ref.title,
+            sitting_id=ref.sitting_id,
+            record_id=ref.record_id,
+            created_at=ref.created_at,
+        )
+        for ref in answer_response.registry_references
+    ]
+
     return AskResponse(
         answer=answer_response.answer,
         citations=citations,
@@ -477,6 +509,7 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
             Recommendation(text=r.text, reason=r.reason) for r in answer_response.recommendations
         ],
         related_records=related_records,
+        registry_references=registry_references,
         latency_ms=round(answer_response.latency_ms, 1),
     )
 

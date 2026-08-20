@@ -28,6 +28,7 @@ from app.rag.router import (
     AskRequest,
     AskResponse,
     ChatMessage,
+    RegistryReferenceItem,
     RelatedRecord,
     SearchRecommendationRequest,
     SearchRecommendationResponse,
@@ -179,6 +180,59 @@ class TestAskResponseContract:
         assert resp.recommendations == []
         dump = resp.model_dump()
         assert dump["recommendations"] == []
+
+    def test_registry_references_defaults_to_empty(self) -> None:
+        """AskResponse.registry_references defaults to empty list."""
+        resp = AskResponse(
+            answer="Test",
+            citations=[],
+            source_chunks=[],
+            latency_ms=5.0,
+        )
+        assert resp.registry_references == []
+        dump = resp.model_dump()
+        assert dump["registry_references"] == []
+
+    def test_registry_references_in_model_dump(self) -> None:
+        """AskResponse model dump carries registry_references with values preserved.
+
+        Unlike RelatedRecord, a RegistryReferenceItem never carries a
+        chunk_id/transcript_id — it comes from sitting/hansard_record rows
+        directly, and a sitting-only reference has record_id=None.
+        """
+        refs = [
+            RegistryReferenceItem(
+                kind="sitting",
+                id=1,
+                title="Startup Verification Sitting",
+                sitting_id=1,
+                record_id=None,
+                created_at="2026-08-20T12:00:00",
+            ),
+            RegistryReferenceItem(
+                kind="record",
+                id=5,
+                title="Morning Session",
+                sitting_id=1,
+                record_id=5,
+                created_at="2026-08-20T12:05:00",
+            ),
+        ]
+        resp = AskResponse(
+            answer="Test answer",
+            citations=[],
+            source_chunks=[],
+            registry_references=refs,
+            latency_ms=50.0,
+        )
+        dump = resp.model_dump()
+
+        assert len(dump["registry_references"]) == 2
+        assert dump["registry_references"][0]["kind"] == "sitting"
+        assert dump["registry_references"][0]["id"] == 1
+        assert dump["registry_references"][0]["record_id"] is None
+        assert dump["registry_references"][1]["kind"] == "record"
+        assert dump["registry_references"][1]["record_id"] == 5
 
 
 # ---------------------------------------------------------------------------

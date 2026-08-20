@@ -294,6 +294,102 @@ class TestChat:
         assert captured_messages["messages"][0]["content"] == "msg 10"
 
     @pytest.mark.asyncio
+    async def test_registry_references_populated_when_recent_activity_tool_runs(
+        self, mock_settings
+    ):
+        """When the model calls find_recent_activity, the result reaches AnswerResponse.
+
+        Mirrors the grounded-path test for search_hansard: the fake agent invokes
+        the second tool (find_recent_activity) during `ainvoke`, and the response
+        should carry the registry reference the tool found — even though nothing
+        was retrieved via search_hansard, so `grounded` stays False.
+        """
+        raw = (
+            "One record was uploaded recently.\n\n"
+            "RECOMMENDATIONS:\n- Q1 | R1\n- Q2 | R2\n- Q3 | R3"
+        )
+        retriever = FakeRetriever([])
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            return_value=MagicMock(
+                fetchall=lambda: [
+                    (
+                        "record",
+                        5,
+                        "Morning Session",
+                        "3rd Sitting",
+                        None,
+                        "audio.mp3",
+                        1,
+                        5,
+                    )
+                ]
+            )
+        )
+        context_manager = AsyncMock()
+        context_manager.__aenter__ = AsyncMock(return_value=session)
+        context_manager.__aexit__ = AsyncMock(return_value=None)
+        session_factory = MagicMock(return_value=context_manager)
+
+        captured_tools: dict = {}
+
+        def fake_create_agent(*args, **kwargs):
+            captured_tools["tools"] = kwargs["tools"]
+            fake_agent = MagicMock()
+
+            async def fake_ainvoke(*a, **kw):
+                # Simulate the model calling find_recent_activity (tools[1]).
+                await captured_tools["tools"][1].ainvoke(
+                    {"period": "recent", "scope": "uploads"}
+                )
+                return {"messages": [AIMessage(content=raw)]}
+
+            fake_agent.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+            return fake_agent
+
+        with patch("app.rag.agent.create_agent", side_effect=fake_create_agent):
+            agent = HansardChatAgent(
+                chat_model=AsyncMock(),
+                retriever=retriever,
+                settings=mock_settings,
+                session_factory=session_factory,
+            )
+            response = await agent.chat("What was uploaded recently?")
+
+        assert len(response.registry_references) == 1
+        ref = response.registry_references[0]
+        assert ref.kind == "record"
+        assert ref.id == 5
+        assert ref.sitting_id == 1
+        assert ref.record_id == 5
+        # No transcript chunk was retrieved, so this stays ungrounded/uncited.
+        assert response.citations == []
+
+    @pytest.mark.asyncio
+    async def test_no_recent_activity_tool_without_session_factory(self, mock_settings):
+        """Without a session_factory, only search_hansard is wired — no crash."""
+        raw = "Ok.\n\nRECOMMENDATIONS:\n- Q1 | R1\n- Q2 | R2\n- Q3 | R3"
+        retriever = FakeRetriever([])
+        captured_tools: dict = {}
+
+        def fake_create_agent(*args, **kwargs):
+            captured_tools["tools"] = kwargs["tools"]
+            fake_agent = MagicMock()
+            fake_agent.ainvoke = AsyncMock(
+                return_value={"messages": [AIMessage(content=raw)]}
+            )
+            return fake_agent
+
+        with patch("app.rag.agent.create_agent", side_effect=fake_create_agent):
+            agent = HansardChatAgent(
+                chat_model=AsyncMock(), retriever=retriever, settings=mock_settings
+            )
+            response = await agent.chat("Hello!")
+
+        assert len(captured_tools["tools"]) == 1
+        assert response.registry_references == []
+
+    @pytest.mark.asyncio
     async def test_recommendations_always_exactly_three_across_paths(self, mock_settings):
         conversational_raw = "Hi!\n\nRECOMMENDATIONS:\n- Q1 | R1"
         grounded_raw = "The record shows this [1].\n\nRECOMMENDATIONS:\n- Q1 | R1\n- Q2 | R2"

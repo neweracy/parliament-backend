@@ -45,6 +45,7 @@ from app.rag.recommendations import (
     AnswerResponse,
     CorpusHints,
     RecommendationBuilder,
+    RegistryReference,
     finalise_answer,
 )
 from app.rag.retriever import RetrievalFilters, RetrievedChunk
@@ -320,7 +321,9 @@ _RECENT_ACTIVITY_SQL = """
         s.title,
         NULL::text AS sitting_title,
         s.created_at,
-        NULL::text AS audio_file_name
+        NULL::text AS audio_file_name,
+        s.id AS sitting_id,
+        NULL::bigint AS record_id
     FROM sitting s
     WHERE :want_sittings AND s.created_at >= :start AND s.created_at < :end
 
@@ -332,7 +335,9 @@ _RECENT_ACTIVITY_SQL = """
         hr.title,
         s.title AS sitting_title,
         hr.created_at,
-        hr.audio_file_name
+        hr.audio_file_name,
+        s.id AS sitting_id,
+        hr.id AS record_id
     FROM hansard_record hr
     JOIN sitting s ON s.id = hr.sitting_id
     WHERE :want_records
@@ -344,7 +349,11 @@ _RECENT_ACTIVITY_SQL = """
 """
 
 
-def _make_recent_activity_tool(session_factory: Any, now_fn=None):
+def _make_recent_activity_tool(
+    session_factory: Any,
+    collector: list[RegistryReference],
+    now_fn=None,
+):
     """Build a `find_recent_activity` tool bound to one request's DB session.
 
     Answers "what's new in the registry" questions directly from
@@ -354,9 +363,15 @@ def _make_recent_activity_tool(session_factory: Any, now_fn=None):
     `search_hansard`) because it queries different tables entirely and never
     produces citable chunk_ids.
 
+    Every sitting/record the SQL finds is appended to `collector`, in the same
+    way `_make_search_tool` collects chunks, so the caller can turn them into
+    navigable references after the model finishes — text alone gives the user
+    a title but no way to jump to the record.
+
     `now_fn` is injectable for tests; defaults to `datetime.now(UTC)`.
     """
     clock = now_fn or (lambda: datetime.now(UTC))
+    seen_refs: set[tuple[str, int]] = set()
 
     @tool
     async def find_recent_activity(period: str = "recent", scope: str = "all") -> str:
@@ -431,8 +446,32 @@ def _make_recent_activity_tool(session_factory: Any, now_fn=None):
             return f"Nothing was added to the registry in {label} ({scope_key})."
 
         lines = [f"Added in {label} ({len(rows)} item(s), most recent first):"]
-        for kind, item_id, title, sitting_title, created_at, audio_file_name in rows:
+        for (
+            kind,
+            item_id,
+            title,
+            sitting_title,
+            created_at,
+            audio_file_name,
+            sitting_id,
+            record_id,
+        ) in rows:
             when = created_at.strftime("%Y-%m-%d %H:%M UTC") if created_at else "unknown date"
+
+            ref_key = (kind, item_id)
+            if ref_key not in seen_refs:
+                seen_refs.add(ref_key)
+                collector.append(
+                    RegistryReference(
+                        kind=kind,
+                        id=item_id,
+                        title=title,
+                        sitting_id=sitting_id,
+                        record_id=record_id,
+                        created_at=created_at.isoformat() if created_at else "",
+                    )
+                )
+
             if kind == "sitting":
                 lines.append(f"- Sitting #{item_id} \"{title}\" — created {when}")
             else:
@@ -519,10 +558,12 @@ class HansardChatAgent:
 
         # Everything search_hansard retrieved this turn, in first-seen order.
         retrieved: list[RetrievedChunk] = []
+        # Everything find_recent_activity found this turn, in first-seen order.
+        registry_refs: list[RegistryReference] = []
 
         tools = [_make_search_tool(self._retriever, filters, retrieved)]
         if self._session_factory is not None:
-            tools.append(_make_recent_activity_tool(self._session_factory))
+            tools.append(_make_recent_activity_tool(self._session_factory, registry_refs))
 
         agent = create_agent(
             model=self._chat_model,
@@ -577,6 +618,7 @@ class HansardChatAgent:
                 history_questions=history_questions,
                 grounded=False,
                 start_time=start_time,
+                registry_references=registry_refs,
             )
         except Exception:
             _bedrock_breaker.record_failure()
@@ -596,6 +638,7 @@ class HansardChatAgent:
                 history_questions=history_questions,
                 grounded=False,
                 start_time=start_time,
+                registry_references=registry_refs,
             )
 
         answer_text, parsed = split_recommendations(raw_answer)
@@ -631,4 +674,5 @@ class HansardChatAgent:
             history_questions=history_questions,
             grounded=grounded,
             start_time=start_time,
+            registry_references=registry_refs,
         )

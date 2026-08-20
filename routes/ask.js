@@ -74,6 +74,17 @@ function mapAskResponse(raw) {
       sittingId: r.sitting_id ?? null,
       recordId: r.record_id ?? null,
     })),
+    // Sittings/records the assistant found via find_recent_activity — a
+    // navigation reference with no chunk to cite, distinct from relatedRecords
+    // (which always comes from a retrieved transcript chunk).
+    registryReferences: (raw.registry_references || []).filter(Boolean).map((r) => ({
+      kind: r.kind || "record",
+      id: r.id ?? 0,
+      title: r.title || "",
+      sittingId: r.sitting_id ?? 0,
+      recordId: r.record_id ?? null,
+      createdAt: r.created_at || null,
+    })),
     latencyMs: raw.latency_ms ?? raw.latencyMs ?? 0,
   };
 }

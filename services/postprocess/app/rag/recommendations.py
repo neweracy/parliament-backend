@@ -109,6 +109,35 @@ class RecommendationItem:
     reason: str
 
 
+@dataclass(frozen=True)
+class RegistryReference:
+    """A sitting or record the assistant found via `find_recent_activity`.
+
+    Distinct from `RelatedRecordItem`: that type is derived from retrieved
+    transcript chunks and always carries a `chunk_id`/`transcript_id`, while a
+    registry reference comes straight from `sitting`/`hansard_record` rows and
+    may point at a sitting that has no transcript yet — there is nothing to
+    cite a chunk from.
+
+    Attributes:
+        kind: "sitting" or "record".
+        id: The id of the referenced row — a sitting id when `kind` is
+            "sitting", a hansard_record id when `kind` is "record".
+        title: Display title of the sitting or record.
+        sitting_id: The owning sitting's id. Equal to `id` when `kind` is
+            "sitting". Always present — every record belongs to a sitting.
+        record_id: The record's id when `kind` is "record", else None.
+        created_at: ISO 8601 timestamp of when the row was created.
+    """
+
+    kind: str
+    id: int
+    title: str
+    sitting_id: int
+    record_id: int | None
+    created_at: str
+
+
 @dataclass
 class RelatedRecordItem:
     """A sitting, record, or speaker behind the answer, linked to its transcript.
@@ -152,6 +181,8 @@ class AnswerResponse:
         source_chunks: The retrieved chunks used as context for generation.
         recommendations: Suggested follow-up questions based on the context.
         related_records: Sittings, records, or speakers behind the answer.
+        registry_references: Sittings/records surfaced by
+            `find_recent_activity` — navigation targets with no chunk to cite.
         latency_ms: Total time from request to response in milliseconds.
     """
 
@@ -160,6 +191,7 @@ class AnswerResponse:
     source_chunks: list[RetrievedChunk] = field(default_factory=list)
     recommendations: list[RecommendationItem] = field(default_factory=list)
     related_records: list[RelatedRecordItem] = field(default_factory=list)
+    registry_references: list[RegistryReference] = field(default_factory=list)
     latency_ms: float = 0.0
 
 
@@ -708,6 +740,7 @@ def finalise_answer(
     history_questions: list[str],
     grounded: bool,
     start_time: float,
+    registry_references: list[RegistryReference] | None = None,
 ) -> AnswerResponse:
     """Attach recommendations and related records, then stamp latency.
 
@@ -767,5 +800,6 @@ def finalise_answer(
         source_chunks=context_chunks,
         recommendations=recommendations,
         related_records=related,
+        registry_references=registry_references or [],
         latency_ms=latency_ms,
     )

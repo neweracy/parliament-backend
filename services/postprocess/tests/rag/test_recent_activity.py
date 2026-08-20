@@ -13,10 +13,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.rag.agent import (
-    _PeriodParseError,
     _make_recent_activity_tool,
+    _PeriodParseError,
     _resolve_period,
 )
+from app.rag.recommendations import RegistryReference
 
 
 def _make_session_factory(rows: list[tuple]):
@@ -139,6 +140,8 @@ class TestFindRecentActivityTool:
                 None,
                 datetime(2026, 8, 18, 10, 0, tzinfo=UTC),
                 None,
+                1,
+                None,
             ),
             (
                 "record",
@@ -147,10 +150,13 @@ class TestFindRecentActivityTool:
                 "3rd Sitting",
                 datetime(2026, 8, 17, 9, 0, tzinfo=UTC),
                 "audio.mp3",
+                1,
+                5,
             ),
         ]
         factory = _make_session_factory(rows)
-        tool = _make_recent_activity_tool(factory, now_fn=lambda: _NOW)
+        collector: list[RegistryReference] = []
+        tool = _make_recent_activity_tool(factory, collector, now_fn=lambda: _NOW)
 
         result = await tool.ainvoke({"period": "recent", "scope": "all"})
 
@@ -161,9 +167,89 @@ class TestFindRecentActivityTool:
         assert "2 item(s)" in result
 
     @pytest.mark.asyncio
+    async def test_collects_navigable_registry_references(self):
+        rows = [
+            (
+                "sitting",
+                1,
+                "3rd Sitting",
+                None,
+                datetime(2026, 8, 18, 10, 0, tzinfo=UTC),
+                None,
+                1,
+                None,
+            ),
+            (
+                "record",
+                5,
+                "Morning Session",
+                "3rd Sitting",
+                datetime(2026, 8, 17, 9, 0, tzinfo=UTC),
+                "audio.mp3",
+                1,
+                5,
+            ),
+        ]
+        factory = _make_session_factory(rows)
+        collector: list[RegistryReference] = []
+        tool = _make_recent_activity_tool(factory, collector, now_fn=lambda: _NOW)
+
+        await tool.ainvoke({"period": "recent", "scope": "all"})
+
+        assert len(collector) == 2
+        sitting_ref, record_ref = collector
+
+        assert sitting_ref.kind == "sitting"
+        assert sitting_ref.id == 1
+        assert sitting_ref.title == "3rd Sitting"
+        assert sitting_ref.sitting_id == 1
+        assert sitting_ref.record_id is None
+        assert sitting_ref.created_at == datetime(2026, 8, 18, 10, 0, tzinfo=UTC).isoformat()
+
+        assert record_ref.kind == "record"
+        assert record_ref.id == 5
+        assert record_ref.title == "Morning Session"
+        assert record_ref.sitting_id == 1
+        assert record_ref.record_id == 5
+
+    @pytest.mark.asyncio
+    async def test_repeated_calls_do_not_duplicate_collected_references(self):
+        rows = [
+            (
+                "sitting",
+                1,
+                "3rd Sitting",
+                None,
+                datetime(2026, 8, 18, 10, 0, tzinfo=UTC),
+                None,
+                1,
+                None,
+            ),
+        ]
+        factory = _make_session_factory(rows)
+        collector: list[RegistryReference] = []
+        tool = _make_recent_activity_tool(factory, collector, now_fn=lambda: _NOW)
+
+        await tool.ainvoke({"period": "recent", "scope": "all"})
+        await tool.ainvoke({"period": "this month", "scope": "all"})
+
+        assert len(collector) == 1
+
+    @pytest.mark.asyncio
+    async def test_no_rows_collects_nothing(self):
+        factory = _make_session_factory([])
+        collector: list[RegistryReference] = []
+        tool = _make_recent_activity_tool(factory, collector, now_fn=lambda: _NOW)
+
+        await tool.ainvoke({"period": "recent", "scope": "all"})
+
+        assert collector == []
+
+    @pytest.mark.asyncio
     async def test_empty_result_reports_nothing_added(self):
         factory = _make_session_factory([])
-        tool = _make_recent_activity_tool(factory, now_fn=lambda: _NOW)
+        collector: list[RegistryReference] = []
+        tool = _make_recent_activity_tool(factory, collector, now_fn=lambda: _NOW)
 
         result = await tool.ainvoke({"period": "last month", "scope": "records"})
 
@@ -173,7 +259,8 @@ class TestFindRecentActivityTool:
     @pytest.mark.asyncio
     async def test_month_query_resolves_to_correct_range(self):
         factory = _make_session_factory([])
-        tool = _make_recent_activity_tool(factory, now_fn=lambda: _NOW)
+        collector: list[RegistryReference] = []
+        tool = _make_recent_activity_tool(factory, collector, now_fn=lambda: _NOW)
 
         await tool.ainvoke({"period": "July 2026", "scope": "all"})
 
@@ -185,7 +272,8 @@ class TestFindRecentActivityTool:
     @pytest.mark.asyncio
     async def test_uploads_scope_filters_to_records_with_audio(self):
         factory = _make_session_factory([])
-        tool = _make_recent_activity_tool(factory, now_fn=lambda: _NOW)
+        collector: list[RegistryReference] = []
+        tool = _make_recent_activity_tool(factory, collector, now_fn=lambda: _NOW)
 
         await tool.ainvoke({"period": "recent", "scope": "uploads"})
 
@@ -197,7 +285,8 @@ class TestFindRecentActivityTool:
     @pytest.mark.asyncio
     async def test_sittings_scope_excludes_records(self):
         factory = _make_session_factory([])
-        tool = _make_recent_activity_tool(factory, now_fn=lambda: _NOW)
+        collector: list[RegistryReference] = []
+        tool = _make_recent_activity_tool(factory, collector, now_fn=lambda: _NOW)
 
         await tool.ainvoke({"period": "recent", "scope": "sittings"})
 
@@ -208,7 +297,8 @@ class TestFindRecentActivityTool:
     @pytest.mark.asyncio
     async def test_unknown_scope_returns_helpful_message(self):
         factory = _make_session_factory([])
-        tool = _make_recent_activity_tool(factory, now_fn=lambda: _NOW)
+        collector: list[RegistryReference] = []
+        tool = _make_recent_activity_tool(factory, collector, now_fn=lambda: _NOW)
 
         result = await tool.ainvoke({"period": "recent", "scope": "bogus"})
 
@@ -217,7 +307,8 @@ class TestFindRecentActivityTool:
     @pytest.mark.asyncio
     async def test_invalid_period_returns_error_text_not_exception(self):
         factory = _make_session_factory([])
-        tool = _make_recent_activity_tool(factory, now_fn=lambda: _NOW)
+        collector: list[RegistryReference] = []
+        tool = _make_recent_activity_tool(factory, collector, now_fn=lambda: _NOW)
 
         result = await tool.ainvoke({"period": "sometime", "scope": "all"})
 
@@ -226,7 +317,8 @@ class TestFindRecentActivityTool:
     @pytest.mark.asyncio
     async def test_db_failure_returns_friendly_message_not_exception(self):
         factory = _make_failing_session_factory()
-        tool = _make_recent_activity_tool(factory, now_fn=lambda: _NOW)
+        collector: list[RegistryReference] = []
+        tool = _make_recent_activity_tool(factory, collector, now_fn=lambda: _NOW)
 
         result = await tool.ainvoke({"period": "recent", "scope": "all"})
 
