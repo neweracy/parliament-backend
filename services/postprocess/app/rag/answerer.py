@@ -103,9 +103,15 @@ _SYSTEM_PROMPT = (
     "- [question text] | [brief reason why this is relevant]\n"
     "- [question text] | [brief reason why this is relevant]\n"
     "\n"
-    "Base recommendations on topics, speakers, or themes "
-    "mentioned in the source chunks that the user hasn't asked "
-    "about yet. If no source chunks are available, suggest "
+    "Generate follow-up questions that dig DEEPER into the "
+    "specific content you just summarised or answered about. "
+    "Good follow-ups ask about a specific claim, decision, "
+    "speaker contribution, or policy mentioned in the chunks. "
+    "Bad follow-ups are generic (e.g. 'What else was discussed?'). "
+    "If your answer was a summary of a record, suggest questions "
+    "that drill into the most substantive points — specific "
+    "debates, named policies, contested votes, or individual "
+    "contributions. If no source chunks are available, suggest "
     "questions about general parliamentary proceedings."
 )
 

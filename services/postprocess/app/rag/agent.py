@@ -149,9 +149,23 @@ RECOMMENDATIONS:
 - <follow-up question> | <short reason it is relevant>
 - <follow-up question> | <short reason it is relevant>
 
-Base them on topics, speakers, dates, or sittings that came back from your
-tool calls and that the user has not already asked about. With nothing
-retrieved, suggest ways into the record instead.
+Generate follow-up questions that dig DEEPER into the specific content you just
+summarised or answered about. Good follow-ups:
+- Ask about a specific claim, decision, or motion mentioned in the passages
+- Ask what a particular speaker said about a specific sub-topic
+- Ask about the outcome or resolution of a debate you referenced
+- Ask for details about a figure, date, or policy mentioned in passing
+
+Bad follow-ups (avoid these):
+- Generic questions like "What else was discussed?" or "Who else spoke?"
+- Questions that merely rephrase what was already answered
+- Questions about topics NOT mentioned in the retrieved passages
+
+If your answer was a summary of a record, suggest questions that drill into the
+most substantive points — specific debates, named policies, contested votes, or
+individual contributions that the user would want to explore further.
+
+With nothing retrieved, suggest ways into the record instead.
 
 ## Hard limits
 
