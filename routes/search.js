@@ -85,9 +85,10 @@ function mapRecommendationResponse(raw, limit) {
  * Creates the Search router.
  * @param {Function} requireSession - JWT auth middleware
  * @param {Object} db - Database client with query(text, params) helper
+ * @param {import('../lib/cache').CacheUtil} [cache] - Optional cache utility instance
  * @returns {express.Router}
  */
-module.exports = function searchRoutes(requireSession, db) {
+module.exports = function searchRoutes(requireSession, db, cache) {
   const router = express.Router();
 
   /**
@@ -121,6 +122,21 @@ module.exports = function searchRoutes(requireSession, db) {
         const parsed = Number(limit);
         if (!Number.isNaN(parsed) && parsed > 0) {
           effectiveLimit = Math.min(parsed, MAX_LIMIT);
+        }
+      }
+
+      // Cache-aside: check cache before proxying to upstream
+      let cacheKey;
+      if (cache) {
+        try {
+          const hash = cache.hashParams({ query: query.trim(), entityFilter, dateFrom, dateTo, speaker, limit: effectiveLimit });
+          cacheKey = cache.key("search", hash);
+          const cached = await cache.get(cacheKey);
+          if (cached) {
+            return res.json(cached);
+          }
+        } catch {
+          // Redis unavailable — continue without cache (graceful degradation)
         }
       }
 
@@ -190,6 +206,11 @@ module.exports = function searchRoutes(requireSession, db) {
           latencyMs: raw.latency_ms ?? raw.latencyMs ?? 0,
         };
 
+        // Cache successful response (fire-and-forget, never block the response)
+        if (cache && cacheKey) {
+          cache.set(cacheKey, results, 300).catch(() => {});
+        }
+
         res.json(results);
       } catch (fetchErr) {
         clearTimeout(timeout);
@@ -239,6 +260,15 @@ module.exports = function searchRoutes(requireSession, db) {
    */
   router.get("/api/search/suggestions", requireSession, requirePermission("search_hansard"), async (req, res) => {
     try {
+      // Check cache for suggestions
+      if (cache) {
+        const cacheKey = cache.key("suggestions", "current");
+        const cached = await cache.get(cacheKey);
+        if (cached) {
+          return res.json(cached);
+        }
+      }
+
       // Get distinct entity names from transcript_chunk
       const entitiesResult = await db.query(
         `SELECT DISTINCT unnest(entity_names) AS name FROM transcript_chunk WHERE entity_names != '{}' ORDER BY name LIMIT 200`
@@ -249,10 +279,18 @@ module.exports = function searchRoutes(requireSession, db) {
         `SELECT DISTINCT speaker FROM transcript_chunk WHERE speaker IS NOT NULL ORDER BY speaker LIMIT 100`
       );
 
-      res.json({
+      const suggestions = {
         entities: entitiesResult.rows.map((row) => ({ name: row.name, kind: "entity" })),
         speakers: speakersResult.rows.map((row) => row.speaker),
-      });
+      };
+
+      // Cache suggestions with 1-hour TTL (fire-and-forget)
+      if (cache) {
+        const cacheKey = cache.key("suggestions", "current");
+        cache.set(cacheKey, suggestions, 3600).catch(() => {});
+      }
+
+      res.json(suggestions);
     } catch (err) {
       console.error("GET /api/search/suggestions error:", err);
       res.status(500).json({

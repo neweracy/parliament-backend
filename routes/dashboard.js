@@ -34,9 +34,10 @@ function initialsOf(name) {
  * Creates the Dashboard router.
  * @param {Function} requireSession - JWT auth middleware
  * @param {Object} db - Database client with query(text, params) helper
+ * @param {Object} [cache] - Optional cache utility (from lib/cache.js)
  * @returns {express.Router}
  */
-module.exports = function dashboardRoutes(requireSession, db) {
+module.exports = function dashboardRoutes(requireSession, db, cache) {
   const router = express.Router();
 
   /**
@@ -54,6 +55,15 @@ module.exports = function dashboardRoutes(requireSession, db) {
    */
   router.get("/api/dashboard/stats", requireSession, requirePermission("view_records"), async (req, res) => {
     try {
+      // Check cache first
+      if (cache) {
+        const cacheKey = cache.key("dashboard", "stats");
+        const cached = await cache.get(cacheKey);
+        if (cached) {
+          return res.json(cached);
+        }
+      }
+
       // Run all queries in parallel for better performance
       const [
         sittingsCount,
@@ -175,7 +185,7 @@ module.exports = function dashboardRoutes(requireSession, db) {
         records: parseInt(row.records, 10),
       }));
 
-      res.json({
+      const stats = {
         totalSittings,
         totalRecords,
         recordsByStatus,
@@ -183,7 +193,15 @@ module.exports = function dashboardRoutes(requireSession, db) {
         weeklyOutput,
         recentActivity,
         teamWorkload,
-      });
+      };
+
+      // Cache the assembled stats (fire-and-forget)
+      if (cache) {
+        const cacheKey = cache.key("dashboard", "stats");
+        cache.set(cacheKey, stats, 120).catch(() => {});
+      }
+
+      res.json(stats);
     } catch (err) {
       console.error("GET /api/dashboard/stats error:", err);
       res.status(500).json({
