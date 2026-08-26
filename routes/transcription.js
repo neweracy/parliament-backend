@@ -509,6 +509,17 @@ async function completeTranscription(jobId, recordId, result, db, cache) {
     setTimeout(() => jobRedisRefs.delete(recordId), 60000);
   }
 
+  // Invalidate caches that depend on transcript data (fire-and-forget).
+  // Search cache is NOT invalidated — it relies on 300s TTL expiry (Req 8.3).
+  if (cache) {
+    cache.del(cache.key("suggestions", "current")).catch((err) => {
+      console.warn("[cache] Failed to invalidate suggestions:", err.message);
+    });
+    cache.del(cache.key("dashboard", "stats")).catch((err) => {
+      console.warn("[cache] Failed to invalidate dashboard stats:", err.message);
+    });
+  }
+
   // Retire the job shortly after the client observes completion. Without this
   // the entry lives forever and the status endpoint keeps serving stale
   // in-memory state instead of the record's real status.
