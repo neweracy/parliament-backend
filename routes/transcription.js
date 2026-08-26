@@ -33,8 +33,17 @@ const POSTPROCESS_TOKEN = process.env.POSTPROCESS_TOKEN || "";
  *
  * In a production multi-instance deployment this would move to Redis or
  * the database, but for single-process operation this is sufficient.
+ * Now also serves as a fallback when Redis is unavailable.
  */
 const jobs = new Map();
+
+/**
+ * Lightweight mapping of recordId → jobId for Redis lookups.
+ * When a job is stored in Redis (not in the `jobs` Map), the status endpoint
+ * needs a way to find the Redis key by recordId. This map provides that
+ * indirection without requiring a Redis SCAN by field value.
+ */
+const jobRedisRefs = new Map();
 
 /**
  * How long a finished job (completed or failed) stays in memory so a polling
@@ -98,9 +107,10 @@ function buildDurationFields(durationS, paramOffset = 1) {
  * Creates the Transcription router.
  * @param {Function} requireSession - JWT auth middleware
  * @param {Object} db - Database client with query(text, params) helper
+ * @param {Object|null} [cache] - Cache utility instance (optional, for Redis-first job state)
  * @returns {express.Router}
  */
-module.exports = function transcriptionRoutes(requireSession, db) {
+module.exports = function transcriptionRoutes(requireSession, db, cache) {
   const router = express.Router();
 
   /**
@@ -158,17 +168,31 @@ module.exports = function transcriptionRoutes(requireSession, db) {
           [recordId]
         );
 
-        // Store job state in memory
-        jobs.set(jobId, {
+        // Store job state — Redis-first with in-memory Map fallback
+        const jobState = {
           status: "queued",
           progress: 0,
           recordId,
           sittingId,
           error: null,
-        });
+        };
+
+        if (cache) {
+          const jobKey = cache.key("jobs", jobId);
+          const stored = await cache.set(jobKey, jobState, 3600);
+          if (!stored) {
+            // Redis failed — fall back to in-memory Map for this job's lifetime
+            jobs.set(jobId, jobState);
+          } else {
+            // Track recordId→jobId for status poll lookups
+            jobRedisRefs.set(recordId, jobId);
+          }
+        } else {
+          jobs.set(jobId, jobState);
+        }
 
         // Kick off async transcription (do not await — return 202 immediately)
-        runTranscription(jobId, recordId, sittingId, record.audio_path, db).catch(
+        runTranscription(jobId, recordId, sittingId, record.audio_path, db, cache).catch(
           (err) => {
             console.error("Unhandled transcription error for job " + jobId + ":", err);
           }
@@ -202,12 +226,30 @@ module.exports = function transcriptionRoutes(requireSession, db) {
       try {
         const { sittingId, recordId } = req.params;
 
-        // Check in-memory jobs for an active job matching this record
+        // Check for an active job matching this record.
+        // When cache is available, jobs are stored in Redis by jobId.
+        // We maintain a lightweight recordId→jobId mapping in the Map
+        // to enable lookup. Check Redis first, then fall back to Map.
         let activeJob = null;
+
         for (const [, job] of jobs) {
           if (job.recordId === recordId && job.sittingId === sittingId) {
             activeJob = job;
             break;
+          }
+        }
+
+        // If not found in Map but cache is available, check Redis
+        // (covers the case where job was stored in Redis successfully
+        // and the Map only has a jobId reference)
+        if (!activeJob && cache) {
+          const refJobId = jobRedisRefs.get(recordId);
+          if (refJobId) {
+            const jobKey = cache.key("jobs", refJobId);
+            const redisJob = await cache.get(jobKey);
+            if (redisJob && redisJob.recordId === recordId && redisJob.sittingId === sittingId) {
+              activeJob = redisJob;
+            }
           }
         }
 
@@ -301,20 +343,28 @@ module.exports = function transcriptionRoutes(requireSession, db) {
  * @param {string} sittingId - Parent sitting ID
  * @param {string} audioPath - Path to the audio file
  * @param {Object} db - Database client
+ * @param {Object|null} [cache] - Cache utility instance (optional)
  */
-async function runTranscription(jobId, recordId, sittingId, audioPath, db) {
+async function runTranscription(jobId, recordId, sittingId, audioPath, db, cache) {
   const job = jobs.get(jobId);
-  if (!job) return;
+  // If job is not in Map and cache is available, it's stored in Redis
+  const jobInRedis = !job && !!cache;
+  if (!job && !jobInRedis) return;
 
   /**
-   * Mirrors progress into both the in-memory job and the record row so the
-   * frontend sees movement whether it reads the job or falls back to the DB.
+   * Mirrors progress into the job store (Redis or Map) and the record row so
+   * the frontend sees movement whether it reads the job or falls back to the DB.
    */
   async function reportProgress(percent) {
     const current = jobs.get(jobId);
     if (current) {
       current.status = "processing";
       current.progress = percent;
+    }
+    // Also update Redis if job is stored there
+    if (cache && jobInRedis) {
+      const jobKey = cache.key("jobs", jobId);
+      cache.set(jobKey, { status: "processing", progress: percent, recordId, sittingId, error: null }, 3600).catch(() => {});
     }
     try {
       await db.query(
@@ -339,14 +389,15 @@ async function runTranscription(jobId, recordId, sittingId, audioPath, db) {
       },
     });
 
-    await completeTranscription(jobId, recordId, result, db);
+    await completeTranscription(jobId, recordId, result, db, cache);
   } catch (err) {
     console.error("Transcription failed for job " + jobId + ":", err);
     await failTranscription(
       jobId,
       recordId,
       err.message || "Transcription failed",
-      db
+      db,
+      cache
     );
   }
 }
@@ -366,9 +417,20 @@ async function runTranscription(jobId, recordId, sittingId, audioPath, db) {
  * @param {string} [result.provider] - ASR provider name
  * @param {number|null} [result.durationS] - Audio duration in seconds
  * @param {Object} db - Database client
+ * @param {Object|null} [cache] - Cache utility instance (optional)
  */
-async function completeTranscription(jobId, recordId, result, db) {
+async function completeTranscription(jobId, recordId, result, db, cache) {
   const job = jobs.get(jobId);
+
+  // Resolve sittingId from Map or Redis (needed for terminal state writes)
+  let sittingId;
+  if (job) {
+    sittingId = job.sittingId;
+  } else if (cache) {
+    const jobKey = cache.key("jobs", jobId);
+    const redisJob = await cache.get(jobKey);
+    sittingId = redisJob ? redisJob.sittingId : undefined;
+  }
 
   // Determine the next version number for this record
   const versionResult = await db.query(
@@ -439,6 +501,14 @@ async function completeTranscription(jobId, recordId, result, db) {
     job.error = null;
   }
 
+  // Update Redis with terminal state and 60s TTL for auto-cleanup
+  if (cache) {
+    const jobKey = cache.key("jobs", jobId);
+    cache.set(jobKey, { status: "completed", progress: 100, recordId, sittingId, error: null }, 60).catch(() => {});
+    // Clean up the recordId→jobId reference after TTL
+    setTimeout(() => jobRedisRefs.delete(recordId), 60000);
+  }
+
   // Retire the job shortly after the client observes completion. Without this
   // the entry lives forever and the status endpoint keeps serving stale
   // in-memory state instead of the record's real status.
@@ -453,8 +523,9 @@ async function completeTranscription(jobId, recordId, result, db) {
  * @param {string} recordId - Hansard record ID
  * @param {string} errorMessage - Description of what went wrong
  * @param {Object} db - Database client
+ * @param {Object|null} [cache] - Cache utility instance (optional)
  */
-async function failTranscription(jobId, recordId, errorMessage, db) {
+async function failTranscription(jobId, recordId, errorMessage, db, cache) {
   const job = jobs.get(jobId);
 
   // Update record: set error, return status to Draft (retriable)
@@ -468,6 +539,15 @@ async function failTranscription(jobId, recordId, errorMessage, db) {
     job.status = "failed";
     job.progress = 0;
     job.error = errorMessage;
+  }
+
+  // Update Redis with terminal state and 60s TTL for auto-cleanup
+  if (cache) {
+    const jobKey = cache.key("jobs", jobId);
+    const sittingId = job ? job.sittingId : undefined;
+    cache.set(jobKey, { status: "failed", progress: 0, recordId, sittingId, error: errorMessage }, 60).catch(() => {});
+    // Clean up the recordId→jobId reference after TTL
+    setTimeout(() => jobRedisRefs.delete(recordId), 60000);
   }
 
   scheduleJobCleanup(jobId);
@@ -490,6 +570,7 @@ function scheduleJobCleanup(jobId) {
 module.exports.completeTranscription = completeTranscription;
 module.exports.failTranscription = failTranscription;
 module.exports.jobs = jobs;
+module.exports.jobRedisRefs = jobRedisRefs;
 module.exports.formatDurationHMS = formatDurationHMS;
 module.exports.buildDurationFields = buildDurationFields;
 
