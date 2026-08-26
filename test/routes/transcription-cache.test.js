@@ -12,7 +12,7 @@
  * @module test/routes/transcription-cache
  */
 
-const { describe, it, afterEach, beforeEach } = require('node:test');
+const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const express = require('express');
 const request = require('supertest');
@@ -35,7 +35,7 @@ function createMockCache() {
       const raw = store.get(key);
       return raw ? JSON.parse(raw) : null;
     },
-    set: async (key, value, ttl) => {
+    set: async (key, value, _ttl) => {
       store.set(key, JSON.stringify(value));
       return true;
     },
@@ -44,7 +44,7 @@ function createMockCache() {
       return true;
     },
     invalidatePattern: async () => 0,
-    hashParams: (obj) => 'mockhash',
+    hashParams: (_obj) => 'mockhash',
     _store: store,
   };
 }
@@ -59,7 +59,7 @@ function createFailingCache() {
     set: async () => false,
     del: async () => false,
     invalidatePattern: async () => 0,
-    hashParams: (obj) => 'mockhash',
+    hashParams: (_obj) => 'mockhash',
   };
 }
 
@@ -299,7 +299,7 @@ describe('Transcription cache — TTL on terminal states', () => {
     const setCalls = [];
     const cache = {
       key: (ns, ...parts) => `parliament:${ns}:${parts.join(':')}`,
-      get: async (key) => null,
+      get: async (_key) => null,
       set: async (key, value, ttl) => {
         setCalls.push({ key, value, ttl });
         return true;

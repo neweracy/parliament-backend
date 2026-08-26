@@ -44,7 +44,7 @@ function createMockCache() {
       return true;
     },
     invalidatePattern: async () => 0,
-    hashParams: (obj) => 'mockhash',
+    hashParams: (_obj) => 'mockhash',
     _store: store,
     _setCalls: setCalls,
     _getCalls: getCalls,

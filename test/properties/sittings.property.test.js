@@ -111,7 +111,20 @@ const filtersArb = fc.record({
 /**
  * No-op auth middleware.
  */
-function passThrough(req, res, next) { next(); }
+function passThrough(req, res, next) {
+  req.user = {
+    userId: 'test-user',
+    email: 'admin@test.com',
+    name: 'Test Admin',
+    role: 'Admin',
+    permissions: [
+      'system_config', 'view_records', 'manage_users',
+      'create_sitting', 'edit_record', 'export_hansard',
+      'upload_audio',
+    ],
+  };
+  next();
+}
 
 /**
  * Applies the same filter logic that the route uses:

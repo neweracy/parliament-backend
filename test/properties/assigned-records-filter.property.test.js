@@ -28,7 +28,20 @@ const recordsRoutes = require('../../routes/records');
 /**
  * No-op auth middleware.
  */
-function passThrough(req, res, next) { next(); }
+function passThrough(req, res, next) {
+  req.user = {
+    userId: 'test-user',
+    email: 'admin@test.com',
+    name: 'Test Admin',
+    role: 'Admin',
+    permissions: [
+      'system_config', 'view_records', 'manage_users',
+      'create_sitting', 'edit_record', 'export_hansard',
+      'upload_audio',
+    ],
+  };
+  next();
+}
 
 /**
  * Creates a mock DB that simulates the INNER JOIN behaviour of

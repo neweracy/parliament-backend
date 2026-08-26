@@ -66,7 +66,7 @@ const { createCache } = require("./lib/cache");
 const cache = createCache(getClient());
 
 // --- Local: WebSocket real-time updates ---
-const { initWebSocket, broadcast } = require("./lib/ws-server");
+const { initWebSocket } = require("./lib/ws-server");
 
 // --- Local: routes and providers ---
 const khayaRoutes = require("./routes/khaya");
