@@ -501,6 +501,20 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
             corpus_hints=corpus_hints,
         )
 
+    # Log RAG quality metrics for monitoring and evaluation
+    logger.info(
+        "rag.ask.metrics",
+        question_preview=body.question[:80],
+        path="fast" if _is_simple_search_question(body.question, has_history) else "agent",
+        chunk_count=len(answer_response.source_chunks),
+        citation_count=len(answer_response.citations),
+        recommendation_count=len(answer_response.recommendations),
+        related_record_count=len(answer_response.related_records),
+        answer_length=len(answer_response.answer),
+        grounded=len(answer_response.citations) > 0,
+        latency_ms=round(answer_response.latency_ms, 1),
+    )
+
     # Map to response models
     citations = [
         CitationItem(
