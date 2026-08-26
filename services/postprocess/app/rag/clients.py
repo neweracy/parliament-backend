@@ -8,11 +8,18 @@ Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 2.1, 2.4
 
 from __future__ import annotations
 
+import hashlib
+import time
+from collections import OrderedDict
+
 import botocore.session
+import structlog
 from botocore.config import Config as BotoConfig
 from langchain_aws import BedrockEmbeddings, ChatBedrock
 
 from app.config import Settings
+
+logger = structlog.get_logger("rag.clients")
 
 
 def create_chat_model(settings: Settings) -> ChatBedrock:
@@ -39,19 +46,90 @@ def create_chat_model(settings: Settings) -> ChatBedrock:
     )
 
 
-def create_embeddings(settings: Settings) -> BedrockEmbeddings:
-    """Create a configured BedrockEmbeddings instance for Titan Text Embeddings V2.
+def create_embeddings(settings: Settings) -> CachedEmbeddings:
+    """Create a configured BedrockEmbeddings instance wrapped with LRU cache.
 
     Args:
         settings: Application settings providing the AWS region.
 
     Returns:
-        A BedrockEmbeddings instance for generating document embeddings.
+        A CachedEmbeddings instance that caches query embeddings in memory.
     """
-    return BedrockEmbeddings(
+    inner = BedrockEmbeddings(
         model_id="amazon.titan-embed-text-v2:0",
         region_name=settings.aws_region,
     )
+    return CachedEmbeddings(inner)
+
+
+class CachedEmbeddings:
+    """LRU-cached wrapper around BedrockEmbeddings for query embeddings.
+
+    Caches the vector result of `aembed_query` keyed by the query text hash.
+    Cache entries expire after `ttl_seconds` to prevent stale results if the
+    embedding model were ever updated. The cache is bounded to `max_size`
+    entries and uses LRU eviction.
+
+    This eliminates redundant Bedrock API calls when the same query is asked
+    multiple times (common in agent loops that search the same terms).
+    """
+
+    def __init__(
+        self,
+        inner: BedrockEmbeddings,
+        max_size: int = 256,
+        ttl_seconds: float = 3600,
+    ) -> None:
+        self._inner = inner
+        self._max_size = max_size
+        self._ttl_seconds = ttl_seconds
+        self._cache: OrderedDict[str, tuple[list[float], float]] = OrderedDict()
+
+    def _cache_key(self, text: str) -> str:
+        """Produce a short hash key for the query text."""
+        return hashlib.sha256(text.encode()).hexdigest()[:32]
+
+    async def aembed_query(self, text: str) -> list[float]:
+        """Return cached embedding or call Bedrock and cache the result."""
+        key = self._cache_key(text)
+        now = time.time()
+
+        # Check cache
+        if key in self._cache:
+            embedding, ts = self._cache[key]
+            if now - ts < self._ttl_seconds:
+                self._cache.move_to_end(key)
+                logger.debug("rag.embedding_cache.hit", query_preview=text[:40])
+                return embedding
+            else:
+                del self._cache[key]
+
+        # Cache miss — call Bedrock
+        embedding = await self._inner.aembed_query(text)
+
+        # Store in cache with LRU eviction
+        self._cache[key] = (embedding, now)
+        if len(self._cache) > self._max_size:
+            self._cache.popitem(last=False)
+
+        logger.debug("rag.embedding_cache.miss", query_preview=text[:40])
+        return embedding
+
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        """Delegate document embedding to the inner client (not cached).
+
+        Document embeddings are used during ingestion, which is a one-time
+        operation per chunk, so caching them provides little benefit.
+        """
+        return await self._inner.aembed_documents(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        """Sync embedding — delegates to inner (no cache for sync path)."""
+        return self._inner.embed_query(text)
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        """Sync document embedding — delegates to inner."""
+        return self._inner.embed_documents(texts)
 
 
 def probe_credentials() -> bool:

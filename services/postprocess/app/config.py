@@ -103,8 +103,8 @@ class Settings(BaseSettings):
 
     # --- RAG agent ---
     # Wall-clock timeout for the full agent loop (seconds). The gateway aborts
-    # at 30s, so this must be lower to allow a structured fallback.
-    rag_agent_timeout_s: int = 25
+    # at 60s, so this must be lower to allow a structured fallback.
+    rag_agent_timeout_s: int = 50
     # Embedding batch size for ingestion (Titan supports up to 25 texts)
     rag_embedding_batch_size: int = 10
     # Retry attempts for failed embeddings during ingestion
@@ -150,7 +150,7 @@ class Settings(BaseSettings):
             "LLM_MAX_PARALLEL": 3,
             "LLM_CHUNK_TIMEOUT_MS": 15000,
             "LLM_MAX_PROMPT_RECORDS": 50,
-            "RAG_AGENT_TIMEOUT_S": 25,
+            "RAG_AGENT_TIMEOUT_S": 50,
             "RAG_EMBEDDING_BATCH_SIZE": 10,
             "RAG_EMBEDDING_MAX_RETRIES": 2,
             "DB_POOL_SIZE": 5,

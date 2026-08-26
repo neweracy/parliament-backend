@@ -25,6 +25,7 @@ from sqlalchemy import text
 
 from app.deps import verify_service_token
 from app.rag.agent import HansardChatAgent
+from app.rag.answerer import GroundedAnsweringChain
 from app.rag.ingestion import TranscriptIngestionWorker
 from app.rag.recommendations import (
     MAX_SEARCH_RECOMMENDATION_COUNT,
@@ -35,6 +36,43 @@ from app.rag.retriever import HybridRetriever, RetrievalFilters
 from app.rag.search_recommendations import generate_search_recommendations
 
 logger = structlog.get_logger("rag.router")
+
+# Patterns that indicate a conversational (non-search) question.
+# These skip the fast path and go through the full agent.
+_CONVERSATIONAL_PATTERNS = (
+    "hello", "hi ", "hey", "good morning", "good afternoon", "good evening",
+    "what can you", "how do i use", "what are you", "who are you",
+    "thank", "thanks", "help me", "can you help",
+)
+
+
+def _is_simple_search_question(question: str, has_history: bool) -> bool:
+    """Heuristic: should this question use the fast grounded path?
+
+    Returns True when the question is likely a straightforward factual query
+    that can be answered with a single retrieve-then-answer pass, skipping
+    the agent's "decide whether to search" step.
+
+    Criteria:
+    - No conversation history (first message in thread)
+    - Not a greeting or capability question
+    - At least 3 words (rules out "hi", "hey", single-word inputs)
+    """
+    if has_history:
+        return False
+
+    lower = question.lower().strip()
+
+    # Too short to be a real question
+    if len(lower.split()) < 3:
+        return False
+
+    # Check for conversational patterns
+    for pattern in _CONVERSATIONAL_PATTERNS:
+        if lower.startswith(pattern):
+            return False
+
+    return True
 
 router = APIRouter(prefix="/rag", dependencies=[Depends(verify_service_token)])
 
@@ -384,10 +422,12 @@ async def rag_recommendations(
 
 @router.post("/ask", response_model=AskResponse)
 async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
-    """Answer a question via the conversational HansardChatAgent.
+    """Answer a question via grounded Q&A.
 
-    The agent decides for itself whether the turn needs a search_hansard call,
-    returning the answer with citations, source chunks, and latency.
+    Uses a fast path (single retrieve + answer) for simple first-turn questions,
+    and the full conversational HansardChatAgent for multi-turn conversations
+    or greeting/capability questions. The fast path saves one full model
+    round-trip by skipping the "decide whether to search" step.
     """
     session_factory = request.app.state.session_factory
     settings = request.app.state.settings
@@ -418,26 +458,48 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
             speaker=body.speaker,
         )
 
-    # The agent decides whether to search, so the router cannot know in advance
-    # whether hints will be needed. The lookup is two indexed DISTINCT queries
-    # and it never fails the answer, so it is fetched up front.
     corpus_hints = await fetch_corpus_hints(session_factory)
 
     # Build conversation history for the answerer
     conversation_history: list[tuple[str, str]] | None = None
+    has_history = bool(body.conversation_history)
     if body.conversation_history:
-        # Limit to last 20 messages to avoid exceeding context window
         recent = body.conversation_history[-20:]
         conversation_history = [(m.role, m.content) for m in recent]
 
-    # Generate a conversational, tool-driven answer with conversation context
-    agent = HansardChatAgent(chat_model, retriever, settings, session_factory=session_factory)
-    answer_response = await agent.chat(
-        question=body.question,
-        filters=filters,
-        conversation_history=conversation_history,
-        corpus_hints=corpus_hints,
-    )
+    # Fast path: simple first-turn factual questions skip the agent loop.
+    # This eliminates one full model round-trip (~3-5s savings).
+    if _is_simple_search_question(body.question, has_history):
+        logger.info(
+            "rag.ask.fast_path",
+            question_preview=body.question[:80],
+        )
+        # Retrieve chunks directly, then answer in one model call
+        chunks = await retriever.retrieve(
+            query=body.question, filters=filters, limit=10
+        )
+        chain = GroundedAnsweringChain(chat_model, settings)
+        answer_response = await chain.answer(
+            question=body.question,
+            chunks=chunks,
+            corpus_hints=corpus_hints,
+        )
+    else:
+        # Full agent path: multi-turn, greetings, or complex questions
+        logger.info(
+            "rag.ask.agent_path",
+            question_preview=body.question[:80],
+            has_history=has_history,
+        )
+        agent = HansardChatAgent(
+            chat_model, retriever, settings, session_factory=session_factory
+        )
+        answer_response = await agent.chat(
+            question=body.question,
+            filters=filters,
+            conversation_history=conversation_history,
+            corpus_hints=corpus_hints,
+        )
 
     # Map to response models
     citations = [

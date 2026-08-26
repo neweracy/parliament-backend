@@ -59,8 +59,8 @@ _MAX_SEARCH_RESULTS = 10
 _MAX_HISTORY_MESSAGES = 20
 
 # Super-step ceiling for the agent loop. Each tool round trip costs roughly two,
-# so this allows several searches while still bounding a misbehaving model.
-_RECURSION_LIMIT = 12
+# so this allows up to 3 searches while bounding a misbehaving model.
+_RECURSION_LIMIT = 6
 
 # Circuit breaker for the Bedrock model — shared across all agent instances
 # within a single worker process. Opens after 5 consecutive failures, recovers
@@ -603,7 +603,7 @@ class HansardChatAgent:
             # must finish well inside that window to return a structured error
             # rather than a TCP reset.
             timeout_s = (
-                self._settings.rag_agent_timeout_s if self._settings else 25
+                self._settings.rag_agent_timeout_s if self._settings else 50
             )
             result = await asyncio.wait_for(
                 agent.ainvoke(

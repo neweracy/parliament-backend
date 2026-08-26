@@ -142,9 +142,9 @@ function askRoutes(requireSession, _db) {
           .map((m) => ({ role: m.role, content: m.content }));
       }
 
-      // Proxy to Postprocessing Service with 30s timeout
+      // Proxy to Postprocessing Service with 60s timeout
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
+      const timeout = setTimeout(() => controller.abort(), 60000);
 
       try {
         const upstream = await fetch(`${POSTPROCESS_URL}/rag/ask`, {
