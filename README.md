@@ -33,6 +33,7 @@ Built with a three-tier architecture: a React SPA frontend, an Express 5 API gat
 | Authentication | jsonwebtoken, jwks-rsa (Cognito RS256 validation), bcrypt |
 | AWS SDKs | @aws-sdk/client-bedrock-runtime, @aws-sdk/client-cognito-identity-provider |
 | Database | pg (PostgreSQL client) |
+| Caching | ioredis (Redis client with reconnect, graceful degradation) |
 | File Uploads | Multer 2 |
 | API Docs | swagger-ui-express |
 | Config | dotenv, TOML |
@@ -69,6 +70,7 @@ Built with a three-tier architecture: a React SPA frontend, an Express 5 API gat
 | Rate Limiting | Caddy rate-limit zones (session: 5 req/min, API: 120 req/min) |
 | Hosting | Fly.io |
 | Database | PostgreSQL 16 with pgvector + pg_trgm extensions |
+| Caching | Redis 7 (ioredis) — optional, graceful degradation when unavailable |
 | Package Manager | pnpm 10 (via corepack) |
 | Orchestration | concurrently (multi-service dev startup) |
 | Migrations | Alembic (offline + online modes, manual SQL) |
@@ -83,7 +85,10 @@ Built with a three-tier architecture: a React SPA frontend, an Express 5 API gat
 | RAG Retrieval | Hybrid: FulltextRetriever (tsvector) + VectorRetriever (pgvector cosine) → RRF fusion |
 | Conversational Agent | LangChain `create_agent` with `search_hansard` tool (model decides when to search) |
 | Grounded Answering | LangChain ChatBedrock with citation parsing and validation |
+| Fast Path | Simple first-turn questions bypass the agent loop (single retrieve + answer, ~3-5s faster) |
+| Embedding Cache | In-memory LRU cache (256 entries, 1h TTL) eliminates redundant Bedrock embedding calls |
 | Recommendations | Deterministic derivation from retrieved chunks (no extra model call) + LLM-backed search suggestions |
+| Response Caching | Redis-backed cache for search results (5 min), suggestions (1h), dashboard stats (2 min) |
 
 ## Architecture
 
@@ -95,16 +100,16 @@ Built with a three-tier architecture: a React SPA frontend, an Express 5 API gat
 └──────────────────┘     └───────────┬───────────┘     └────────────┬────────────┘
                                      │                              │
                               ┌──────┴──────┐              ┌───────┴────────┐
-                              │ Deepgram    │              │ PostgreSQL 16  │
-                              │ Khaya AI    │              │ (pgvector)     │
-                              │ (ASR)       │              │ Port 5432      │
+                              │ Redis 7     │              │ PostgreSQL 16  │
+                              │ (caching)   │              │ (pgvector)     │
+                              │ Port 6379   │              │ Port 5432      │
                               └─────────────┘              └───────┬────────┘
                                                                    │
-                                                           ┌───────┴────────┐
-                                                           │ Amazon Bedrock │
-                                                           │ (Claude + Titan│
-                                                           │  Embeddings)   │
-                                                           └────────────────┘
+                              ┌─────────────┐              ┌───────┴────────┐
+                              │ Deepgram    │              │ Amazon Bedrock │
+                              │ Khaya AI    │              │ (Claude + Titan│
+                              │ (ASR)       │              │  Embeddings)   │
+                              └─────────────┘              └────────────────┘
 ```
 
 ### API Endpoints
@@ -383,6 +388,7 @@ Set it to `true` and supply AWS credentials to enable the Bedrock refinement sta
 | `PORT` | No | Backend port (default: `8081`) |
 | `SESSION_SECRET` | No | JWT signing secret (auto-generated if unset) |
 | `AUTH_MODE` | No | `legacy` (default) or `cognito` — controls authentication strategy |
+| `REDIS_URL` | No | Redis connection URL (e.g. `redis://localhost:6379`). Omit to disable caching |
 | `COGNITO_USER_POOL_ID` | If AUTH_MODE=cognito | AWS Cognito User Pool ID |
 | `COGNITO_REGION` | If AUTH_MODE=cognito | AWS region for Cognito |
 | `COGNITO_APP_CLIENT_ID` | If AUTH_MODE=cognito | Cognito App Client ID |
@@ -405,6 +411,8 @@ See `sample.env` for the full list with defaults.
 ├── lib/
 │   ├── location-correction/  # Rule-based Ghana entity correction
 │   ├── hybrid/               # Audio slicing for hybrid pipeline
+│   ├── redis-client.js       # Redis connection singleton (ioredis)
+│   ├── cache.js              # Cache utility layer (get/set/del/invalidate)
 │   ├── rbac-config.js        # Role-permission registry (60s cache)
 │   ├── postprocess-client.js # Python service HTTP client
 │   └── postprocess-mode.js   # Mode dispatcher utilities
@@ -463,6 +471,38 @@ See `sample.env` for the full list with defaults.
 ├── bench/                    # Benchmark harness
 └── Makefile                  # Project automation
 ```
+
+## Redis Caching (Optional)
+
+The gateway includes an optional Redis caching layer that reduces latency for repeated queries. When `REDIS_URL` is set, the following are cached:
+
+| Cached Data | TTL | Key Pattern |
+|-------------|-----|-------------|
+| Search results | 5 minutes | `parliament:search:<hash>` |
+| Search suggestions | 1 hour | `parliament:suggestions:current` |
+| Dashboard stats | 2 minutes | `parliament:dashboard:stats` |
+| Transcription job state | 60s (terminal) / 1h (active) | `parliament:jobs:<jobId>` |
+
+When `REDIS_URL` is **not set**, all cache operations return cache-miss results and the app functions normally — just without caching. The caching layer never blocks or throws on failure.
+
+### Starting Redis
+
+```bash
+# Via Docker Compose (alongside Postgres)
+cd services/postprocess && docker compose up -d redis
+
+# Or standalone
+docker run -d --name redis -p 6379:6379 redis:7-alpine
+```
+
+### Verifying
+
+```bash
+curl -s http://localhost:8081/health | jq .redis
+# "connected" | "connecting" | "disconnected" | "disabled"
+```
+
+Cache invalidation happens automatically when transcripts are ingested (suggestions and dashboard stats are cleared). Search results expire via TTL.
 
 ## Testing
 
