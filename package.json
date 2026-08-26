@@ -46,6 +46,7 @@
     "jsonwebtoken": "9.0.2",
     "jwks-rsa": "^4.1.0",
     "multer": "2.0.2",
+    "ioredis": "5.6.1",
     "pg": "^8.22.0",
     "swagger-ui-express": "5.0.1",
     "toml": "3.0.0",
