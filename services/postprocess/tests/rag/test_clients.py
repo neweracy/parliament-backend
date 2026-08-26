@@ -6,7 +6,12 @@ from unittest.mock import MagicMock, patch
 
 from langchain_aws import BedrockEmbeddings, ChatBedrock
 
-from app.rag.clients import create_chat_model, create_embeddings, probe_credentials
+from app.rag.clients import (
+    CachedEmbeddings,
+    create_chat_model,
+    create_embeddings,
+    probe_credentials,
+)
 
 
 def test_create_chat_model(mock_settings):
@@ -17,11 +22,13 @@ def test_create_chat_model(mock_settings):
     assert model.region_name == mock_settings.aws_region
     # Verify retry/timeout config is set via botocore Config
     assert model.config is not None
-    # max_attempts dropped from 2 to 1 (botocore counts retries on top of the
-    # initial call, so total_max_attempts is 2 rather than the previous 3).
-    # A read timeout means the model was still generating, so extra re-sends
-    # only burn the agent's wall-clock budget.
-    assert model.config.retries["total_max_attempts"] == 2
+    # Retries are disabled. botocore's client-config `max_attempts` counts
+    # *retries on top of* the initial call and normalizes to
+    # `total_max_attempts = max_attempts + 1` during client creation, so the
+    # factory passes `max_attempts=0` to get exactly one total attempt.
+    # `max_attempts=1` would permit a retry and double the worst-case wall
+    # clock (2 x read_timeout), which can outlast the gateway's abort window.
+    assert model.config.retries["total_max_attempts"] == 1
     # Read timeout comes from rag_model_timeout_s, not the refiner's
     # llm_chunk_timeout_ms (15s), which was too short for cited RAG answers.
     assert model.config.read_timeout == mock_settings.rag_model_timeout_s
@@ -29,11 +36,19 @@ def test_create_chat_model(mock_settings):
 
 
 def test_create_embeddings(mock_settings):
-    """create_embeddings returns a BedrockEmbeddings with Titan V2 model."""
+    """create_embeddings returns a CachedEmbeddings wrapping Titan V2 Bedrock embeddings."""
     emb = create_embeddings(mock_settings)
-    assert isinstance(emb, BedrockEmbeddings)
-    assert emb.model_id == "amazon.titan-embed-text-v2:0"
-    assert emb.region_name == mock_settings.aws_region
+    assert isinstance(emb, CachedEmbeddings)
+
+    # The retriever calls the embedding interface directly, so the wrapper has to
+    # expose the same surface as BedrockEmbeddings.
+    for method in ("aembed_query", "aembed_documents", "embed_query", "embed_documents"):
+        assert callable(getattr(emb, method))
+
+    inner = emb._inner
+    assert isinstance(inner, BedrockEmbeddings)
+    assert inner.model_id == "amazon.titan-embed-text-v2:0"
+    assert inner.region_name == mock_settings.aws_region
 
 
 @patch("app.rag.clients.botocore.session.get_session")

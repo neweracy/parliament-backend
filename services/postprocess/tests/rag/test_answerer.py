@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -108,3 +109,32 @@ class TestAnswer:
         assert response.answer == GENERATION_FAILURE_TEXT
         # Real builder tops up from chunk metadata → static set
         assert len(response.recommendations) == 3
+
+    @pytest.mark.asyncio
+    async def test_timeout_path(self, mock_settings, sample_retrieved_chunks):
+        """A model call exceeding rag_agent_timeout_s returns the structured fallback.
+
+        The dedicated `except TimeoutError` clause must run rather than the
+        `except Exception` clause below it — TimeoutError descends from OSError
+        -> Exception, so clause ordering is what keeps them distinct.
+        """
+        # model_copy skips validation, so a sub-second budget is allowed here
+        fast_settings = mock_settings.model_copy(update={"rag_agent_timeout_s": 0.05})
+
+        async def never_returns(_messages):
+            await asyncio.sleep(5)
+
+        slow_model = AsyncMock()
+        slow_model.ainvoke = AsyncMock(side_effect=never_returns)
+
+        chain = GroundedAnsweringChain(slow_model, fast_settings)
+
+        response = await chain.answer("What was discussed?", sample_retrieved_chunks)
+
+        assert response.answer == (
+            "The request took too long to process. Please try a more specific question."
+        )
+        # Not the generic failure text → the timeout clause ran, not `except Exception`
+        assert response.answer != GENERATION_FAILURE_TEXT
+        assert len(response.recommendations) == 3
+        assert response.citations == []

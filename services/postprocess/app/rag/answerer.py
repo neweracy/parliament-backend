@@ -9,6 +9,7 @@ Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import structlog
@@ -224,9 +225,38 @@ class GroundedAnsweringChain:
         )
 
         # Step 3: Call ChatBedrock.ainvoke() — async-native, no thread executor
+        #
+        # Wall-clock timeout shares the agent's budget knob so both /rag/ask
+        # paths are bounded the same way. boto's read_timeout alone would leave
+        # this path only implicitly bounded, so raising rag_model_timeout_s past
+        # the gateway's abort would turn a structured error into a TCP reset.
+        timeout_s = self._settings.rag_agent_timeout_s if self._settings else 50
         try:
-            ai_message = await self._chat_model.ainvoke(messages)
+            ai_message = await asyncio.wait_for(
+                self._chat_model.ainvoke(messages), timeout=timeout_s
+            )
             raw_answer = ai_message.content
+        except TimeoutError:
+            # Must precede `except Exception`: TimeoutError descends from
+            # OSError -> Exception, so a later clause would swallow it.
+            logger.warning(
+                "rag.answerer.timeout",
+                question_preview=question[:80],
+                timeout_s=timeout_s,
+            )
+            return self._finalise(
+                answer=(
+                    "The request took too long to process. Please try a more specific question."
+                ),
+                citations=[],
+                context_chunks=context_chunks,
+                parsed=[],
+                hint_chunks=context_chunks or chunks,
+                corpus_hints=corpus_hints,
+                history_questions=history_questions,
+                grounded=grounded,
+                start_time=start_time,
+            )
         except Exception:
             logger.error(
                 "rag.answerer.model_invocation_failed",

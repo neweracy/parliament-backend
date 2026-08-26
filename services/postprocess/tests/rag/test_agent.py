@@ -68,6 +68,13 @@ class TestFormatPassages:
         rendered = _format_passages([chunk])
         assert "chunk_id: 42" in rendered
         assert "Text for chunk 42." in rendered
+        # Positive form of the headers, so the absence assertions in
+        # test_omits_absent_optional_metadata are not vacuous.
+        assert "speaker: Hon. Doe" in rendered
+        assert "sitting: 3rd Sitting" in rendered
+        assert "record: Budget Debate" in rendered
+        assert "date: 2024-01-15" in rendered
+        assert "time: 10.0s-20.0s" in rendered
 
     def test_omits_absent_optional_metadata(self):
         chunk = _make_chunk(
@@ -81,11 +88,39 @@ class TestFormatPassages:
         )
         rendered = _format_passages([chunk])
         assert "chunk_id: 1" in rendered
-        assert "speaker" not in rendered
-        assert "sitting" not in rendered
-        assert "record" not in rendered
-        assert "date" not in rendered
-        assert "time" not in rendered
+        # Assert on the header form `<field>:` that _format_passages emits, not a
+        # bare field name. The output is wrapped in
+        # <retrieved_parliamentary_record> tags, so bare substrings such as
+        # "record" are always present and would make these assertions vacuous.
+        assert "speaker:" not in rendered
+        assert "sitting:" not in rendered
+        assert "record:" not in rendered
+        assert "date:" not in rendered
+        assert "time:" not in rendered
+
+    def test_wraps_all_passages_in_boundary_tags(self):
+        """The boundary markers are part of the contract, not incidental framing.
+
+        They pair with the system prompt's content-boundary rule to mark
+        retrieved transcript text as data rather than instructions, so the
+        untrusted text must sit wholly inside a single open/close pair.
+        """
+        rendered = _format_passages([_make_chunk(1), _make_chunk(2)])
+
+        assert rendered.startswith("<retrieved_parliamentary_record>\n")
+        assert rendered.endswith("\n</retrieved_parliamentary_record>")
+        # One pair only — per-passage tags would leave untrusted text between a
+        # closing and the next opening marker, outside the boundary.
+        assert rendered.count("<retrieved_parliamentary_record>") == 1
+        assert rendered.count("</retrieved_parliamentary_record>") == 1
+
+        inner = rendered.removeprefix("<retrieved_parliamentary_record>\n").removesuffix(
+            "\n</retrieved_parliamentary_record>"
+        )
+        assert "chunk_id: 1" in inner
+        assert "Text for chunk 1." in inner
+        assert "chunk_id: 2" in inner
+        assert "Text for chunk 2." in inner
 
 
 # ---------------------------------------------------------------------------
@@ -305,8 +340,7 @@ class TestChat:
         was retrieved via search_hansard, so `grounded` stays False.
         """
         raw = (
-            "One record was uploaded recently.\n\n"
-            "RECOMMENDATIONS:\n- Q1 | R1\n- Q2 | R2\n- Q3 | R3"
+            "One record was uploaded recently.\n\nRECOMMENDATIONS:\n- Q1 | R1\n- Q2 | R2\n- Q3 | R3"
         )
         retriever = FakeRetriever([])
         session = AsyncMock()
@@ -339,9 +373,7 @@ class TestChat:
 
             async def fake_ainvoke(*a, **kw):
                 # Simulate the model calling find_recent_activity (tools[1]).
-                await captured_tools["tools"][1].ainvoke(
-                    {"period": "recent", "scope": "uploads"}
-                )
+                await captured_tools["tools"][1].ainvoke({"period": "recent", "scope": "uploads"})
                 return {"messages": [AIMessage(content=raw)]}
 
             fake_agent.ainvoke = AsyncMock(side_effect=fake_ainvoke)
@@ -375,9 +407,7 @@ class TestChat:
         def fake_create_agent(*args, **kwargs):
             captured_tools["tools"] = kwargs["tools"]
             fake_agent = MagicMock()
-            fake_agent.ainvoke = AsyncMock(
-                return_value={"messages": [AIMessage(content=raw)]}
-            )
+            fake_agent.ainvoke = AsyncMock(return_value={"messages": [AIMessage(content=raw)]})
             return fake_agent
 
         with patch("app.rag.agent.create_agent", side_effect=fake_create_agent):

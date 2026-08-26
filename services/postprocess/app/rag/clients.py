@@ -33,10 +33,14 @@ def create_chat_model(settings: Settings) -> ChatBedrock:
     is a much longer call than refining a single correction chunk, and sharing
     the refiner's 15s budget made any slower answer fail on retry at ~25s.
 
-    Retries are capped at a single attempt: a read timeout here means the model
-    was still generating, and re-sending the same prompt doubles the wall-clock
-    cost without improving the odds. The agent's own timeout and the
-    circuit breaker handle failure.
+    Retries are disabled entirely. In botocore's client config, `max_attempts`
+    counts *retries on top of* the initial call, so `max_attempts=0` normalizes
+    to `total_max_attempts=1` — one call and nothing more. A read timeout here
+    means the model was still generating, and re-sending the same prompt only
+    doubles the wall-clock cost without improving the odds. With `read_timeout`
+    bounded by `rag_model_timeout_s`, a single attempt keeps the worst case
+    inside the gateway's abort window instead of exceeding it. The agent's own
+    timeout and the circuit breaker handle failure.
 
     Args:
         settings: Application settings providing model_id, region, and timeout.
@@ -49,7 +53,7 @@ def create_chat_model(settings: Settings) -> ChatBedrock:
         model_id=settings.bedrock_model_id,
         region_name=settings.aws_region,
         config=BotoConfig(
-            retries={"max_attempts": 1, "mode": "standard"},
+            retries={"max_attempts": 0, "mode": "standard"},
             read_timeout=read_timeout_s,
             connect_timeout=10,
         ),
