@@ -59,6 +59,12 @@ const { degradedResponse, mergeSuccess, logDegraded } = require("./lib/postproce
 // --- Local: database ---
 const db = require("./lib/db");
 
+// --- Local: Redis caching ---
+const { getClient, disconnect, healthCheck: redisHealthCheck } = require("./lib/redis-client");
+const { createCache } = require("./lib/cache");
+
+const cache = createCache(getClient());
+
 // --- Local: WebSocket real-time updates ---
 const { initWebSocket, broadcast } = require("./lib/ws-server");
 
@@ -781,11 +787,11 @@ app.use("/api/transcription/hybrid", hybridRoutes(authMiddleware, upload, hybrid
 app.use(sittingsRoutes(authMiddleware, db));
 app.use(recordsRoutes(authMiddleware, db));
 app.use(audioRoutes(authMiddleware, db));
-app.use(transcriptionRoutes(authMiddleware, db));
+app.use(transcriptionRoutes(authMiddleware, db, cache));
 app.use(transcriptRoutes(authMiddleware, db));
-app.use(searchRoutes(authMiddleware, db));
+app.use(searchRoutes(authMiddleware, db, cache));
 app.use(askRoutes(authMiddleware, db));
-app.use(dashboardRoutes(authMiddleware, db));
+app.use(dashboardRoutes(authMiddleware, db, cache));
 app.use(settingsRoutes(authMiddleware, db));
 app.use(dictionaryRoutes(authMiddleware, db));
 app.use(usersRoutes(authMiddleware, db));
@@ -890,13 +896,15 @@ app.get("/api/audio-proxy", authMiddleware, requirePermission("view_records"), a
 // HEALTH CHECK — unauthenticated, no outbound calls, no secrets exposed
 // ============================================================================
 
-app.get('/health', (_req, res) => {
+app.get('/health', async (_req, res) => {
+  const redisHealth = await redisHealthCheck();
   res.json({
     status: 'ok',
     uptime_seconds: Math.floor(process.uptime()),
     postprocess_mode: POSTPROCESS_MODE,
     version: APP_VERSION,
     ws_clients: require("./lib/ws-server").getClientCount(),
+    redis: redisHealth.state,
   });
 });
 
@@ -962,5 +970,19 @@ const server = app.listen(CONFIG.port, CONFIG.host, async () => {
 
   // Initialize WebSocket server for live updates
   initWebSocket(server);
+});
+
+// ============================================================================
+// GRACEFUL SHUTDOWN — close Redis connection on termination signals
+// ============================================================================
+
+process.on("SIGTERM", async () => {
+  await disconnect();
+  process.exit(0);
+});
+
+process.on("SIGINT", async () => {
+  await disconnect();
+  process.exit(0);
 });
 
