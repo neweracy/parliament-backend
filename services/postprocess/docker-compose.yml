@@ -36,6 +36,21 @@ services:
       - internal
 
   # ---------------------------------------------------------------------------
+  # Redis Cache
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - internal
+
+  # ---------------------------------------------------------------------------
   # Postprocessing Service (Python/FastAPI)
   # ---------------------------------------------------------------------------
   postprocess:
@@ -49,6 +64,7 @@ services:
       DRAIN_TIMEOUT_SECONDS: "15"
       SERVICE_TOKEN: "local-dev-token"
       DATABASE_URL: "postgresql+psycopg://postprocess:localdev@postgres:5432/postprocess"
+      REDIS_URL: "redis://redis:6379"
       # AWS Bedrock — enables LLM correction and Titan embeddings for RAG
       AWS_REGION: "${AWS_REGION:-us-east-1}"
       AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
@@ -60,6 +76,8 @@ services:
       - "8082:8082"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8082/health || exit 1"]
@@ -86,10 +104,13 @@ services:
       POSTPROCESS_TIMEOUT_MS: "20000"
       POSTPROCESS_BREAKER_THRESHOLD: "5"
       POSTPROCESS_BREAKER_COOLDOWN_MS: "30000"
+      REDIS_URL: "redis://redis:6379"
     ports:
       - "8081:8081"
     depends_on:
       postprocess:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - internal
