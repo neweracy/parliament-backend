@@ -105,6 +105,16 @@ class Settings(BaseSettings):
     # Wall-clock timeout for the full agent loop (seconds). The gateway aborts
     # at 60s, so this must be lower to allow a structured fallback.
     rag_agent_timeout_s: int = 50
+    # Per-call boto3 read timeout for the RAG chat model (seconds).
+    #
+    # Deliberately separate from llm_chunk_timeout_ms, which the correction
+    # refiner uses. That path sends a few hundred words and returns quickly;
+    # the RAG chat model generates a long cited answer from up to 10 retrieved
+    # chunks and routinely needs far longer. Reusing the 15s refiner value gave
+    # the model 15s per attempt with one retry on top, so any answer needing
+    # more than 15s failed at roughly 25s no matter how much wall-clock budget
+    # the agent still had.
+    rag_model_timeout_s: int = 45
     # Embedding batch size for ingestion (Titan supports up to 25 texts)
     rag_embedding_batch_size: int = 10
     # Retry attempts for failed embeddings during ingestion
@@ -151,6 +161,7 @@ class Settings(BaseSettings):
             "LLM_CHUNK_TIMEOUT_MS": 15000,
             "LLM_MAX_PROMPT_RECORDS": 50,
             "RAG_AGENT_TIMEOUT_S": 50,
+            "RAG_MODEL_TIMEOUT_S": 45,
             "RAG_EMBEDDING_BATCH_SIZE": 10,
             "RAG_EMBEDDING_MAX_RETRIES": 2,
             "DB_POOL_SIZE": 5,

@@ -28,20 +28,30 @@ def create_chat_model(settings: Settings) -> ChatBedrock:
     Uses the default AWS credential chain (environment variables, IAM role,
     config file, etc.) — never hardcodes credentials.
 
+    Read timeout comes from `rag_model_timeout_s`, not from the refiner's
+    `llm_chunk_timeout_ms`. Generating a cited answer over ten retrieved chunks
+    is a much longer call than refining a single correction chunk, and sharing
+    the refiner's 15s budget made any slower answer fail on retry at ~25s.
+
+    Retries are capped at a single attempt: a read timeout here means the model
+    was still generating, and re-sending the same prompt doubles the wall-clock
+    cost without improving the odds. The agent's own timeout and the
+    circuit breaker handle failure.
+
     Args:
         settings: Application settings providing model_id, region, and timeout.
 
     Returns:
         A ChatBedrock instance configured with retries and timeout.
     """
-    timeout_s = int(settings.llm_chunk_timeout_ms / 1000)
+    read_timeout_s = settings.rag_model_timeout_s
     return ChatBedrock(
         model_id=settings.bedrock_model_id,
         region_name=settings.aws_region,
         config=BotoConfig(
-            retries={"max_attempts": 2, "mode": "standard"},
-            read_timeout=timeout_s,
-            connect_timeout=timeout_s,
+            retries={"max_attempts": 1, "mode": "standard"},
+            read_timeout=read_timeout_s,
+            connect_timeout=10,
         ),
     )
 

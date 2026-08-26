@@ -17,8 +17,15 @@ def test_create_chat_model(mock_settings):
     assert model.region_name == mock_settings.aws_region
     # Verify retry/timeout config is set via botocore Config
     assert model.config is not None
-    assert model.config.retries["total_max_attempts"] == 3  # 2 retries + 1 initial
-    assert model.config.read_timeout == 15
+    # max_attempts dropped from 2 to 1 (botocore counts retries on top of the
+    # initial call, so total_max_attempts is 2 rather than the previous 3).
+    # A read timeout means the model was still generating, so extra re-sends
+    # only burn the agent's wall-clock budget.
+    assert model.config.retries["total_max_attempts"] == 2
+    # Read timeout comes from rag_model_timeout_s, not the refiner's
+    # llm_chunk_timeout_ms (15s), which was too short for cited RAG answers.
+    assert model.config.read_timeout == mock_settings.rag_model_timeout_s
+    assert model.config.connect_timeout == 10
 
 
 def test_create_embeddings(mock_settings):
