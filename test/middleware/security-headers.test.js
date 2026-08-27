@@ -66,7 +66,7 @@ describe('Security Headers — CSP (Req 14.1, 14.2, 14.3, 14.4)', () => {
     const res = await request(app).get('/api/test');
 
     const csp = res.headers['content-security-policy'];
-    assert.ok(csp.includes("connect-src 'self' https://auth.example.com"), 'connect-src includes Cognito');
+    assert.ok(csp.includes("connect-src 'self' blob: https://auth.example.com"), 'connect-src includes Cognito');
     assert.ok(csp.includes("form-action 'self' https://auth.example.com"), 'form-action includes Cognito');
   });
 
