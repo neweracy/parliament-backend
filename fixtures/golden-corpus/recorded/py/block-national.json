@@ -2,8 +2,8 @@
   "fixture_id": "block-national",
   "engine": "py",
   "corpus_version": "2.0.0",
-  "recorded_at": "2026-07-29T12:24:20.663408Z",
-  "transcript": "the National Democratic Congress anthem",
+  "recorded_at": "2026-08-27T12:15:58.199887Z",
+  "transcript": "the national anthem",
   "words": [
     {
       "word": "the",
@@ -25,12 +25,5 @@
     }
   ],
   "entities": [],
-  "corrections": [
-    {
-      "original": "national",
-      "corrected": "National Democratic Congress",
-      "strategy": "substring",
-      "confidence": 0.8
-    }
-  ]
+  "corrections": []
 }
