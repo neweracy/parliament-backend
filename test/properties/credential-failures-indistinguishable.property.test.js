@@ -167,6 +167,10 @@ describe('Property 5: Credential failures are publicly indistinguishable', () =>
         async (failureCause) => {
           let bcryptCallCount = 0;
 
+          // Clear require cache for auth + rate-limiter to reset in-memory state
+          delete require.cache[require.resolve('../../routes/auth')];
+          delete require.cache[require.resolve('../../middleware/rate-limiter')];
+
           // Mock bcrypt.compare to track calls and control outcome
           const mockBcryptCompare = async (_password, _hash) => {
             bcryptCallCount++;
@@ -260,6 +264,10 @@ describe('Property 5: Credential failures are publicly indistinguishable', () =>
 
     for (const cause of FAILURE_CAUSES) {
       let bcryptCallCount = 0;
+
+      // Clear require cache for auth + rate-limiter to reset in-memory state
+      delete require.cache[require.resolve('../../routes/auth')];
+      delete require.cache[require.resolve('../../middleware/rate-limiter')];
 
       const mockBcryptCompare = async (_password, _hash) => {
         bcryptCallCount++;
