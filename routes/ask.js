@@ -85,7 +85,8 @@ function mapAskResponse(raw) {
       recordId: r.record_id ?? null,
       createdAt: r.created_at || null,
     })),
-    latencyMs: raw.latency_ms ?? raw.latencyMs ?? 0,
+    latencyMs: Number.isFinite(raw.latency_ms) ? raw.latency_ms
+      : Number.isFinite(raw.latencyMs) ? raw.latencyMs : 0,
   };
 }
 
