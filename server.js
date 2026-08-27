@@ -367,8 +367,27 @@ const app = express();
 const createCorsPolicy = require("./middleware/cors-policy");
 app.use(createCorsPolicy());
 
-// Parse JSON request bodies (Express 5 requires explicit body-parser middleware)
-app.use(express.json({ limit: '2kb', strict: true }));
+/**
+ * Global JSON body limit.
+ *
+ * Was '2kb', which silently broke POST /api/ask: the frontend forwards
+ * conversationHistory on every turn, so the body outgrew 2KB after about three
+ * exchanges and the parser returned 413 before the handler's own .slice(-20)
+ * trim could run. 256kb fits a 20-message history while still bounding the
+ * request.
+ *
+ * The login route is excluded on purpose. It mounts its own 2KB parser so
+ * credential payloads stay tightly bounded; letting this parser consume that
+ * body first makes the route-level limit and its strict:false setting dead code.
+ */
+const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || '256kb';
+const LOGIN_PATH = '/api/auth/login';
+const globalJsonParser = express.json({ limit: JSON_BODY_LIMIT, strict: true });
+
+app.use((req, res, next) => {
+  if (req.path === LOGIN_PATH) return next();
+  return globalJsonParser(req, res, next);
+});
 
 // Security headers: CSP, X-Content-Type-Options, Referrer-Policy, X-Frame-Options,
 // HSTS, and auth cache controls (Req 14.1–14.12)
@@ -906,6 +925,38 @@ app.get('/health', async (_req, res) => {
     ws_clients: require("./lib/ws-server").getClientCount(),
     redis: redisHealth.state,
   });
+});
+
+// ============================================================================
+// BODY-PARSER ERROR ENVELOPE — after all routes, before the Sentry handler
+// ============================================================================
+
+/**
+ * Body-parser error envelope.
+ *
+ * Converts raw body-parser failures into this project's standard error shape so
+ * clients get something actionable instead of a bare "Payload Too Large".
+ */
+app.use((err, _req, res, next) => {
+  if (err && (err.type === 'entity.too.large' || err.status === 413)) {
+    return res.status(413).json({
+      error: {
+        type: 'ValidationError',
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'Request body is too large. Start a new conversation or shorten your question.',
+      },
+    });
+  }
+  if (err && err.type === 'entity.parse.failed') {
+    return res.status(400).json({
+      error: {
+        type: 'ValidationError',
+        code: 'INVALID_JSON',
+        message: 'Request body must be valid JSON',
+      },
+    });
+  }
+  return next(err);
 });
 
 // ============================================================================
