@@ -22,8 +22,10 @@ import structlog
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 from sqlalchemy import text
+
+from app.rag.retrieval_status import ArmStatus, RetrievalStatus
 
 logger = structlog.get_logger("rag.retriever")
 
@@ -191,6 +193,7 @@ class FulltextRetriever(BaseRetriever):
     session_factory: Any = Field(exclude=True)
     filters: RetrievalFilters | None = Field(default=None, exclude=True)
     pool_size: int = Field(default=_CANDIDATE_POOL_SIZE, exclude=True)
+    _last_error: str | None = PrivateAttr(default=None)
 
     class Config:
         arbitrary_types_allowed = True
@@ -215,6 +218,7 @@ class FulltextRetriever(BaseRetriever):
         Uses ts_rank on the tsvector column with plainto_tsquery matching.
         Applies any configured RetrievalFilters as additional WHERE clauses.
         """
+        self._last_error = None
         where_clauses, params = _build_filter_clauses(self.filters)
         params["query"] = query
         params["pool_size"] = self.pool_size
@@ -272,8 +276,9 @@ class FulltextRetriever(BaseRetriever):
                 )
                 return documents
 
-        except Exception:
+        except Exception as exc:
             logger.error("rag.retriever.fulltext_search_failed", exc_info=True)
+            self._last_error = f"{type(exc).__name__}: {exc}"
             return []
 
 
@@ -294,6 +299,7 @@ class VectorRetriever(BaseRetriever):
     embeddings: Any = Field(exclude=True)
     filters: RetrievalFilters | None = Field(default=None, exclude=True)
     pool_size: int = Field(default=_CANDIDATE_POOL_SIZE, exclude=True)
+    _last_error: str | None = PrivateAttr(default=None)
 
     class Config:
         arbitrary_types_allowed = True
@@ -319,15 +325,17 @@ class VectorRetriever(BaseRetriever):
         then executes cosine distance SQL against the transcript_chunk table.
         Applies any configured RetrievalFilters as additional WHERE clauses.
         """
+        self._last_error = None
         # Step 1: Embed the query
         try:
             query_embedding = await self.embeddings.aembed_query(query)
-        except Exception:
+        except Exception as exc:
             logger.error(
                 "rag.retriever.embedding_failed",
                 query_preview=query[:80],
                 exc_info=True,
             )
+            self._last_error = f"Embedding failed: {type(exc).__name__}: {exc}"
             return []
 
         # Step 2: Build and execute cosine similarity SQL
@@ -388,8 +396,9 @@ class VectorRetriever(BaseRetriever):
                 )
                 return documents
 
-        except Exception:
+        except Exception as exc:
             logger.error("rag.retriever.vector_search_failed", exc_info=True)
+            self._last_error = f"{type(exc).__name__}: {exc}"
             return []
 
 
@@ -523,6 +532,7 @@ class HybridRetriever:
         self._session_factory = session_factory
         self._embeddings = embeddings
         self._settings = settings
+        self.last_status: RetrievalStatus | None = None
 
     async def retrieve(
         self,
@@ -567,6 +577,32 @@ class HybridRetriever:
         # Step 2: Fuse via RRF
         rrf = RRFRetriever(fulltext, vector)
         fused_docs = await rrf.retrieve(query, limit)
+
+        # Build retrieval status for diagnostics
+        self.last_status = RetrievalStatus(
+            fulltext=ArmStatus.FAILED if fulltext._last_error else ArmStatus.OK,
+            vector=ArmStatus.FAILED if vector._last_error else ArmStatus.OK,
+            fused_count=len(fused_docs),
+            fulltext_error=fulltext._last_error,
+            vector_error=vector._last_error,
+        )
+
+        if self.last_status.both_failed:
+            logger.error(
+                "rag.retriever.both_arms_failed",
+                query_preview=query[:80],
+                fulltext_error=fulltext._last_error,
+                vector_error=vector._last_error,
+            )
+        elif self.last_status.any_failed:
+            logger.warning(
+                "rag.retriever.arm_degraded",
+                query_preview=query[:80],
+                fulltext_status=self.last_status.fulltext.value,
+                vector_status=self.last_status.vector.value,
+                fulltext_error=fulltext._last_error,
+                vector_error=vector._last_error,
+            )
 
         # Step 3: Convert Documents to RetrievedChunk
         chunks = self._docs_to_chunks(fused_docs)
