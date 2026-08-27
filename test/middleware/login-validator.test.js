@@ -21,14 +21,43 @@ const loginValidator = require('../../middleware/login-validator');
 /**
  * Creates a minimal Express app with the login validator middleware
  * and a success handler that returns the normalized values.
+ *
+ * express.json() is mounted first with a 2048-byte limit to match the
+ * validator's MAX_BODY_BYTES constant — this mirrors the production
+ * middleware stack in server.js.
  */
 function buildApp() {
   const app = express();
 
-  app.post('/api/auth/login', loginValidator, (req, res) => {
-    res.status(200).json({
-      normalizedEmail: req.normalizedEmail,
-      submittedPassword: req.submittedPassword,
+  // Body size limit enforced by express.json (matches login-validator MAX_BODY_BYTES).
+  // strict: false allows scalar JSON values (null, number, string, boolean) to
+  // pass through to the validator, which rejects them with 422.
+  app.post(
+    '/api/auth/login',
+    express.json({ limit: loginValidator.MAX_BODY_BYTES, strict: false }),
+    loginValidator,
+    (req, res) => {
+      res.status(200).json({
+        normalizedEmail: req.normalizedEmail,
+        submittedPassword: req.submittedPassword,
+      });
+    }
+  );
+
+  // Error handler for express.json() parse errors (413 payload too large, 400 bad JSON)
+  app.use((err, _req, res, _next) => {
+    if (err.status === 413) {
+      return res.status(413).json({
+        error: { type: 'ValidationError', code: 'INVALID_REQUEST', message: 'Request body too large' },
+      });
+    }
+    if (err.type === 'entity.parse.failed') {
+      return res.status(400).json({
+        error: { type: 'ValidationError', code: 'INVALID_REQUEST', message: 'Request body must be valid JSON' },
+      });
+    }
+    res.status(err.status || 500).json({
+      error: { type: 'ServerError', code: 'INTERNAL_ERROR', message: err.message },
     });
   });
 
@@ -172,14 +201,16 @@ describe('Login Validator — JSON Parsing (Req 5.4)', () => {
     assert.equal(res.body.error.code, 'INVALID_REQUEST');
   });
 
-  it('rejects empty body → 400', async () => {
+  it('rejects empty body → 422', async () => {
     const app = buildApp();
     const res = await request(app)
       .post('/api/auth/login')
       .set('Content-Type', 'application/json')
       .send('');
 
-    assert.equal(res.status, 400);
+    // express.json() interprets empty body as {} — the validator then
+    // rejects it as missing required fields (email and password).
+    assert.equal(res.status, 422);
   });
 
   it('rejects trailing comma JSON → 400', async () => {

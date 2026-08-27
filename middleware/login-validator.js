@@ -58,13 +58,13 @@ function loginValidator(req, res, next) {
   // Body is already parsed by express.json() mounted before this middleware
   const parsed = req.body;
 
-  if (parsed === undefined || parsed === null) {
+  if (parsed === undefined) {
     return res.status(400).json(
       validationError('INVALID_REQUEST', 'Request body must be valid JSON')
     );
   }
 
-  if (!isPlainObject(parsed)) {
+  if (parsed === null || !isPlainObject(parsed)) {
     return res.status(422).json(
       validationError('INVALID_REQUEST', 'Request body must be a JSON object')
     );

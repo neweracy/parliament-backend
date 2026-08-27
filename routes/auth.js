@@ -132,6 +132,7 @@ function authRoutes(db, options = {}) {
    */
   router.post(
     '/api/auth/login',
+    express.json({ limit: loginValidator.MAX_BODY_BYTES, strict: false }),
     loginValidator,
     rateLimiter,
     requestDeadline(5000),
