@@ -17,6 +17,7 @@ import structlog
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes_datasets import router as datasets_router
@@ -255,6 +256,37 @@ async def lifespan(app: FastAPI):
         db_max_connections=settings.db_pool_size + settings.db_max_overflow,
         db_sslmode=settings.db_sslmode or "unset",
     )
+
+    # Check for unindexed chunks and warn operators at startup
+    try:
+        async with session_factory() as session:
+            result = await session.execute(
+                text(
+                    "SELECT COUNT(*) AS total, "
+                    "COUNT(*) FILTER (WHERE embedding IS NULL) AS unindexed "
+                    "FROM transcript_chunk"
+                )
+            )
+            row = result.fetchone()
+            if row and row[0] > 0:
+                total, unindexed = row[0], row[1]
+                if unindexed > 0:
+                    pct = round(unindexed / total * 100, 1)
+                    logger.warning(
+                        "rag.startup.null_embeddings_detected",
+                        total_chunks=total,
+                        unindexed_chunks=unindexed,
+                        coverage_pct=round(100 - pct, 1),
+                        action="POST /rag/reindex to fix. "
+                        "Vector search is blind to these chunks.",
+                    )
+                else:
+                    logger.info(
+                        "rag.startup.embedding_coverage_ok",
+                        total_chunks=total,
+                    )
+    except Exception:
+        logger.warning("rag.startup.embedding_check_failed", exc_info=True)
 
     yield
 
