@@ -54,9 +54,18 @@ const COMMON_INVALID_TYPES = [
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
- * No-op auth middleware.
+ * No-op auth middleware that sets a stub user with upload_audio permission.
  */
-function passThrough(_req, _res, next) { next(); }
+function passThrough(req, _res, next) {
+  req.user = {
+    userId: 'test-user',
+    email: 'test@example.com',
+    name: 'Test User',
+    role: 'Admin',
+    permissions: ['upload_audio', 'view_records'],
+  };
+  next();
+}
 
 /**
  * Creates a mock db that returns a valid record for the existence check
