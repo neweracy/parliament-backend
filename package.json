@@ -14,7 +14,8 @@
     "start-backend": "nodemon --no-deprecation server.js",
     "lint": "eslint .",
     "test": "eslint . && node --test 'test/**/*.test.js'",
-    "test:khaya:live": "node scripts/test-khaya-live.js"
+    "test:khaya:live": "node scripts/test-khaya-live.js",
+    "test:rag-scenarios": "node scripts/rag-scenario-test.js"
   },
   "repository": {
     "type": "git",

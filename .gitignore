@@ -44,6 +44,10 @@ Thumbs.db
 coverage/
 test-results/
 
+# RAG scenario harness artifacts (generated)
+scripts/rag-test-results.jsonl
+scripts/rag-test-summary.md
+
 # Temporary files
 *.tmp
 tmp_*
