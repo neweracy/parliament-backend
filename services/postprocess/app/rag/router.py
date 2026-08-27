@@ -77,18 +77,32 @@ def _is_simple_search_question(question: str, has_history: bool) -> bool:
 
 # Substring signals for a summary request — any one of these appearing anywhere
 # in the question is enough. "what was discussed in" is here because it names a
-# container (a sitting or record) rather than a topic.
+# container (a sitting or record) rather than a topic. "what is in" likewise
+# asks the user to look inside a named container.
 _SUMMARY_INTENT_PATTERNS = (
     "summarize",
     "summarise",
     "summary of",
     "give me a summary",
     "what was discussed in",
+    "what is in",
+    "what's in",
 )
 
 # Signals that only count when both halves are present: the opener alone is too
 # broad, the follower alone appears in ordinary topic searches.
-_SUMMARY_INTENT_PAIRS = (("what does", "talk about"),)
+#
+# "tell me" + "record"/"sitting"/"session" catches informal requests like
+# "tell me something short about test record" that name a specific container
+# without using a summary verb. Without this the question looks like a simple
+# first-turn search, takes the toolless fast path, and the `summarize_record`
+# tool is unreachable.
+_SUMMARY_INTENT_PAIRS = (
+    ("what does", "talk about"),
+    ("tell me", "record"),
+    ("tell me", "sitting"),
+    ("tell me", "session"),
+)
 
 # Openers that read as a summary request only when the subject is quoted.
 _QUOTED_SUBJECT_OPENERS = ("what is", "what's")
@@ -117,7 +131,10 @@ def _has_summary_intent(question: str) -> bool:
       record itself. Contrast "what was discussed about the budget?", a topic
       search that stays on the fast path: the preposition is the whole
       distinction, `in` names a record, `about` names a subject.
+    - "what is in" / "what's in" — asking to look inside a container.
     - "what does" together with "talk about"
+    - "tell me" together with "record", "sitting", or "session" — informal
+      requests naming a specific container.
     - "what is" / "what's" together with "about" and a double-quoted subject
     """
     lower = question.lower().strip()

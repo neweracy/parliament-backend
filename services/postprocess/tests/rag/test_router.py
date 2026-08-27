@@ -465,6 +465,14 @@ class TestSummaryIntentDetection:
             "What was discussed in the Startup Verification Sitting?",
             'What is "Morning Session" about?',
             "Give me a summary of the proceedings",
+            # "tell me" + container word pairs
+            "tell me somethihng short about test record",
+            "tell me about the Morning Session record",
+            "Tell me what happened in the plenary sitting",
+            "tell me about the budget session",
+            # "what is in" / "what's in" patterns
+            "What is in the test record?",
+            "What's in the Morning Session?",
         ],
     )
     def test_summary_phrasings_are_detected(self, question: str) -> None:
@@ -479,6 +487,9 @@ class TestSummaryIntentDetection:
             "Hello",
             # Possessive apostrophes must not read as a quoted record title.
             "What is the Speaker's ruling about inflation?",
+            # "tell me" without a container word is a topic search.
+            "tell me about the budget allocations",
+            "tell me what the minister said about taxes",
         ],
     )
     def test_topic_searches_are_not_summary_intent(self, question: str) -> None:
@@ -531,3 +542,17 @@ class TestSummaryIntentDetection:
             _has_summary_intent(question)
         )
         assert use_fast_path is True
+
+    def test_tell_me_about_record_takes_agent_path(self) -> None:
+        """The original failing prompt must route to the agent where summarize_record lives."""
+        question = "tell me somethihng short about test record"
+
+        # Qualifies as a simple search (7 words, no history, no conversational prefix)
+        assert _is_simple_search_question(question, has_history=False) is True
+        # But the summary intent override kicks in
+        assert _has_summary_intent(question) is True
+
+        use_fast_path = _is_simple_search_question(question, has_history=False) and not (
+            _has_summary_intent(question)
+        )
+        assert use_fast_path is False
