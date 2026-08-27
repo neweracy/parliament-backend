@@ -119,6 +119,13 @@ class Settings(BaseSettings):
     rag_embedding_batch_size: int = 10
     # Retry attempts for failed embeddings during ingestion
     rag_embedding_max_retries: int = 2
+    # Per-statement timeout for RAG retrieval queries (milliseconds).
+    # The default db_statement_timeout_ms (15s) is tuned for simple correction
+    # queries. Hybrid retrieval involves multiple JOINs, cosine distance,
+    # tsvector ranking, and a latest-version subquery that grows with the
+    # corpus. This higher limit applies only to retrieval sessions via
+    # SET LOCAL so it cannot affect other query paths.
+    rag_query_timeout_ms: int = 30000
 
     # --- LLM Refiner ---
     llm_enabled: bool = True
@@ -164,6 +171,7 @@ class Settings(BaseSettings):
             "RAG_MODEL_TIMEOUT_S": 45,
             "RAG_EMBEDDING_BATCH_SIZE": 10,
             "RAG_EMBEDDING_MAX_RETRIES": 2,
+            "RAG_QUERY_TIMEOUT_MS": 30000,
             "DB_POOL_SIZE": 5,
             "DB_MAX_OVERFLOW": 5,
             "DB_POOL_RECYCLE_SECONDS": 1800,

@@ -194,6 +194,7 @@ class FulltextRetriever(BaseRetriever):
     filters: RetrievalFilters | None = Field(default=None, exclude=True)
     pool_size: int = Field(default=_CANDIDATE_POOL_SIZE, exclude=True)
     _last_error: str | None = PrivateAttr(default=None)
+    _query_timeout_ms: int = PrivateAttr(default=30000)
 
     class Config:
         arbitrary_types_allowed = True
@@ -250,6 +251,13 @@ class FulltextRetriever(BaseRetriever):
 
         try:
             async with self.session_factory() as session:
+                # Raise statement timeout for retrieval queries — the default
+                # 15s is tuned for correction, not for JOINs + ranking.
+                # SET LOCAL scopes to the current transaction only.
+                timeout_val = int(self._query_timeout_ms)
+                await session.execute(
+                    text(f"SET LOCAL statement_timeout = '{timeout_val}'")
+                )
                 result = await session.execute(text(sql), params)
                 rows = result.fetchall()
 
@@ -300,6 +308,7 @@ class VectorRetriever(BaseRetriever):
     filters: RetrievalFilters | None = Field(default=None, exclude=True)
     pool_size: int = Field(default=_CANDIDATE_POOL_SIZE, exclude=True)
     _last_error: str | None = PrivateAttr(default=None)
+    _query_timeout_ms: int = PrivateAttr(default=30000)
 
     class Config:
         arbitrary_types_allowed = True
@@ -370,6 +379,10 @@ class VectorRetriever(BaseRetriever):
 
         try:
             async with self.session_factory() as session:
+                timeout_val = int(self._query_timeout_ms)
+                await session.execute(
+                    text(f"SET LOCAL statement_timeout = '{timeout_val}'")
+                )
                 result = await session.execute(text(sql), params)
                 rows = result.fetchall()
 
@@ -533,6 +546,7 @@ class HybridRetriever:
         self._embeddings = embeddings
         self._settings = settings
         self.last_status: RetrievalStatus | None = None
+        self._query_timeout_ms = settings.rag_query_timeout_ms if settings else 30000
 
     async def retrieve(
         self,
@@ -573,6 +587,11 @@ class HybridRetriever:
             embeddings=self._embeddings,
             filters=filters,
         )
+
+        # Propagate the RAG-specific query timeout to both arms so their
+        # SET LOCAL statement_timeout uses the higher retrieval limit.
+        fulltext._query_timeout_ms = self._query_timeout_ms
+        vector._query_timeout_ms = self._query_timeout_ms
 
         # Step 2: Fuse via RRF
         rrf = RRFRetriever(fulltext, vector)
