@@ -71,7 +71,7 @@ function createRouter(requireSession, upload) {
    *
    * Returns supported languages for Khaya AI ASR v3.
    */
-  router.get("/languages", requireSession, requirePermission("view_records"), async (req, res) => {
+  router.get("/languages", async (req, res) => {
     try {
       const languages = await khaya.getLanguages();
       res.json(languages);

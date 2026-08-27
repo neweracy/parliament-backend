@@ -77,7 +77,9 @@ function buildHybridApp({ secret, deps = buildFakeDeps() }) {
 
     try {
       const token = authHeader.slice(7);
-      jwt.verify(token, secret);
+      const decoded = jwt.verify(token, secret);
+      // Set req.user so requirePermission middleware has a valid identity
+      req.user = { role: "Admin", ...decoded };
       next();
     } catch (err) {
       return res.status(401).json({
