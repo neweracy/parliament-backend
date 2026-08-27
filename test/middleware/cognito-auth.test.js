@@ -259,9 +259,9 @@ describe('getPermissionsForRole()', () => {
     }
   });
 
-  it('returns Viewer permissions for unknown roles', () => {
+  it('returns empty permissions for unknown roles (fail-closed)', () => {
     const perms = getPermissionsForRole('NonExistentRole');
-    assert.deepEqual(perms, ROLE_PERMISSIONS['Viewer']);
+    assert.deepEqual(perms, []);
   });
 });
 
