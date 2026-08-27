@@ -30,6 +30,7 @@ from app.llm.bedrock import BedrockClient
 from app.middleware import RequestLoggingMiddleware
 from app.obs.metrics import emit_error
 from app.rag.clients import create_chat_model, create_embeddings, probe_credentials
+from app.rag.diagnostics import router as rag_diagnostics_router
 from app.rag.router import router as rag_router
 
 logger = structlog.get_logger("main")
@@ -302,3 +303,4 @@ app.include_router(postprocess_router)
 app.include_router(health_router)
 app.include_router(datasets_router)
 app.include_router(rag_router)
+app.include_router(rag_diagnostics_router)
