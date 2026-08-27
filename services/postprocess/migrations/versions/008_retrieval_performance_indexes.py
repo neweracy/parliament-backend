@@ -31,7 +31,7 @@ def upgrade() -> None:
     # Covering index for the _LATEST_VERSION_JOIN subquery.
     # DESC on version so MAX() reads the first row per group.
     op.execute(
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
+        "CREATE INDEX IF NOT EXISTS "
         "ix_transcript_record_version "
         "ON transcript (record_id, version DESC)"
     )
@@ -40,7 +40,7 @@ def upgrade() -> None:
     # 1. VectorRetriever: WHERE tc.embedding IS NOT NULL (inverse)
     # 2. POST /rag/reindex: WHERE tc.embedding IS NULL
     op.execute(
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
+        "CREATE INDEX IF NOT EXISTS "
         "ix_transcript_chunk_null_embedding "
         "ON transcript_chunk (transcript_id) "
         "WHERE embedding IS NULL"
