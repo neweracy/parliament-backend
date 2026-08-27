@@ -48,6 +48,7 @@ test-results/
 *.tmp
 tmp_*
 f.txt
+out*.txt
 .cache/
 
 # Generated transcripts and local audio samples
