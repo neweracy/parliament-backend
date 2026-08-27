@@ -403,7 +403,7 @@ class TestRecommendationsEndpointDegrades:
             raise RuntimeError("no database in this test")
 
         app.state.session_factory = broken_session_factory
-        app.state.settings = SimpleNamespace()
+        app.state.settings = SimpleNamespace(rag_query_timeout_ms=30000)
         app.state.embeddings = None
         app.state.chat_model = chat_model
 
