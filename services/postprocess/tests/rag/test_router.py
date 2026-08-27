@@ -32,6 +32,8 @@ from app.rag.router import (
     RelatedRecord,
     SearchRecommendationRequest,
     SearchRecommendationResponse,
+    _has_summary_intent,
+    _is_simple_search_question,
 )
 from app.rag.router import router as rag_router
 
@@ -439,3 +441,93 @@ class TestRecommendationsEndpointDegrades:
         for value in (0, MAX_SEARCH_RECOMMENDATION_COUNT + 1):
             response = client.post("/rag/recommendations", json={"query": "x", "limit": value})
             assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Summary-intent routing
+# ---------------------------------------------------------------------------
+
+
+class TestSummaryIntentDetection:
+    """Summary requests must be recognised so they reach the tool-bearing agent.
+
+    GroundedAnsweringChain (the fast path) has no tools; the record
+    summarization tool lives on HansardChatAgent. A summary question that looks
+    like a simple first-turn search would otherwise never see the tool.
+    """
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "Summarize the Morning Session record",
+            'What does "Budget Debate" talk about? Give me a summary of the key '
+            "topics, decisions, and speakers.",
+            "What was discussed in the Startup Verification Sitting?",
+            'What is "Morning Session" about?',
+            "Give me a summary of the proceedings",
+        ],
+    )
+    def test_summary_phrasings_are_detected(self, question: str) -> None:
+        assert _has_summary_intent(question) is True
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            # A topic search, not a request for a record's contents.
+            "What was discussed about the budget?",
+            "What did the Finance Minister say about inflation?",
+            "Hello",
+            # Possessive apostrophes must not read as a quoted record title.
+            "What is the Speaker's ruling about inflation?",
+        ],
+    )
+    def test_topic_searches_are_not_summary_intent(self, question: str) -> None:
+        assert _has_summary_intent(question) is False
+
+    def test_discussed_in_versus_discussed_about(self) -> None:
+        """The preposition is the whole distinction: `in` names a record, `about` a topic."""
+        assert _has_summary_intent("What was discussed in the Morning Session?") is True
+        assert _has_summary_intent("What was discussed about the budget?") is False
+
+    @pytest.mark.parametrize("verb", ["summarize", "summarise"])
+    def test_both_spellings_match(self, verb: str) -> None:
+        assert _has_summary_intent(f"Please {verb} this record") is True
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "SUMMARIZE THE MORNING SESSION RECORD",
+            "Summarise The Morning Session Record",
+            "WHAT WAS DISCUSSED IN THE STARTUP VERIFICATION SITTING?",
+        ],
+    )
+    def test_matching_is_case_insensitive(self, question: str) -> None:
+        assert _has_summary_intent(question) is True
+
+    def test_summary_intent_overrides_the_fast_path(self) -> None:
+        """The frontend button phrasing qualifies as a simple search but must not use it.
+
+        This mirrors the router's routing decision: a question only takes the
+        fast path when it is a simple first-turn search *and* carries no summary
+        intent.
+        """
+        question = (
+            'What does "Morning Session" talk about? Give me a summary of the '
+            "key topics, decisions, and speakers."
+        )
+
+        assert _is_simple_search_question(question, has_history=False) is True
+        assert _has_summary_intent(question) is True
+
+        use_fast_path = _is_simple_search_question(question, has_history=False) and not (
+            _has_summary_intent(question)
+        )
+        assert use_fast_path is False
+
+    def test_plain_topic_search_still_takes_the_fast_path(self) -> None:
+        question = "What did the Finance Minister say about inflation?"
+
+        use_fast_path = _is_simple_search_question(question, has_history=False) and not (
+            _has_summary_intent(question)
+        )
+        assert use_fast_path is True

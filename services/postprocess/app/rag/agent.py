@@ -48,7 +48,7 @@ from app.rag.recommendations import (
     RegistryReference,
     finalise_answer,
 )
-from app.rag.retriever import RetrievalFilters, RetrievedChunk
+from app.rag.retriever import _LATEST_VERSION_JOIN, RetrievalFilters, RetrievedChunk
 
 logger = structlog.get_logger("rag.agent")
 
@@ -74,6 +74,21 @@ _NO_MATCH_TEXT = "No passages in the transcribed parliamentary record match that
 # Items listed per find_recent_activity call, per scope (sittings, records).
 _MAX_RECENT_ITEMS = 15
 
+# Passages handed to the model per summarize_record call. A full sitting can run
+# to hundreds of chunks, and the whole record will not fit in one prompt. The cap
+# buys a single model call: map-reduce over chunk groups would multiply Bedrock
+# round trips in a path already fighting the gateway's abort window, so instead
+# the record is sampled down to this many passages and summarised in one pass.
+_MAX_SUMMARY_CHUNKS = 24
+
+# Candidate records listed back when a title is ambiguous. Enough to disambiguate
+# a repeated title, short enough to stay readable in a reply.
+_MAX_RECORD_CANDIDATES = 10
+
+# Longest digit string still tried as a hansard_record.id. Beyond this a value
+# overflows bigint, so it is treated as a title fragment instead of an id.
+_MAX_ID_DIGITS = 18
+
 _MONTH_NAMES = {name.lower(): index for index, name in enumerate(calendar.month_name) if name}
 _MONTH_ABBR = {name.lower(): index for index, name in enumerate(calendar.month_abbr) if name}
 
@@ -97,16 +112,33 @@ month", "last N days", "YYYY-MM", or a month name with an optional year.
 "all" (default). This tool never needs citation markers — it reports registry
 metadata, not transcript content.
 
+`summarize_record(record)` reads one specific record and returns passages drawn
+from across the whole of it, in ordinal order, each headed by a chunk_id. Pass
+the record's title, or its numeric id if you have one. Use it when the user names
+a record or sitting and wants to know what is in it. A long record comes back as
+an even sample across the record rather than every passage, so write the summary
+as an overview of the whole record and say it is an overview if the user presses
+for exhaustive detail.
+
 ## Deciding whether to search
 
-Search `search_hansard` when the user asks about the substance of proceedings —
-what was said, what was decided, what was debated, who spoke, when something
-happened. Turn their wording into focused search terms rather than passing the
-raw sentence, and resolve pronouns against the conversation before searching.
+Search `search_hansard` when the user asks about the substance of proceedings
+across the corpus — what was said, what was decided, what was debated, who
+spoke, when something happened. Turn their wording into focused search terms
+rather than passing the raw sentence, and resolve pronouns against the
+conversation before searching.
 
 Use `find_recent_activity` when the user asks what is new in the registry
 itself — recent uploads, newly added sittings or records, or what was added in
 a given month — rather than what was discussed.
+
+Use `summarize_record` when the user points at one specific named record and
+asks what it is about, asks for a summary of it, or asks what happened in that
+sitting. A topic search is the wrong tool there: it returns whatever passages
+rank against the title as search terms, not that record's own content. When the
+user asks for a summary of several records, summarise the ones you can and offer
+to continue with the rest. When the tool reports that several records match the
+name, ask the user which one they mean rather than picking one.
 
 Do not call either tool for:
 - greetings, thanks, or small talk
@@ -206,11 +238,7 @@ def _format_passages(chunks: list[RetrievedChunk]) -> str:
         blocks.append("[" + " | ".join(header) + "]\n" + chunk.text)
 
     inner = "\n\n".join(blocks)
-    return (
-        "<retrieved_parliamentary_record>\n"
-        + inner
-        + "\n</retrieved_parliamentary_record>"
-    )
+    return "<retrieved_parliamentary_record>\n" + inner + "\n</retrieved_parliamentary_record>"
 
 
 def _make_search_tool(retriever: Any, filters: RetrievalFilters | None, collector: list):
@@ -325,9 +353,9 @@ def _resolve_period(period: str, *, now: datetime) -> tuple[datetime, datetime, 
     range_match = re.fullmatch(r"(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})", raw)
     if range_match:
         start = datetime.strptime(range_match.group(1), "%Y-%m-%d").replace(tzinfo=UTC)
-        end = datetime.strptime(range_match.group(2), "%Y-%m-%d").replace(
-            tzinfo=UTC
-        ) + timedelta(days=1)
+        end = datetime.strptime(range_match.group(2), "%Y-%m-%d").replace(tzinfo=UTC) + timedelta(
+            days=1
+        )
         return start, end, f"{range_match.group(1)} to {range_match.group(2)}"
 
     month_word_match = re.fullmatch(r"([a-z]+)\.?\s*(\d{4})?", raw)
@@ -438,10 +466,7 @@ def _make_recent_activity_tool(
         uploads_only = scope_key == "uploads"
 
         if not want_sittings and not want_records:
-            return (
-                f"Unknown scope '{scope}'. Use 'sittings', 'records', 'uploads', "
-                "or 'all'."
-            )
+            return f"Unknown scope '{scope}'. Use 'sittings', 'records', 'uploads', or 'all'."
 
         try:
             async with session_factory() as session:
@@ -505,16 +530,293 @@ def _make_recent_activity_tool(
                 )
 
             if kind == "sitting":
-                lines.append(f"- Sitting #{item_id} \"{title}\" — created {when}")
+                lines.append(f'- Sitting #{item_id} "{title}" — created {when}')
             else:
                 upload_note = f", audio: {audio_file_name}" if audio_file_name else ""
                 lines.append(
-                    f"- Record #{item_id} \"{title}\" (sitting: {sitting_title}) — "
+                    f'- Record #{item_id} "{title}" (sitting: {sitting_title}) — '
                     f"created {when}{upload_note}"
                 )
         return "\n".join(lines)
 
     return find_recent_activity
+
+
+def _escape_like(value: str) -> str:
+    """Neutralise LIKE wildcards so a user-supplied title matches literally.
+
+    Without this, a title containing `%` or `_` would be read as a pattern and
+    match records the user never named. The value stays a bound parameter either
+    way — this only controls what the pattern means, not how it reaches SQL.
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+# Resolves whatever the model passed — a title fragment or a numeric id — to
+# candidate records. Both arms are bound parameters. `hr.id = CAST(:record_id AS
+# bigint)` is NULL-safe: when the input was not numeric the parameter is NULL and
+# the comparison yields NULL, so only the title arm can match.
+_RESOLVE_RECORD_SQL = """
+    SELECT
+        hr.id,
+        hr.title,
+        s.title AS sitting_title,
+        hr.date::text AS record_date,
+        s.id AS sitting_id
+    FROM hansard_record hr
+    JOIN sitting s ON s.id = hr.sitting_id
+    WHERE hr.title ILIKE :title_pattern ESCAPE '\\'
+       OR hr.id = CAST(:record_id AS bigint)
+    ORDER BY hr.date DESC, hr.id DESC
+    LIMIT :limit
+"""
+
+# Every chunk of the record's current transcript, in reading order. The
+# latest-version join matters more here than in search: a record that has been
+# re-edited still holds indexed chunks for its superseded versions, and
+# summarising those would describe text the editor already replaced.
+_RECORD_CHUNKS_SQL = f"""
+    SELECT
+        tc.id AS chunk_id,
+        tc.ordinal,
+        tc.text,
+        tc.speaker,
+        tc.start_s,
+        tc.end_s,
+        tc.entity_names,
+        tc.transcript_id
+    FROM transcript_chunk tc
+    JOIN transcript t ON t.id = tc.transcript_id
+    {_LATEST_VERSION_JOIN}
+    WHERE t.record_id = :record_id
+    ORDER BY tc.ordinal ASC
+"""
+
+
+def _sample_evenly(items: list, cap: int) -> list:
+    """Pick at most `cap` items spread evenly across `items`, order preserved.
+
+    Used to fit a long record into one prompt. Truncating to the first `cap`
+    chunks would summarise only the opening; sampling across the whole sequence
+    keeps the shape of the sitting — what it opened on, what it worked through,
+    how it closed.
+
+    The indices are spaced across the closed interval `[0, len - 1]`, so the
+    first and last items are included by construction rather than being bolted
+    on afterwards. Both carry weight: the opening frames the sitting and the
+    close often holds the resolution or the adjournment.
+
+    Args:
+        items: Sequence already in the order the output should keep.
+        cap: Maximum number of items to return.
+
+    Returns:
+        `items` unchanged when it already fits, otherwise exactly `cap` items in
+        their original relative order, starting with the first and ending with
+        the last.
+    """
+    total = len(items)
+    if total <= cap:
+        return list(items)
+    if cap <= 1:
+        return [items[0]]
+
+    step = (total - 1) / (cap - 1)
+    # `step > 1` because total > cap, so the rounded indices stay strictly
+    # increasing and the set keeps all `cap` of them. Sorting is what guarantees
+    # the output order matches the input order.
+    picked = sorted({round(i * step) for i in range(cap)})
+    return [items[index] for index in picked]
+
+
+def _make_summarize_record_tool(
+    session_factory: Any,
+    retriever: Any,
+    collector: list[RetrievedChunk],
+):
+    """Build a `summarize_record` tool bound to one request's DB session and collector.
+
+    `search_hansard` answers "what does the record say about X" and
+    `find_recent_activity` answers "what is in the registry", but neither can
+    hand the model the contents of a record the user named — so "summarise this
+    record" had no tool to serve it and was correctly refused. This tool closes
+    that gap by fetching the record's own chunks instead of ranking against a
+    query.
+
+    Selected chunks are appended to `collector` in first-seen order and
+    de-duplicated by chunk_id, exactly as `_make_search_tool` does, because
+    citations, `source_chunks`, and the recommendation inputs all read from that
+    list — the summary path has to feed it or the summary arrives uncitable.
+
+    `retriever` is accepted so every tool factory takes the same shape at the
+    call site; this tool does not rank, so it does not use it.
+    """
+    seen_ids: set[int] = set()
+
+    @tool
+    async def summarize_record(record: str) -> str:
+        """Fetch the contents of one specific named record so you can summarise it.
+
+        Use when the user names a record or sitting and asks what it is about,
+        asks for a summary of it, or asks what happened in it. Prefer this over
+        `search_hansard` for a named record: search ranks the whole corpus
+        against your query, while this returns that record's own passages in
+        order.
+
+        A short record is returned in full. A long one is returned as an even
+        sample across it — first passage, last passage, and evenly spaced
+        passages between — so treat the result as whole-record coverage rather
+        than a complete transcript.
+
+        Args:
+            record: The record's title as the user or `find_recent_activity`
+                gave it (matched case-insensitively, partial titles allowed), or
+                its numeric id.
+
+        Returns:
+            The record's passages, each headed by the chunk_id to cite it with;
+            or a list of candidates when the title is ambiguous; or a note that
+            no record matches.
+        """
+        raw = (record or "").strip()
+        if not raw:
+            return "Tell me which record to summarise — its title, or its numeric id."
+
+        numeric_id = int(raw) if raw.isdigit() and len(raw) <= _MAX_ID_DIGITS else None
+
+        try:
+            async with session_factory() as session:
+                resolved = await session.execute(
+                    text(_RESOLVE_RECORD_SQL),
+                    {
+                        "title_pattern": f"%{_escape_like(raw)}%",
+                        "record_id": numeric_id,
+                        "limit": _MAX_RECORD_CANDIDATES,
+                    },
+                )
+                candidates = resolved.fetchall()
+        except Exception:
+            logger.error(
+                "rag.agent.summarize_record_resolve_failed",
+                record_preview=raw[:80],
+                exc_info=True,
+            )
+            return "Could not look up that record right now."
+
+        if not candidates:
+            logger.info("rag.agent.summarize_record_no_match", record_preview=raw[:80])
+            return (
+                f'No record in the registry is named "{raw}". Ask the user to check the '
+                "record name, or look up which records were added recently to see the "
+                "exact titles."
+            )
+
+        # An exact title beats the fragments it is contained in. This narrows on
+        # evidence rather than guessing — a genuine ambiguity still comes back as
+        # a list for the user to settle.
+        exact = [row for row in candidates if (row[1] or "").strip().lower() == raw.lower()]
+        if len(exact) == 1:
+            candidates = exact
+
+        if len(candidates) > 1:
+            logger.info(
+                "rag.agent.summarize_record_ambiguous",
+                record_preview=raw[:80],
+                candidates=len(candidates),
+            )
+            lines = [f'Several records match "{raw}". Ask the user which one they mean:']
+            for cand_id, cand_title, cand_sitting, cand_date, _cand_sitting_id in candidates:
+                lines.append(
+                    f'- Record #{cand_id} "{cand_title}" (sitting: {cand_sitting}, '
+                    f"date: {cand_date})"
+                )
+            return "\n".join(lines)
+
+        record_id, record_title, sitting_title, record_date, sitting_id = candidates[0]
+
+        try:
+            async with session_factory() as session:
+                chunk_result = await session.execute(
+                    text(_RECORD_CHUNKS_SQL), {"record_id": record_id}
+                )
+                rows = chunk_result.fetchall()
+        except Exception:
+            logger.error(
+                "rag.agent.summarize_record_fetch_failed",
+                record_id=record_id,
+                exc_info=True,
+            )
+            return "Could not read that record's transcript right now."
+
+        if not rows:
+            logger.info("rag.agent.summarize_record_empty", record_id=record_id)
+            return (
+                f'Record #{record_id} "{record_title}" has no indexed transcript yet, '
+                "so there is nothing to summarise."
+            )
+
+        selected = _sample_evenly(rows, _MAX_SUMMARY_CHUNKS)
+
+        chunks: list[RetrievedChunk] = []
+        for (
+            chunk_id,
+            _ordinal,
+            chunk_text,
+            speaker,
+            start_s,
+            end_s,
+            entities,
+            transcript_id,
+        ) in selected:
+            chunks.append(
+                RetrievedChunk(
+                    chunk_id=chunk_id,
+                    text=chunk_text,
+                    # Nothing was ranked here — the chunks were selected by
+                    # position in the record, so relevance carries no meaning.
+                    relevance_score=1.0,
+                    transcript_id=transcript_id,
+                    speaker=speaker,
+                    start_s=start_s,
+                    end_s=end_s,
+                    matched_entities=list(entities or []),
+                    record_title=record_title,
+                    sitting_title=sitting_title,
+                    date=record_date,
+                    sitting_id=sitting_id,
+                    record_id=record_id,
+                )
+            )
+
+        for chunk in chunks:
+            if chunk.chunk_id not in seen_ids:
+                seen_ids.add(chunk.chunk_id)
+                collector.append(chunk)
+
+        logger.info(
+            "rag.agent.summarize_record",
+            record_preview=raw[:80],
+            record_id=record_id,
+            total_chunks=len(rows),
+            selected_chunks=len(chunks),
+            collected_total=len(collector),
+        )
+
+        if len(chunks) == len(rows):
+            coverage = f"all {len(rows)} passage(s), in order"
+        else:
+            coverage = (
+                f"{len(chunks)} of {len(rows)} passages, sampled evenly across the "
+                "whole record in order, first and last included"
+            )
+
+        header = (
+            f'Record #{record_id} "{record_title}" (sitting: {sitting_title}, '
+            f"date: {record_date}) — {coverage}."
+        )
+        return header + "\n" + _format_passages(chunks)
+
+    return summarize_record
 
 
 class HansardChatAgent:
@@ -596,6 +898,12 @@ class HansardChatAgent:
         tools = [_make_search_tool(self._retriever, filters, retrieved)]
         if self._session_factory is not None:
             tools.append(_make_recent_activity_tool(self._session_factory, registry_refs))
+            # Shares the `retrieved` collector with search_hansard: both hand the
+            # model real transcript chunks, so both feed the same citation and
+            # source_chunks channel.
+            tools.append(
+                _make_summarize_record_tool(self._session_factory, self._retriever, retrieved)
+            )
 
         agent = create_agent(
             model=self._chat_model,
@@ -620,9 +928,7 @@ class HansardChatAgent:
             # calls + model invocations). The gateway aborts at 30s, so this
             # must finish well inside that window to return a structured error
             # rather than a TCP reset.
-            timeout_s = (
-                self._settings.rag_agent_timeout_s if self._settings else 50
-            )
+            timeout_s = self._settings.rag_agent_timeout_s if self._settings else 50
             result = await asyncio.wait_for(
                 agent.ainvoke(
                     {"messages": messages},

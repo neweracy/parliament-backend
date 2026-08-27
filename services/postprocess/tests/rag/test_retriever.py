@@ -85,6 +85,63 @@ class TestBuildFilterClauses:
         assert params == {}
 
 
+class TestScopeFilters:
+    """Tests for the record_id / sitting_id scope filters.
+
+    These two identifier spaces are distinct from `transcript_id`: a record has
+    many transcript versions and a sitting has many records. `transcript_chunk`
+    has no record or sitting column, so both predicates must go through the
+    `hansard_record hr` / `sitting s` joins that both retriever arms already
+    have in scope.
+    """
+
+    def test_default_filters_yield_no_clauses(self):
+        """RetrievalFilters() with no arguments stays a no-op (backward compatible)."""
+        filters = RetrievalFilters()
+        clauses, params = _build_filter_clauses(filters)
+        assert clauses == []
+        assert params == {}
+        assert filters.record_id is None
+        assert filters.sitting_id is None
+
+    def test_record_id_filter(self):
+        """record_id produces a clause against the joined record row."""
+        filters = RetrievalFilters(record_id=5)
+        clauses, params = _build_filter_clauses(filters)
+        assert clauses == ["hr.id = :record_id"]
+        assert params == {"record_id": 5}
+
+    def test_sitting_id_filter(self):
+        """sitting_id produces a clause against the joined sitting row."""
+        filters = RetrievalFilters(sitting_id=3)
+        clauses, params = _build_filter_clauses(filters)
+        assert clauses == ["s.id = :sitting_id"]
+        assert params == {"sitting_id": 3}
+
+    def test_record_and_sitting_together(self):
+        """Both scope filters together produce both clauses and both params."""
+        filters = RetrievalFilters(record_id=5, sitting_id=3)
+        clauses, params = _build_filter_clauses(filters)
+        assert clauses == ["hr.id = :record_id", "s.id = :sitting_id"]
+        assert params == {"record_id": 5, "sitting_id": 3}
+
+    def test_record_id_combines_with_speaker(self):
+        """record_id composes with an existing filter rather than replacing it."""
+        filters = RetrievalFilters(record_id=5, speaker="Hon. Doe")
+        clauses, params = _build_filter_clauses(filters)
+        assert len(clauses) == 2
+        assert "tc.speaker = :speaker" in clauses
+        assert "hr.id = :record_id" in clauses
+        assert params == {"speaker": "Hon. Doe", "record_id": 5}
+
+    def test_scope_filters_are_bound_not_interpolated(self):
+        """Clauses reference named bind parameters, never inlined values."""
+        clauses, _ = _build_filter_clauses(RetrievalFilters(record_id=5, sitting_id=3))
+        for clause in clauses:
+            assert "5" not in clause
+            assert "3" not in clause
+
+
 class TestRRFRetriever:
     """Tests for RRFRetriever — Reciprocal Rank Fusion logic."""
 

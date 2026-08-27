@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from langchain_core.messages import AIMessage
 
 from app.rag.agent import (
+    _MAX_SUMMARY_CHUNKS,
     GENERATION_FAILURE_TEXT,
     HansardChatAgent,
     _format_passages,
     _make_search_tool,
+    _make_summarize_record_tool,
+    _sample_evenly,
 )
 from app.rag.parsing import message_text
 from app.rag.retriever import RetrievedChunk
@@ -469,3 +475,378 @@ class TestChat:
             )
             error_response = await agent3.chat("Hello!")
         assert len(error_response.recommendations) == 3
+
+
+# ---------------------------------------------------------------------------
+# _sample_evenly — the chunk budget for summarize_record
+# ---------------------------------------------------------------------------
+
+
+class TestSampleEvenly:
+    def test_returns_everything_when_it_already_fits(self):
+        items = list(range(5))
+        assert _sample_evenly(items, 24) == items
+
+    def test_returns_everything_at_exactly_the_cap(self):
+        items = list(range(24))
+        assert _sample_evenly(items, 24) == items
+
+    def test_caps_and_keeps_first_and_last(self):
+        items = list(range(500))
+        picked = _sample_evenly(items, 24)
+
+        assert len(picked) == 24
+        assert picked[0] == 0
+        assert picked[-1] == 499
+
+    def test_spacing_is_even_rather_than_front_loaded(self):
+        """Truncation would return 0..23; sampling must span the whole sequence."""
+        picked = _sample_evenly(list(range(240)), 24)
+
+        gaps = [b - a for a, b in pairwise(picked)]
+        # Perfect spacing here is 239/23 ≈ 10.4, so gaps land on 10 or 11.
+        assert set(gaps) <= {10, 11}
+
+    @given(
+        total=st.integers(min_value=1, max_value=2000),
+        cap=st.integers(min_value=2, max_value=64),
+    )
+    def test_size_order_and_endpoints_hold_for_any_record_length(self, total, cap):
+        """Invariants the summary path depends on, across record lengths.
+
+        Whatever the record's length, the sample must fit the prompt budget, read
+        in order, and still open and close with the real opening and closing
+        passages.
+        """
+        items = list(range(total))
+        picked = _sample_evenly(items, cap)
+
+        assert len(picked) == min(total, cap)
+        assert picked == sorted(picked)
+        assert picked[0] == items[0]
+        assert picked[-1] == items[-1]
+        assert set(picked) <= set(items)
+
+
+# ---------------------------------------------------------------------------
+# summarize_record tool
+# ---------------------------------------------------------------------------
+
+
+def _record_row(
+    record_id: int = 5,
+    title: str = "Morning Session",
+    sitting_title: str = "3rd Sitting",
+    date: str = "2024-01-15",
+    sitting_id: int = 1,
+) -> tuple:
+    """A row in the shape _RESOLVE_RECORD_SQL selects."""
+    return (record_id, title, sitting_title, date, sitting_id)
+
+
+def _chunk_row(ordinal: int, chunk_id: int | None = None) -> tuple:
+    """A row in the shape _RECORD_CHUNKS_SQL selects."""
+    return (
+        ordinal if chunk_id is None else chunk_id,
+        ordinal,
+        f"Passage at ordinal {ordinal}.",
+        "Hon. Doe",
+        float(ordinal),
+        float(ordinal) + 1.0,
+        [],
+        900,
+    )
+
+
+def _sequenced_session_factory(*result_sets: list):
+    """Session factory whose successive execute() calls return the queued row lists.
+
+    Same AsyncMock session pattern the find_recent_activity tests use, extended
+    because summarize_record issues two queries per call — resolve the record,
+    then fetch its chunks — so the results have to be queued in order.
+
+    Returns the factory plus the session, so tests can assert on the SQL params
+    that were bound and on how many queries actually ran.
+    """
+    session = AsyncMock()
+    session.execute = AsyncMock(
+        side_effect=[MagicMock(fetchall=lambda rows=rows: rows) for rows in result_sets]
+    )
+    context_manager = AsyncMock()
+    context_manager.__aenter__ = AsyncMock(return_value=session)
+    context_manager.__aexit__ = AsyncMock(return_value=None)
+    return MagicMock(return_value=context_manager), session
+
+
+class TestSummarizeRecordTool:
+    @pytest.mark.asyncio
+    async def test_single_title_match_returns_that_records_chunks(self):
+        factory, session = _sequenced_session_factory(
+            [_record_row()],
+            [_chunk_row(1), _chunk_row(2), _chunk_row(3)],
+        )
+        collector: list[RetrievedChunk] = []
+
+        tool = _make_summarize_record_tool(factory, None, collector)
+        result = await tool.ainvoke({"record": "morning session"})
+
+        assert [c.chunk_id for c in collector] == [1, 2, 3]
+        assert "Morning Session" in result
+        assert "chunk_id: 1" in result
+        # Title match is case-insensitive and bound, not interpolated.
+        resolve_params = session.execute.await_args_list[0].args[1]
+        assert resolve_params["title_pattern"] == "%morning session%"
+        # Chunks are fetched for the resolved record id, not the raw input.
+        assert session.execute.await_args_list[1].args[1] == {"record_id": 5}
+
+    @pytest.mark.asyncio
+    async def test_multiple_matches_ask_for_disambiguation_without_fetching_chunks(self):
+        factory, session = _sequenced_session_factory(
+            [
+                _record_row(record_id=5, title="Morning Session (Part 1)"),
+                _record_row(record_id=9, title="Morning Session (Part 2)", sitting_title="4th"),
+            ],
+        )
+        collector: list[RetrievedChunk] = []
+
+        tool = _make_summarize_record_tool(factory, None, collector)
+        result = await tool.ainvoke({"record": "morning session"})
+
+        assert "Several records match" in result
+        assert "Morning Session (Part 1)" in result
+        assert "Morning Session (Part 2)" in result
+        assert "#5" in result and "#9" in result
+        assert "4th" in result
+        # Nothing was guessed at, so no chunks were read and nothing was collected.
+        assert session.execute.await_count == 1
+        assert collector == []
+
+    @pytest.mark.asyncio
+    async def test_exact_title_wins_over_the_fragments_containing_it(self):
+        factory, _session = _sequenced_session_factory(
+            [
+                _record_row(record_id=5, title="Morning Session"),
+                _record_row(record_id=9, title="Morning Session (Continued)"),
+            ],
+            [_chunk_row(1)],
+        )
+        collector: list[RetrievedChunk] = []
+
+        tool = _make_summarize_record_tool(factory, None, collector)
+        result = await tool.ainvoke({"record": "Morning Session"})
+
+        assert "Several records match" not in result
+        assert len(collector) == 1
+        assert collector[0].record_id == 5
+
+    @pytest.mark.asyncio
+    async def test_no_match_reports_not_found(self):
+        factory, session = _sequenced_session_factory([])
+        collector: list[RetrievedChunk] = []
+
+        tool = _make_summarize_record_tool(factory, None, collector)
+        result = await tool.ainvoke({"record": "Nonexistent Sitting"})
+
+        assert "No record in the registry is named" in result
+        assert "check the" in result
+        assert session.execute.await_count == 1
+        assert collector == []
+
+    @pytest.mark.asyncio
+    async def test_numeric_input_resolves_by_id(self):
+        factory, session = _sequenced_session_factory(
+            [_record_row(record_id=12, title="Afternoon Session")],
+            [_chunk_row(1)],
+        )
+        collector: list[RetrievedChunk] = []
+
+        tool = _make_summarize_record_tool(factory, None, collector)
+        result = await tool.ainvoke({"record": "12"})
+
+        resolve_params = session.execute.await_args_list[0].args[1]
+        assert resolve_params["record_id"] == 12
+        assert "Afternoon Session" in result
+        assert len(collector) == 1
+
+    @pytest.mark.asyncio
+    async def test_non_numeric_input_binds_a_null_id(self):
+        """The id arm must be inert for a title, not fall over on the cast."""
+        factory, session = _sequenced_session_factory(
+            [_record_row()],
+            [_chunk_row(1)],
+        )
+        tool = _make_summarize_record_tool(factory, None, [])
+        await tool.ainvoke({"record": "Morning Session"})
+
+        assert session.execute.await_args_list[0].args[1]["record_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_short_record_returns_every_chunk(self):
+        chunk_rows = [_chunk_row(i) for i in range(1, 10)]
+        factory, _session = _sequenced_session_factory([_record_row()], chunk_rows)
+        collector: list[RetrievedChunk] = []
+
+        tool = _make_summarize_record_tool(factory, None, collector)
+        result = await tool.ainvoke({"record": "Morning Session"})
+
+        assert [c.chunk_id for c in collector] == list(range(1, 10))
+        for ordinal in range(1, 10):
+            assert f"chunk_id: {ordinal}" in result
+
+    @pytest.mark.asyncio
+    async def test_long_record_capped_at_budget_with_first_and_last_in_order(self):
+        chunk_rows = [_chunk_row(i) for i in range(1, 401)]
+        factory, _session = _sequenced_session_factory([_record_row()], chunk_rows)
+        collector: list[RetrievedChunk] = []
+
+        tool = _make_summarize_record_tool(factory, None, collector)
+        result = await tool.ainvoke({"record": "Morning Session"})
+
+        ids = [c.chunk_id for c in collector]
+        assert len(ids) == _MAX_SUMMARY_CHUNKS == 24
+        assert ids[0] == 1, "the opening passage frames the sitting"
+        assert ids[-1] == 400, "the close often carries the resolution or adjournment"
+        assert ids == sorted(ids), "chronology must survive the sampling"
+        # Whole-record coverage, not the first 24 chunks.
+        assert max(ids) - min(ids) == 399
+        assert "24 of 400 passages" in result
+
+    @pytest.mark.asyncio
+    async def test_collector_dedupes_by_chunk_id_across_calls(self):
+        chunk_rows = [_chunk_row(1), _chunk_row(2)]
+        factory, _session = _sequenced_session_factory(
+            [_record_row()],
+            chunk_rows,
+            [_record_row()],
+            chunk_rows,
+        )
+        collector: list[RetrievedChunk] = []
+
+        tool = _make_summarize_record_tool(factory, None, collector)
+        await tool.ainvoke({"record": "Morning Session"})
+        await tool.ainvoke({"record": "Morning Session"})
+
+        assert [c.chunk_id for c in collector] == [1, 2]
+
+    @pytest.mark.asyncio
+    async def test_passages_are_rendered_inside_the_boundary_markers(self):
+        """The summary path must reuse _format_passages, not a second renderer.
+
+        The boundary markers pair with the system prompt's content-boundary rule,
+        so record text fetched for a summary has to arrive marked as data in the
+        same way search results do.
+        """
+        factory, _session = _sequenced_session_factory(
+            [_record_row()],
+            [_chunk_row(1), _chunk_row(2)],
+        )
+        tool = _make_summarize_record_tool(factory, None, [])
+        result = await tool.ainvoke({"record": "Morning Session"})
+
+        assert result.count("<retrieved_parliamentary_record>") == 1
+        assert result.count("</retrieved_parliamentary_record>") == 1
+        assert result.endswith("\n</retrieved_parliamentary_record>")
+        # The header sits outside the markers; every passage sits inside them.
+        header, _, body = result.partition("<retrieved_parliamentary_record>")
+        assert "Record #5" in header
+        assert "chunk_id: 1" in body
+        assert "chunk_id: 2" in body
+        # Metadata resolved once is carried onto every chunk, so citations render
+        # with a record and sitting rather than bare ids.
+        assert "record: Morning Session" in body
+        assert "sitting: 3rd Sitting" in body
+
+    @pytest.mark.asyncio
+    async def test_record_with_no_indexed_chunks_says_so(self):
+        factory, _session = _sequenced_session_factory([_record_row()], [])
+        collector: list[RetrievedChunk] = []
+
+        tool = _make_summarize_record_tool(factory, None, collector)
+        result = await tool.ainvoke({"record": "Morning Session"})
+
+        assert "no indexed transcript" in result
+        assert collector == []
+
+    @pytest.mark.asyncio
+    async def test_db_failure_returns_a_message_rather_than_raising(self):
+        session = AsyncMock()
+        session.execute = AsyncMock(side_effect=Exception("connection reset"))
+        context_manager = AsyncMock()
+        context_manager.__aenter__ = AsyncMock(return_value=session)
+        context_manager.__aexit__ = AsyncMock(return_value=None)
+        factory = MagicMock(return_value=context_manager)
+
+        tool = _make_summarize_record_tool(factory, None, [])
+        result = await tool.ainvoke({"record": "Morning Session"})
+
+        assert "Could not look up that record" in result
+
+
+class TestSummarizeRecordWiring:
+    @pytest.mark.asyncio
+    async def test_registered_alongside_recent_activity_when_session_factory_present(
+        self, mock_settings
+    ):
+        """summarize_record is gated on session_factory, same as find_recent_activity."""
+        raw = "Ok.\n\nRECOMMENDATIONS:\n- Q1 | R1\n- Q2 | R2\n- Q3 | R3"
+        captured_tools: dict = {}
+
+        def fake_create_agent(*args, **kwargs):
+            captured_tools["tools"] = kwargs["tools"]
+            fake_agent = MagicMock()
+            fake_agent.ainvoke = AsyncMock(return_value={"messages": [AIMessage(content=raw)]})
+            return fake_agent
+
+        factory, _session = _sequenced_session_factory([])
+        with patch("app.rag.agent.create_agent", side_effect=fake_create_agent):
+            agent = HansardChatAgent(
+                chat_model=AsyncMock(),
+                retriever=FakeRetriever([]),
+                settings=mock_settings,
+                session_factory=factory,
+            )
+            await agent.chat("Hello!")
+
+        names = [t.name for t in captured_tools["tools"]]
+        assert names == ["search_hansard", "find_recent_activity", "summarize_record"]
+
+    @pytest.mark.asyncio
+    async def test_summary_chunks_reach_citations_and_source_chunks(self, mock_settings):
+        """A summary is grounded: its chunks are real, so they must be citable.
+
+        summarize_record shares search_hansard's collector, which is what makes
+        the summary path produce citations and source_chunks at all.
+        """
+        raw = (
+            "The sitting opened on the budget [1] and closed on the adjournment [2].\n\n"
+            "RECOMMENDATIONS:\n- Q1 | R1\n- Q2 | R2\n- Q3 | R3"
+        )
+        factory, _session = _sequenced_session_factory(
+            [_record_row()],
+            [_chunk_row(1), _chunk_row(2)],
+        )
+        captured_tools: dict = {}
+
+        def fake_create_agent(*args, **kwargs):
+            captured_tools["tools"] = kwargs["tools"]
+            fake_agent = MagicMock()
+
+            async def fake_ainvoke(*a, **kw):
+                # Simulate the model calling summarize_record (tools[2]).
+                await captured_tools["tools"][2].ainvoke({"record": "Morning Session"})
+                return {"messages": [AIMessage(content=raw)]}
+
+            fake_agent.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+            return fake_agent
+
+        with patch("app.rag.agent.create_agent", side_effect=fake_create_agent):
+            agent = HansardChatAgent(
+                chat_model=AsyncMock(),
+                retriever=FakeRetriever([]),
+                settings=mock_settings,
+                session_factory=factory,
+            )
+            response = await agent.chat("Give me a summary of the Morning Session record.")
+
+        assert {c.chunk_id for c in response.citations} == {1, 2}
+        assert len(response.source_chunks) == 2

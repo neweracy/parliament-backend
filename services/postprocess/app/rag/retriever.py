@@ -55,12 +55,21 @@ class RetrievalFilters:
         date_to: If provided, only chunks from transcripts associated
             with sittings on or before this date.
         speaker: If provided, only chunks attributed to this speaker.
+        record_id: If provided, only chunks belonging to this hansard record.
+            This is the record identifier space (`hansard_record.id`), which is
+            distinct from `transcript_id` — a record may have many transcript
+            versions.
+        sitting_id: If provided, only chunks belonging to this sitting.
+            This is the sitting identifier space (`sitting.id`), which is
+            distinct from `transcript_id` — a sitting contains many records.
     """
 
     entity_names: list[str] | None = None
     date_from: date | None = None
     date_to: date | None = None
     speaker: str | None = None
+    record_id: int | None = None
+    sitting_id: int | None = None
 
 
 @dataclass
@@ -124,6 +133,17 @@ def _build_filter_clauses(
     if filters.speaker:
         clauses.append("tc.speaker = :speaker")
         params["speaker"] = filters.speaker
+
+    # `transcript_chunk` carries neither a record nor a sitting column, so these
+    # two scope filters go through the joined parent rows both retriever arms
+    # already have in scope (`hansard_record hr`, `sitting s`).
+    if filters.record_id is not None:
+        clauses.append("hr.id = :record_id")
+        params["record_id"] = filters.record_id
+
+    if filters.sitting_id is not None:
+        clauses.append("s.id = :sitting_id")
+        params["sitting_id"] = filters.sitting_id
 
     return clauses, params
 

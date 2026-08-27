@@ -74,6 +74,70 @@ def _is_simple_search_question(question: str, has_history: bool) -> bool:
 
     return True
 
+
+# Substring signals for a summary request — any one of these appearing anywhere
+# in the question is enough. "what was discussed in" is here because it names a
+# container (a sitting or record) rather than a topic.
+_SUMMARY_INTENT_PATTERNS = (
+    "summarize",
+    "summarise",
+    "summary of",
+    "give me a summary",
+    "what was discussed in",
+)
+
+# Signals that only count when both halves are present: the opener alone is too
+# broad, the follower alone appears in ordinary topic searches.
+_SUMMARY_INTENT_PAIRS = (("what does", "talk about"),)
+
+# Openers that read as a summary request only when the subject is quoted.
+_QUOTED_SUBJECT_OPENERS = ("what is", "what's")
+
+# Only double quotes mark a quoted record title. Straight apostrophes are
+# excluded on purpose so possessives ("the Speaker's ruling about X") don't match.
+_SUBJECT_QUOTE_CHARS = ('"', "\u201c", "\u201d")
+
+
+def _has_summary_intent(question: str) -> bool:
+    """Heuristic: is this question asking for the contents of a specific record?
+
+    Returns True when the question asks what a named record or sitting covers.
+    Such questions must reach HansardChatAgent, because the record-summarising
+    tool lives on the agent — GroundedAnsweringChain has no tools. Without this
+    check a phrasing like 'What does "Morning Session" talk about?' looks like a
+    simple first-turn search and takes the toolless fast path, making the
+    summarization feature unreachable.
+
+    Signals are matched anywhere in the question, not just the prefix — the
+    frontend's "Summarize this record" button puts the verb mid-sentence.
+
+    Criteria (case-insensitive):
+    - summarize / summarise / summary of / give me a summary
+    - "what was discussed in" — names a container, so the answer comes from the
+      record itself. Contrast "what was discussed about the budget?", a topic
+      search that stays on the fast path: the preposition is the whole
+      distinction, `in` names a record, `about` names a subject.
+    - "what does" together with "talk about"
+    - "what is" / "what's" together with "about" and a double-quoted subject
+    """
+    lower = question.lower().strip()
+
+    for pattern in _SUMMARY_INTENT_PATTERNS:
+        if pattern in lower:
+            return True
+
+    for opener, follower in _SUMMARY_INTENT_PAIRS:
+        if opener in lower and follower in lower:
+            return True
+
+    if "about" in lower and any(char in question for char in _SUBJECT_QUOTE_CHARS):
+        for opener in _QUOTED_SUBJECT_OPENERS:
+            if opener in lower:
+                return True
+
+    return False
+
+
 router = APIRouter(prefix="/rag", dependencies=[Depends(verify_service_token)])
 
 
@@ -428,6 +492,12 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
     and the full conversational HansardChatAgent for multi-turn conversations
     or greeting/capability questions. The fast path saves one full model
     round-trip by skipping the "decide whether to search" step.
+
+    Summary-intent questions ("summarize this record", 'what does "Morning
+    Session" talk about?') always take the agent path even though they look like
+    simple first-turn searches. The record-summarising tool lives on the agent —
+    GroundedAnsweringChain has no tools — so routing them to the fast path would
+    make the feature unreachable. Do not "optimize" them back onto it.
     """
     session_factory = request.app.state.session_factory
     settings = request.app.state.settings
@@ -469,7 +539,13 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
 
     # Fast path: simple first-turn factual questions skip the agent loop.
     # This eliminates one full model round-trip (~3-5s savings).
-    if _is_simple_search_question(body.question, has_history):
+    # Summary requests are pulled back onto the agent path regardless — the
+    # summarization tool only exists there.
+    # Decided once so the branch, both path logs, and the metrics log agree.
+    summary_intent = _has_summary_intent(body.question)
+    use_fast_path = _is_simple_search_question(body.question, has_history) and not summary_intent
+
+    if use_fast_path:
         logger.info(
             "rag.ask.fast_path",
             question_preview=body.question[:80],
@@ -490,6 +566,7 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
             "rag.ask.agent_path",
             question_preview=body.question[:80],
             has_history=has_history,
+            summary_intent=summary_intent,
         )
         agent = HansardChatAgent(
             chat_model, retriever, settings, session_factory=session_factory
@@ -505,7 +582,7 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
     logger.info(
         "rag.ask.metrics",
         question_preview=body.question[:80],
-        path="fast" if _is_simple_search_question(body.question, has_history) else "agent",
+        path="fast" if use_fast_path else "agent",
         chunk_count=len(answer_response.source_chunks),
         citation_count=len(answer_response.citations),
         recommendation_count=len(answer_response.recommendations),
