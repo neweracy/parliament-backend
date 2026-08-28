@@ -84,6 +84,9 @@ module.exports = function recordsRoutes(requireSession, db) {
         endTime,
         description,
         visibility,
+        assigneeName,
+        assigneeAvatar,
+        assigneeRole,
       } = req.body;
 
       // Validate required fields
@@ -113,8 +116,12 @@ module.exports = function recordsRoutes(requireSession, db) {
         });
       }
 
+      const effectiveAssigneeName = assigneeName || req.user?.name || null;
+      const effectiveAssigneeRole = assigneeRole || req.user?.role || null;
+      const effectiveAssigneeAvatar = assigneeAvatar || null;
+
       const result = await db.query(
-        "INSERT INTO hansard_record (sitting_id, title, date, language, start_time, end_time, description, visibility) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
+        "INSERT INTO hansard_record (sitting_id, title, date, language, start_time, end_time, description, visibility, assignee_name, assignee_avatar, assignee_role) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *",
         [
           sittingId,
           title,
@@ -124,6 +131,9 @@ module.exports = function recordsRoutes(requireSession, db) {
           endTime || null,
           description || null,
           visibility || "Public",
+          effectiveAssigneeName,
+          effectiveAssigneeAvatar,
+          effectiveAssigneeRole,
         ]
       );
 
@@ -241,6 +251,20 @@ module.exports = function recordsRoutes(requireSession, db) {
         params.push(visibility);
       }
 
+      // Auto-assign the current user if status is changing and record has no assignee
+      if (status !== undefined) {
+        const currentRecord = await db.query(
+          "SELECT assignee_name FROM hansard_record WHERE id = $1 AND sitting_id = $2",
+          [id, sittingId]
+        );
+        if (currentRecord.rows.length > 0 && !currentRecord.rows[0].assignee_name && assigneeName === undefined) {
+          updates.push("assignee_name = $" + paramIndex++);
+          params.push(req.user?.name || null);
+          updates.push("assignee_role = $" + paramIndex++);
+          params.push(req.user?.role || null);
+        }
+      }
+
       if (updates.length === 0) {
         return res.status(400).json({
           error: {
@@ -351,7 +375,6 @@ module.exports = function recordsRoutes(requireSession, db) {
           `SELECT hr.*, s.title AS sitting_title, s.priority AS sitting_priority
            FROM hansard_record hr
            INNER JOIN sitting s ON s.id = hr.sitting_id
-           WHERE hr.assignee_name IS NOT NULL
            ORDER BY hr.created_at DESC`
         );
 
