@@ -51,7 +51,7 @@ def test_create_embeddings(mock_settings):
     assert inner.region_name == mock_settings.aws_region
 
 
-@patch("app.rag.clients.botocore.session.get_session")
+@patch("app.aws_utils.botocore.session.get_session")
 def test_probe_credentials_found(mock_get_session):
     """probe_credentials returns True when credentials are resolvable."""
     mock_creds = MagicMock()
@@ -63,7 +63,7 @@ def test_probe_credentials_found(mock_get_session):
     assert probe_credentials() is True
 
 
-@patch("app.rag.clients.botocore.session.get_session")
+@patch("app.aws_utils.botocore.session.get_session")
 def test_probe_credentials_not_found(mock_get_session):
     """probe_credentials returns False when no credentials are available."""
     mock_session = MagicMock()
@@ -73,7 +73,7 @@ def test_probe_credentials_not_found(mock_get_session):
     assert probe_credentials() is False
 
 
-@patch("app.rag.clients.botocore.session.get_session")
+@patch("app.aws_utils.botocore.session.get_session")
 def test_probe_credentials_exception(mock_get_session):
     """probe_credentials returns False when an exception occurs."""
     mock_get_session.side_effect = Exception("Something went wrong")

@@ -12,35 +12,13 @@ from __future__ import annotations
 import json
 
 import boto3
-import botocore.session
 from botocore.config import Config
 
+from app.aws_utils import probe_credentials
 from app.config import Settings
 
 # Module-level flag set once at import/startup time
 _credentials_available: bool = False
-
-
-def probe_credentials() -> bool:
-    """Check whether AWS credentials are resolvable.
-
-    Uses ``botocore.session.get_session().get_credentials()`` to determine
-    if credentials exist through the default credential chain (environment
-    variables, IAM role, config file, etc.).
-
-    Returns True if credentials are found, False otherwise.
-    Must never throw — catches all exceptions and returns False.
-    """
-    try:
-        session = botocore.session.get_session()
-        credentials = session.get_credentials()
-        if credentials is None:
-            return False
-        # Attempt to resolve frozen credentials to verify they're real
-        resolved = credentials.get_frozen_credentials()
-        return resolved is not None and resolved.access_key is not None
-    except Exception:
-        return False
 
 
 class BedrockClient:

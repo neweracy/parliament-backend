@@ -12,11 +12,11 @@ import hashlib
 import time
 from collections import OrderedDict
 
-import botocore.session
 import structlog
 from botocore.config import Config as BotoConfig
 from langchain_aws import BedrockEmbeddings, ChatBedrock
 
+from app.aws_utils import probe_credentials
 from app.config import Settings
 
 logger = structlog.get_logger("rag.clients")
@@ -145,24 +145,3 @@ class CachedEmbeddings:
         """Sync document embedding — delegates to inner."""
         return self._inner.embed_documents(texts)
 
-
-def probe_credentials() -> bool:
-    """Check whether AWS credentials are resolvable.
-
-    Uses ``botocore.session.get_session().get_credentials()`` to determine
-    if credentials exist through the default credential chain (environment
-    variables, IAM role, config file, etc.).
-
-    Returns:
-        True if credentials are found and have an access key, False otherwise.
-        Must never throw — catches all exceptions and returns False.
-    """
-    try:
-        session = botocore.session.get_session()
-        credentials = session.get_credentials()
-        if credentials is None:
-            return False
-        resolved = credentials.get_frozen_credentials()
-        return resolved is not None and resolved.access_key is not None
-    except Exception:
-        return False
