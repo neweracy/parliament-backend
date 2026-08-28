@@ -1,17 +1,11 @@
 """Per-chunk candidate extraction for the LLM_Refiner.
 
 Extracts candidate entity names from each chunk, retrieves similar records
-from the Dataset_Store (pg_trgm fallback), deduplicates, and caps at
-LLM_MAX_PROMPT_RECORDS.
+from the Dataset_Store (pg_trgm similarity search), deduplicates, and caps
+at LLM_MAX_PROMPT_RECORDS.
 
-Supports two retrieval modes:
-  - ``knowledge_base``: Uses Bedrock Knowledge_Base (not yet implemented,
-    falls back to dataset_store with a warning)
-  - ``dataset_store``: Uses pg_trgm similarity search directly
-
-When no database session is available (e.g. Knowledge_Base mode fails and
-no session is provided), falls back to a naive approach using the
-Dataset_Cache's canonical_map.
+When no database session is available, falls back to a naive approach using
+the Dataset_Cache's canonical_map.
 
 Requirements: 12.6, 12.7, 12.8, 12.9, 12.10, 11.10, 11.11
 """
@@ -28,15 +22,6 @@ from app.datasets.store import SimilarityResult, similarity_search_multi
 from app.models.entities import EntityKind, EntityRecord, EntityType
 
 logger = structlog.get_logger("llm.retrieval")
-
-# Module-level flag: only log the Knowledge_Base fallback warning once
-_kb_fallback_warned: bool = False
-
-
-def _reset_kb_warning() -> None:
-    """Reset the Knowledge_Base fallback warning flag (for testing)."""
-    global _kb_fallback_warned  # noqa: PLW0603
-    _kb_fallback_warned = False
 
 
 def _extract_candidate_tokens(
@@ -246,51 +231,3 @@ async def retrieve_candidates(
                 break
 
     return deduped
-
-
-async def retrieve_candidates_knowledge_base(
-    chunk_text: str,
-    snapshot: DatasetSnapshot,
-    session: AsyncSession | None,
-    max_records: int = 50,
-    knowledge_base_id: str | None = None,
-) -> list[EntityRecord]:
-    """Retrieve Entity_Records using Knowledge_Base mode with fallback.
-
-    Attempts Knowledge_Base retrieval first. On failure, falls back to
-    Dataset_Store pg_trgm retrieval and logs one warning record
-    (Requirement 12.9).
-
-    Args:
-        chunk_text: The text of the chunk to retrieve candidates for.
-        snapshot: The current DatasetSnapshot with index data.
-        session: An async SQLAlchemy session for pg_trgm fallback, or None.
-        max_records: Maximum number of records to return.
-        knowledge_base_id: The Bedrock Knowledge Base ID (required for KB mode).
-
-    Returns:
-        A list of EntityRecord objects, deduplicated and capped.
-    """
-    global _kb_fallback_warned  # noqa: PLW0603
-
-    if not knowledge_base_id:
-        # No Knowledge_Base configured — go straight to dataset_store
-        return await retrieve_candidates(chunk_text, snapshot, session, max_records)
-
-    try:
-        # Attempt Knowledge_Base retrieval
-        # NOTE: Full Bedrock Knowledge_Base Retrieve API integration is
-        # a future enhancement. For now, this always falls through to the
-        # Dataset_Store fallback, matching the design's fallback path.
-        raise NotImplementedError("Knowledge_Base retrieval not yet implemented")
-    except Exception:  # noqa: BLE001
-        # Knowledge_Base failed — fall back to Dataset_Store (Requirement 12.9)
-        if not _kb_fallback_warned:
-            _kb_fallback_warned = True
-            logger.warning(
-                "llm.retrieval.knowledge_base_fallback",
-                knowledge_base_id=knowledge_base_id,
-                reason="Knowledge_Base retrieval failed, using Dataset_Store pg_trgm",
-            )
-
-        return await retrieve_candidates(chunk_text, snapshot, session, max_records)

@@ -11,9 +11,7 @@ from app.datasets.index import MatchIndex
 from app.llm.retrieval import (
     _extract_candidate_tokens,
     _fallback_from_canonical_map,
-    _reset_kb_warning,
     retrieve_candidates,
-    retrieve_candidates_knowledge_base,
 )
 from app.models.entities import EntityKind, EntityRecord, EntityType
 
@@ -21,14 +19,6 @@ from app.models.entities import EntityKind, EntityRecord, EntityType
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def _reset_warning():
-    """Reset the KB fallback warning before each test."""
-    _reset_kb_warning()
-    yield
-    _reset_kb_warning()
 
 
 @pytest.fixture
@@ -284,64 +274,3 @@ class TestRetrieveCandidates:
             assert records[0].canonical == "Kumasi"
 
 
-# ---------------------------------------------------------------------------
-# Tests for retrieve_candidates_knowledge_base
-# ---------------------------------------------------------------------------
-
-
-class TestRetrieveCandidatesKnowledgeBase:
-    """Tests for Knowledge_Base mode with fallback."""
-
-    @pytest.mark.asyncio
-    async def test_no_kb_id_uses_dataset_store(
-        self, minimal_snapshot: DatasetSnapshot, _reset_warning
-    ):
-        """Without a knowledge_base_id, goes straight to dataset_store."""
-        records = await retrieve_candidates_knowledge_base(
-            "Kumasi is great",
-            minimal_snapshot,
-            session=None,
-            max_records=50,
-            knowledge_base_id=None,
-        )
-        canonicals = [r.canonical for r in records]
-        assert "Kumasi" in canonicals
-
-    @pytest.mark.asyncio
-    async def test_kb_failure_falls_back_with_warning(
-        self, minimal_snapshot: DatasetSnapshot, _reset_warning
-    ):
-        """KB failure falls back to dataset_store and logs a warning."""
-        records = await retrieve_candidates_knowledge_base(
-            "Kumasi is great",
-            minimal_snapshot,
-            session=None,
-            max_records=50,
-            knowledge_base_id="kb-12345",
-        )
-        # Should still get results from fallback
-        canonicals = [r.canonical for r in records]
-        assert "Kumasi" in canonicals
-
-    @pytest.mark.asyncio
-    async def test_kb_warning_logged_once(
-        self, minimal_snapshot: DatasetSnapshot, _reset_warning
-    ):
-        """The KB fallback warning is logged only once across multiple calls."""
-        # Call twice — both should succeed but warning only logged once
-        await retrieve_candidates_knowledge_base(
-            "Kumasi is great",
-            minimal_snapshot,
-            session=None,
-            max_records=50,
-            knowledge_base_id="kb-12345",
-        )
-        await retrieve_candidates_knowledge_base(
-            "Accra is the capital",
-            minimal_snapshot,
-            session=None,
-            max_records=50,
-            knowledge_base_id="kb-12345",
-        )
-        # If it crashes, the test fails. The single-warning semantics
-        # are enforced by the module-level flag.
