@@ -49,10 +49,18 @@ services/postprocess/
 │   │   └── metrics.py           # EMF metrics emission
 │   └── rag/
 │       ├── __init__.py
+│       ├── agent.py
+│       ├── answerer.py          # Grounded Q&A with Claude + recommendations
+│       ├── circuit_breaker.py
+│       ├── clients.py
+│       ├── diagnostics.py
 │       ├── ingestion.py         # Speaker-turn-aware chunking + embeddings
-│       ├── retrieval.py         # Hybrid search (vector + full-text + RRF)
-│       ├── answering.py         # Grounded Q&A with Claude + recommendations
-│       └── router.py            # FastAPI router: /rag/search, /rag/ask, /rag/ingest
+│       ├── parsing.py
+│       ├── recommendations.py
+│       ├── retrieval_status.py
+│       ├── retriever.py         # Hybrid search (vector + full-text + RRF)
+│       ├── router.py            # FastAPI router: /rag/search, /rag/ask, /rag/ingest
+│       └── search_recommendations.py
 ├── migrations/
 │   ├── env.py                   # Alembic environment
 │   └── versions/
@@ -136,8 +144,8 @@ Ask:     query → retrieve chunks → build prompt with history → Claude → 
 
 Key files:
 - `rag/ingestion.py` — `TranscriptIngestionWorker` (background queue, speaker-turn chunking)
-- `rag/retrieval.py` — `HybridRetriever` (vector + full-text + Reciprocal Rank Fusion)
-- `rag/answering.py` — `GroundedAnswerer` (Claude with citation parsing + recommendations)
+- `rag/retriever.py` — `HybridRetriever` (vector + full-text + Reciprocal Rank Fusion)
+- `rag/answerer.py` — `GroundedAnswerer` (Claude with citation parsing + recommendations)
 - `rag/router.py` — FastAPI endpoints + Pydantic request/response models
 
 ### Authentication
@@ -329,7 +337,7 @@ Then review the generated file in `migrations/versions/`:
 ### Safe Refactoring
 
 - Changes to `app/main.py` lifespan affect all initialization — verify startup order
-- Changes to `rag/retrieval.py` affect search quality — test with representative queries
+- Changes to `rag/retriever.py` affect search quality — test with representative queries
 - Changes to `rag/ingestion.py` affect stored data — may require re-ingestion
 - Changes to `config.py` Settings — verify defaults don't break existing deployments
 - Changes to `deps.py` — affect auth for all endpoints
@@ -339,9 +347,9 @@ Then review the generated file in `migrations/versions/`:
 | Area | Risk | Mitigation |
 |------|------|-----------|
 | `app/main.py` lifespan | All service init happens here | Test startup/shutdown ordering |
-| `rag/retrieval.py` | Search quality, user-facing | Test with known-good queries, verify RRF weights |
+| `rag/retriever.py` | Search quality, user-facing | Test with known-good queries, verify RRF weights |
 | `rag/ingestion.py` | Stored embeddings, re-ingestion expensive | Test chunking invariants |
-| `rag/answering.py` | LLM costs, citation accuracy | Mock in tests, verify prompt structure |
+| `rag/answerer.py` | LLM costs, citation accuracy | Mock in tests, verify prompt structure |
 | `migrations/versions/*` | Production schema | Never modify applied migrations |
 | `config.py` Settings | Breaking config changes | Always provide defaults |
 | `docker-compose.yml` | Local dev environment | Test `docker compose up` works |
