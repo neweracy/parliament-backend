@@ -132,11 +132,9 @@ class Settings(BaseSettings):
     llm_chunk_size: int = 300
     llm_max_parallel: int = 3
     llm_chunk_timeout_ms: int = 15000
-    # Reserved — not yet dispatched; refiner always uses dataset_store today
+    # Only 'dataset_store' is currently active; the refiner always uses this value
     llm_retrieval_mode: str = "dataset_store"
     llm_max_prompt_records: int = 50
-    # Reserved — not yet dispatched; requires llm_retrieval_mode=knowledge_base
-    knowledge_base_id: str | None = None
 
     # --- History ---
     history_enabled: bool = True

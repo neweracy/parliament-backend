@@ -18,7 +18,7 @@ def _clean_env(monkeypatch):
         "MIN_CANDIDATE_LENGTH", "AWS_REGION", "BEDROCK_MODEL_ID",
         "LLM_ENABLED", "LLM_CHUNK_SIZE", "LLM_MAX_PARALLEL",
         "LLM_CHUNK_TIMEOUT_MS", "LLM_RETRIEVAL_MODE",
-        "LLM_MAX_PROMPT_RECORDS", "KNOWLEDGE_BASE_ID",
+        "LLM_MAX_PROMPT_RECORDS",
         "HISTORY_ENABLED", "LOG_LEVEL", "POSTPROCESS_MODE",
     ]
     for var in config_vars:
