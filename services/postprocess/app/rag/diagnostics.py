@@ -153,7 +153,7 @@ async def rag_diagnostics(request: Request) -> JSONResponse:
     checks["chat_model"] = {
         "status": "ok" if chat_model is not None else "unavailable",
         "configured": chat_model is not None,
-        "model_id": settings.bedrock_model_id if settings else "unknown",
+        "model_id": (settings.rag_model_id or settings.bedrock_model_id) if settings else "unknown",
     }
     if chat_model is None:
         checks["chat_model"]["error"] = (

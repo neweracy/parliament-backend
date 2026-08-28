@@ -23,7 +23,11 @@ logger = structlog.get_logger("rag.clients")
 
 
 def create_chat_model(settings: Settings) -> ChatBedrock:
-    """Create a configured ChatBedrock instance for Claude invocations.
+    """Create a configured ChatBedrock instance for RAG Q&A invocations.
+
+    Uses ``rag_model_id`` when set, falling back to ``bedrock_model_id``.
+    This lets the RAG pipeline run on a different model (e.g. Amazon Nova)
+    while the LLM refiner keeps using the default Bedrock model.
 
     Uses the default AWS credential chain (environment variables, IAM role,
     config file, etc.) — never hardcodes credentials.
@@ -48,9 +52,10 @@ def create_chat_model(settings: Settings) -> ChatBedrock:
     Returns:
         A ChatBedrock instance configured with retries and timeout.
     """
+    model_id = settings.rag_model_id or settings.bedrock_model_id
     read_timeout_s = settings.rag_model_timeout_s
     return ChatBedrock(
-        model_id=settings.bedrock_model_id,
+        model_id=model_id,
         region_name=settings.aws_region,
         config=BotoConfig(
             retries={"max_attempts": 0, "mode": "standard"},

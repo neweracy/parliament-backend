@@ -58,6 +58,7 @@ def _make_app(
         settings = MagicMock()
         settings.service_token = "test-token"
         settings.bedrock_model_id = "test-model"
+        settings.rag_model_id = None
         settings.rag_agent_timeout_s = 50
         settings.rag_model_timeout_s = 45
     state.settings = settings

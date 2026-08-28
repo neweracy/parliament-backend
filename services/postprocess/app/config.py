@@ -100,6 +100,10 @@ class Settings(BaseSettings):
     # --- AWS / Bedrock ---
     aws_region: str = "us-east-1"
     bedrock_model_id: str = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+    # Optional override for the RAG Q&A model. When set, the RAG pipeline uses
+    # this model for grounded answering while the LLM refiner keeps using
+    # bedrock_model_id. When unset, both paths share bedrock_model_id.
+    rag_model_id: str | None = None
 
     # --- RAG agent ---
     # Wall-clock timeout for the full agent loop (seconds). The gateway aborts
