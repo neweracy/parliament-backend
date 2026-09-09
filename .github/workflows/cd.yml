@@ -1,0 +1,164 @@
+name: CD (build + deploy to EC2)
+
+# Auto-deploy on push/merge to main (dev merges a PR -> production deploys).
+# Also deploys when the Hansard frontend repo dispatches a deploy event, or
+# manually. CI checks are advisory and do NOT gate this pipeline. Images are
+# built and shipped to the EC2 host over SSH, deployed with health-gated
+# auto-rollback.
+on:
+  push:
+    branches: [refactor/langchain-rag, main]
+  repository_dispatch:
+    types: [frontend-updated]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  REMOTE_DIR: /opt/parliament
+
+jobs:
+  build:
+    name: Build arm64 images
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tag
+        id: meta
+        run: echo "tag=$(date -u +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout Hansard frontend (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: bigdataghana/Hansard
+          ref: ${{ vars.HANSARD_REF || 'main' }}
+          path: frontend
+          token: ${{ secrets.HANSARD_PAT }}
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build gateway (arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/arm64
+          push: false
+          load: true
+          tags: parliament-gateway:${{ steps.meta.outputs.tag }}
+          build-args: |
+            VITE_COGNITO_DOMAIN=${{ vars.COGNITO_DOMAIN }}
+            VITE_COGNITO_CLIENT_ID=${{ vars.COGNITO_CLIENT_ID }}
+            VITE_COGNITO_REDIRECT_URI=${{ vars.COGNITO_REDIRECT_URI }}
+            VITE_COGNITO_LOGOUT_URI=${{ vars.COGNITO_LOGOUT_URI }}
+            VITE_COGNITO_REGION=us-east-1
+
+      - name: Build postprocess (arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: services/postprocess
+          platforms: linux/arm64
+          push: false
+          load: true
+          tags: parliament-postprocess:${{ steps.meta.outputs.tag }}
+
+      - name: Export images + config
+        run: |
+          docker save parliament-gateway:${{ steps.meta.outputs.tag }}     -o gateway.tar
+          docker save parliament-postprocess:${{ steps.meta.outputs.tag }} -o postprocess.tar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.meta.outputs.tag }}
+          retention-days: 3
+          path: |
+            gateway.tar
+            postprocess.tar
+            deploy-aws/docker-compose.prod.yml
+            deploy-aws/docker-compose.ship.yml
+            deploy-aws/Caddyfile.prod
+
+  deploy:
+    name: Deploy to EC2
+    needs: build
+    runs-on: ubuntu-latest
+    # NOTE: no GitHub "environment" gate — creating environments needs repo admin
+    # and this pipeline is deploy-always by design. Add `environment: production`
+    # later (with admin) if you want a manual approval gate before deploy.
+    env:
+      IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.build.outputs.image_tag }}
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Copy release to host
+        run: |
+          HOST="${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}"
+          ssh -i ~/.ssh/id_ed25519 "$HOST" "mkdir -p ${REMOTE_DIR}/releases/${IMAGE_TAG}"
+          scp -i ~/.ssh/id_ed25519 gateway.tar postprocess.tar \
+            docker-compose.prod.yml docker-compose.ship.yml Caddyfile.prod \
+            "$HOST:${REMOTE_DIR}/releases/${IMAGE_TAG}/"
+
+      - name: Deploy with health gate + auto-rollback
+        run: |
+          HOST="${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}"
+          ssh -i ~/.ssh/id_ed25519 "$HOST" IMAGE_TAG="${IMAGE_TAG}" REMOTE_DIR="${REMOTE_DIR}" bash -s <<'REMOTE'
+          set -euo pipefail
+          cd "${REMOTE_DIR}"
+
+          # Save current image ids for rollback
+          PREV_GW=$(docker image inspect parliament-gateway:current --format '{{.Id}}' 2>/dev/null || echo "")
+          PREV_PP=$(docker image inspect parliament-postprocess:current --format '{{.Id}}' 2>/dev/null || echo "")
+
+          docker load -i "releases/${IMAGE_TAG}/gateway.tar"
+          docker load -i "releases/${IMAGE_TAG}/postprocess.tar"
+          docker tag parliament-gateway:${IMAGE_TAG}     parliament-gateway:current
+          docker tag parliament-postprocess:${IMAGE_TAG} parliament-postprocess:current
+
+          cp "releases/${IMAGE_TAG}/docker-compose.prod.yml" ./docker-compose.prod.yml
+          cp "releases/${IMAGE_TAG}/docker-compose.ship.yml" ./docker-compose.ship.yml
+          cp "releases/${IMAGE_TAG}/Caddyfile.prod" ./Caddyfile.prod
+
+          docker compose -f docker-compose.prod.yml -f docker-compose.ship.yml up -d
+
+          ok=0
+          for i in $(seq 1 24); do
+            if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then ok=1; break; fi
+            sleep 5
+          done
+
+          if [ "$ok" != "1" ]; then
+            echo "::error::Health check failed — rolling back"
+            if [ -n "$PREV_GW" ]; then docker tag "$PREV_GW" parliament-gateway:current; fi
+            if [ -n "$PREV_PP" ]; then docker tag "$PREV_PP" parliament-postprocess:current; fi
+            docker compose -f docker-compose.prod.yml -f docker-compose.ship.yml up -d
+            exit 1
+          fi
+
+          echo "Deploy healthy. Keeping last 3 releases."
+          ls -1dt releases/*/ | tail -n +4 | xargs -r rm -rf
+          docker image prune -f >/dev/null 2>&1 || true
+          REMOTE
+
+      - name: Verify public endpoint
+        run: |
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://${{ vars.PUBLIC_HOST }}/health" || echo 000)
+            if [ "$code" = "200" ]; then echo "public /health OK"; exit 0; fi
+            sleep 5
+          done
+          echo "::error::public health check failed"; exit 1

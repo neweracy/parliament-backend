@@ -1,0 +1,20 @@
+# =============================================================================
+# Edge Caddyfile — TLS termination + reverse proxy to the gateway
+# =============================================================================
+# The gateway container already serves the SPA + API + rate limiting on :8080
+# through its own bundled Caddy. This edge layer only adds public TLS.
+#
+# SITE_ADDRESS controls the listener and cert behaviour:
+#   - a domain (e.g. hansard.example.com) -> automatic Let's Encrypt HTTPS
+#   - ":80"                                -> HTTP only (initial IP-based testing)
+# =============================================================================
+
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	reverse_proxy gateway:8080 {
+		header_up X-Base-Path "/"
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}

@@ -1,0 +1,192 @@
+# =============================================================================
+# Production Compose — Ghana Parliament Hansard System (single EC2 host)
+# =============================================================================
+# Runs the full stack on one Docker host:
+#   caddy       TLS termination (Let's Encrypt) + reverse proxy to the gateway
+#   gateway     Bundled Caddy + Express + built SPA (transcript-end deploy image)
+#   postprocess Python FastAPI (correction + RAG)
+#   postgres    pgvector-enabled PostgreSQL 16 (persisted on an EBS-backed volume)
+#   redis       optional cache
+#
+# The gateway image (deploy/Dockerfile) already serves the SPA and the API on
+# :8080 through its own Caddy (which includes rate limiting). The edge Caddy in
+# front only adds TLS and a public entrypoint, so nothing about the gateway
+# changes between local and prod.
+#
+# Secrets are read from a .env file that env-from-ssm.sh generates at boot from
+# SSM Parameter Store. Bedrock uses the EC2 instance IAM role (no AWS keys).
+#
+# Bring up:  docker compose -f docker-compose.prod.yml up -d --build
+# Logs:      docker compose -f docker-compose.prod.yml logs -f
+# Stop:      docker compose -f docker-compose.prod.yml down   (never add -v)
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Caddy — TLS termination + public entrypoint
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_ADDRESS: "${SITE_ADDRESS:-:80}"
+    volumes:
+      - ./Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - gateway
+    networks:
+      - edge
+      - internal
+
+  # ---------------------------------------------------------------------------
+  # Gateway — Express API (transcript-end)
+  # ---------------------------------------------------------------------------
+  gateway:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        VITE_COGNITO_DOMAIN: "${VITE_COGNITO_DOMAIN}"
+        VITE_COGNITO_CLIENT_ID: "${VITE_COGNITO_CLIENT_ID}"
+        VITE_COGNITO_REDIRECT_URI: "${VITE_COGNITO_REDIRECT_URI}"
+        VITE_COGNITO_LOGOUT_URI: "${VITE_COGNITO_LOGOUT_URI}"
+    restart: unless-stopped
+    # Serves SPA + API on 8080 (bundled Caddy) and Express on 8081 internally.
+    expose:
+      - "8080"
+    environment:
+      PORT: "8081"
+      HOST: "0.0.0.0"
+      BACKEND_PORT: "8081"
+      NODE_ENV: "production"
+      # Post-processing routed to the Python service (full RAG system)
+      POSTPROCESS_MODE: "python"
+      POSTPROCESS_URL: "http://postprocess:8082"
+      POSTPROCESS_TOKEN: "${SERVICE_TOKEN}"
+      POSTPROCESS_TIMEOUT_MS: "20000"
+      POSTPROCESS_BREAKER_THRESHOLD: "5"
+      POSTPROCESS_BREAKER_COOLDOWN_MS: "30000"
+      # Secrets from SSM (.env)
+      DEEPGRAM_API_KEY: "${DEEPGRAM_API_KEY}"
+      KHAYA_API_KEY: "${KHAYA_API_KEY}"
+      SESSION_SECRET: "${SESSION_SECRET}"
+      # Hansard CRUD uses the same Postgres instance
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      REDIS_URL: "redis://redis:6379"
+      AWS_REGION: "${AWS_REGION:-us-east-1}"
+      BEDROCK_MODEL_ID: "${BEDROCK_MODEL_ID:-us.anthropic.claude-haiku-4-5-20251001-v1:0}"
+      # Cognito auth (production). AUTH_MODE=cognito is required when NODE_ENV=production.
+      AUTH_MODE: "${AUTH_MODE:-cognito}"
+      COGNITO_USER_POOL_ID: "${COGNITO_USER_POOL_ID}"
+      COGNITO_REGION: "${COGNITO_REGION:-us-east-1}"
+      COGNITO_APP_CLIENT_ID: "${COGNITO_APP_CLIENT_ID}"
+      COGNITO_DOMAIN: "${COGNITO_DOMAIN}"
+    depends_on:
+      postprocess:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+
+  # ---------------------------------------------------------------------------
+  # Postprocess — Python FastAPI (correction + RAG)
+  # ---------------------------------------------------------------------------
+  postprocess:
+    build:
+      context: ../services/postprocess
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8082"
+      UVICORN_WORKERS: "2"
+      DRAIN_TIMEOUT_SECONDS: "15"
+      SERVICE_TOKEN: "${SERVICE_TOKEN}"
+      DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      REDIS_URL: "redis://redis:6379"
+      # Bedrock via instance IAM role — no AWS keys injected
+      AWS_REGION: "${AWS_REGION:-us-east-1}"
+      BEDROCK_MODEL_ID: "${BEDROCK_MODEL_ID:-us.anthropic.claude-haiku-4-5-20251001-v1:0}"
+      # Separate model for RAG Q&A (Nova Pro), matching the dev configuration.
+      RAG_MODEL_ID: "${RAG_MODEL_ID:-us.amazon.nova-pro-v1:0}"
+      LLM_ENABLED: "true"
+      LOG_LEVEL: "info"
+      RUN_MIGRATIONS: "true"
+      # Sized for t4g.small (2 vCPU / 2 GB): moderate pool.
+      # Peak DB connections = workers * (POOL_SIZE + MAX_OVERFLOW) = 2*(5+5)=20.
+      DB_POOL_SIZE: "5"
+      DB_MAX_OVERFLOW: "5"
+      DB_STATEMENT_TIMEOUT_MS: "30000"
+      # Correction quality thresholds (from dev tuning)
+      MIN_CONFIDENCE: "0.65"
+      WORD_ACCEPT_THRESHOLD: "0.85"
+      FUZZY_SCORE_CUTOFF: "0.65"
+      MIN_CANDIDATE_LENGTH: "3"
+      LLM_CHUNK_SIZE: "400"
+      LLM_MAX_PARALLEL: "4"
+      LLM_CHUNK_TIMEOUT_MS: "30000"
+      LLM_MAX_PROMPT_RECORDS: "75"
+      HISTORY_ENABLED: "true"
+      HISTORY_RETENTION_DAYS: "180"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 16 + pgvector
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_DB: "${POSTGRES_DB}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../services/postprocess/scripts/init-pg-trgm.sql:/docker-entrypoint-initdb.d/01-pg-trgm.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - internal
+
+  # ---------------------------------------------------------------------------
+  # Redis cache
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - internal
+
+volumes:
+  pgdata:
+  redisdata:
+  caddy_data:
+  caddy_config:
+
+networks:
+  edge:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: false

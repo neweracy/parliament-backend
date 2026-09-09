@@ -1,0 +1,15 @@
+# Local smoke-test override. Uses the pre-built local images and disables the
+# LLM so the stack boots and connects without AWS/Bedrock credentials.
+# Run: docker compose -f docker-compose.prod.yml -f docker-compose.smoke.yml up -d
+services:
+  gateway:
+    image: parliament-gateway:local
+    build: !reset null
+    environment:
+      # Smoke test only: legacy auth is blocked when NODE_ENV=production.
+      NODE_ENV: "demo"
+  postprocess:
+    image: parliament-postprocess:local
+    build: !reset null
+    environment:
+      LLM_ENABLED: "false"

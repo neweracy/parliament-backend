@@ -1,0 +1,64 @@
+name: Trigger backend deploy
+
+# Lives in bigdataghana/Hansard as .github/workflows/trigger-backend-deploy.yml
+# On push to the default branch, runs the frontend test suite, then dispatches
+# a deploy event to the backend repo (which rebuilds the gateway image that
+# bundles this frontend and ships it to EC2).
+# On push/merge to main, run advisory tests then dispatch a deploy to the
+# backend repo (which rebuilds the gateway image bundling this frontend and
+# ships it to EC2).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    name: Frontend tests (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Tests (advisory — does not block deploy)
+        id: fetest
+        continue-on-error: true
+        run: pnpm run test 2>&1 | tee fe-test.log
+      - name: Report
+        if: always()
+        run: |
+          {
+            echo "# Frontend CI Report (advisory)"
+            echo "Tests: ${{ steps.fetest.outcome == 'success' && '✅ pass' || '⚠️ failures — see log below' }}"
+            if [ "${{ steps.fetest.outcome }}" != "success" ]; then
+              echo ""; echo '```'; tail -n 100 fe-test.log; echo '```'
+            fi
+            echo "> Deploy proceeds regardless. Please fix any ⚠️ items."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-ci-report-${{ github.run_id }}
+          retention-days: 14
+          path: fe-test.log
+
+  dispatch:
+    name: Dispatch backend deploy (always)
+    needs: test
+    if: always()   # deploy even if the advisory tests failed
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify backend to rebuild + deploy
+        env:
+          GH_TOKEN: ${{ secrets.BACKEND_DISPATCH_PAT }}
+        run: |
+          gh api repos/neweracy/parliament-backend/dispatches \
+            -f event_type=frontend-updated \
+            -F "client_payload[sha]=${GITHUB_SHA}" \
+            -F "client_payload[ref]=${GITHUB_REF_NAME}"
