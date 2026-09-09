@@ -1,18 +1,16 @@
 name: CD (build + deploy to EC2)
 
-# MANUAL-ONLY for now. A working deployment already exists (done manually), so
-# auto-deploy is intentionally DISABLED to avoid redeploying over it. Deploy is
-# triggered deliberately via "Run workflow" (workflow_dispatch).
-#
-# When ready to enable push-to-deploy, uncomment the `push` and
-# `repository_dispatch` triggers below. The pipeline is deploy-always (CI is
-# advisory and does not gate it).
+# Auto-deploy on push/merge to main (dev merges a PR -> production deploys).
+# Also deploys when the Hansard frontend repo dispatches a deploy event, or
+# manually. CI checks are advisory and do NOT gate this pipeline. Images are
+# built and shipped to the EC2 host over SSH, deployed with health-gated
+# auto-rollback.
 on:
+  push:
+    branches: [refactor/langchain-rag, main]
+  repository_dispatch:
+    types: [frontend-updated]
   workflow_dispatch: {}
-  # push:
-  #   branches: [refactor/langchain-rag]
-  # repository_dispatch:
-  #   types: [frontend-updated]
 
 concurrency:
   group: deploy-production
