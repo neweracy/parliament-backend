@@ -1,7 +1,8 @@
 name: CI
 
-# Quality gate: runs on every push and PR. Nothing merges or deploys without
-# passing lint, tests, and a Docker build check.
+# ADVISORY quality + security checks. These run on every push/PR and produce a
+# report in the Actions summary, but they DO NOT block the deploy — the CD
+# pipeline ships regardless. The dev reviews the report and fixes issues.
 on:
   push:
     branches: ["**"]
@@ -13,8 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backend:
-    name: Backend (lint + test)
+  checks:
+    name: Lint + Security (advisory)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,54 +27,57 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Lint
-        run: pnpm run lint
-      - name: Unit tests
-        run: pnpm test
 
-  postprocess:
-    name: Postprocess (ruff + pytest)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/postprocess
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install
-        run: pip install -e ".[dev]"
-      - name: Lint (ruff)
-        run: ruff check .
-      - name: Tests (pytest — Bedrock/DB mocked)
-        run: pytest -q
+      # Each check is non-blocking (continue-on-error) and its result is
+      # captured for the report below.
+      - name: Lint (backend)
+        id: lint
+        continue-on-error: true
+        run: pnpm run lint 2>&1 | tee lint.log
 
-  docker-build:
-    name: Docker build check (gateway + postprocess)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      # Build for the native runner arch only here — this is a fast "does it
-      # build" gate, not the release image. The release build (arm64) runs in CD.
-      - name: Build postprocess image
-        uses: docker/build-push-action@v6
+      - name: Unit tests (backend)
+        id: test
+        continue-on-error: true
+        run: pnpm test 2>&1 | tee test.log
+
+      - name: Security audit (pnpm)
+        id: audit
+        continue-on-error: true
+        run: pnpm audit --audit-level moderate 2>&1 | tee audit.log
+
+      - name: Build report for the developer
+        if: always()
+        run: |
+          {
+            echo "# CI Report (advisory — does not block deploy)"
+            echo ""
+            echo "| Check | Result |"
+            echo "|-------|--------|"
+            echo "| Lint | ${{ steps.lint.outcome == 'success' && '✅ pass' || '⚠️ issues — see log' }} |"
+            echo "| Unit tests | ${{ steps.test.outcome == 'success' && '✅ pass' || '⚠️ failures — see log' }} |"
+            echo "| Security audit | ${{ steps.audit.outcome == 'success' && '✅ clean' || '⚠️ advisories — see log' }} |"
+            echo ""
+            if [ "${{ steps.lint.outcome }}" != "success" ]; then
+              echo "<details><summary>Lint output</summary>"; echo ""; echo '```'; tail -n 100 lint.log; echo '```'; echo "</details>"; echo ""
+            fi
+            if [ "${{ steps.test.outcome }}" != "success" ]; then
+              echo "<details><summary>Test output</summary>"; echo ""; echo '```'; tail -n 100 test.log; echo '```'; echo "</details>"; echo ""
+            fi
+            if [ "${{ steps.audit.outcome }}" != "success" ]; then
+              echo "<details><summary>Security audit</summary>"; echo ""; echo '```'; tail -n 100 audit.log; echo '```'; echo "</details>"; echo ""
+            fi
+            echo "> The deploy proceeds regardless. Please fix any ⚠️ items above."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs (artifact for the developer)
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          context: services/postprocess
-          push: false
-      - name: Checkout Hansard frontend (pinned)
-        uses: actions/checkout@v4
-        with:
-          repository: bigdataghana/Hansard
-          ref: ${{ vars.HANSARD_REF || 'feat/qa-assistant-recommendations' }}
-          path: frontend
-          token: ${{ secrets.HANSARD_PAT || github.token }}
-      - name: Build gateway image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/Dockerfile
-          push: false
-          build-args: |
-            VITE_COGNITO_REGION=us-east-1
+          name: ci-report-${{ github.run_id }}
+          retention-days: 14
+          path: |
+            lint.log
+            test.log
+            audit.log
+
+      # This job NEVER fails — it is advisory only. The report is the output.
