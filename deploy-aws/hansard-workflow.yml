@@ -4,10 +4,13 @@ name: Trigger backend deploy
 # On push to the default branch, runs the frontend test suite, then dispatches
 # a deploy event to the backend repo (which rebuilds the gateway image that
 # bundles this frontend and ships it to EC2).
+# MANUAL-ONLY for now (matches the backend CD). Auto-dispatch on push is
+# disabled so it can't redeploy over the working manual deployment. Uncomment
+# the `push` trigger when ready to enable frontend push-to-deploy.
 on:
-  push:
-    branches: [main]
   workflow_dispatch: {}
+  # push:
+  #   branches: [main]
 
 jobs:
   test:

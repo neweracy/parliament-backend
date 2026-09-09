@@ -1,15 +1,18 @@
 name: CD (build + deploy to EC2)
 
-# Push-to-deploy, ALWAYS deploys. CI checks are advisory (see ci.yml) and do
-# NOT gate this pipeline — a push to the default branch, a frontend dispatch, or
-# a manual run always builds and ships. Images are built and shipped to the EC2
-# host over SSH (no registry), deployed with a health-gated auto-rollback.
+# MANUAL-ONLY for now. A working deployment already exists (done manually), so
+# auto-deploy is intentionally DISABLED to avoid redeploying over it. Deploy is
+# triggered deliberately via "Run workflow" (workflow_dispatch).
+#
+# When ready to enable push-to-deploy, uncomment the `push` and
+# `repository_dispatch` triggers below. The pipeline is deploy-always (CI is
+# advisory and does not gate it).
 on:
-  push:
-    branches: [refactor/langchain-rag]
-  repository_dispatch:
-    types: [frontend-updated]
   workflow_dispatch: {}
+  # push:
+  #   branches: [refactor/langchain-rag]
+  # repository_dispatch:
+  #   types: [frontend-updated]
 
 concurrency:
   group: deploy-production
