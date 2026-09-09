@@ -1,0 +1,11 @@
+# Override for the EC2 box: use pre-built (shipped) images, never build on-host.
+# The CD pipeline loads a versioned image and tags it :current, so deploy and
+# rollback both work by re-tagging :current and re-running compose up.
+# Used with: docker compose -f docker-compose.prod.yml -f docker-compose.ship.yml up -d
+services:
+  gateway:
+    image: parliament-gateway:current
+    build: !reset null
+  postprocess:
+    image: parliament-postprocess:current
+    build: !reset null

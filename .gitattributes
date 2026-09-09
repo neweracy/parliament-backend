@@ -1,0 +1,8 @@
+# Shell scripts and container entrypoints MUST use LF. On Windows, autocrlf
+# otherwise rewrites them to CRLF, which breaks the `#!/usr/bin/env sh` shebang
+# inside Linux containers ("env: 'sh\r': No such file or directory").
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+docker-entrypoint.sh text eol=lf
+start.sh text eol=lf

@@ -15,6 +15,24 @@ yarn.lock
 .env.test.local
 .env.production.local
 
+# AWS single-host deploy: generated secrets (only *.env templates are tracked)
+deploy-aws/.env
+deploy-aws/tags.env
+deploy-aws/*.pem
+deploy-aws/_cognito-outputs.txt
+deploy-aws/_cognito-policy.json
+# Build/transfer artifacts — never commit
+deploy-aws/*.tar
+deploy-aws/*.tar.gz
+deploy-aws/chunks/
+deploy-aws/chunks2/
+deploy-aws/*.log
+deploy-aws/_*.txt
+
+# Stray nested umbrella clone added during deployment work — not part of this
+# repo (it has its own git repo + submodules). Never commit it here.
+Parliament-Project/
+
 # Build outputs
 frontend/dist/
 dist/

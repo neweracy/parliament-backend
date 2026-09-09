@@ -1,0 +1,79 @@
+name: CI
+
+# Quality gate: runs on every push and PR. Nothing merges or deploys without
+# passing lint, tests, and a Docker build check.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm run lint
+      - name: Unit tests
+        run: pnpm test
+
+  postprocess:
+    name: Postprocess (ruff + pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/postprocess
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Lint (ruff)
+        run: ruff check .
+      - name: Tests (pytest — Bedrock/DB mocked)
+        run: pytest -q
+
+  docker-build:
+    name: Docker build check (gateway + postprocess)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # Build for the native runner arch only here — this is a fast "does it
+      # build" gate, not the release image. The release build (arm64) runs in CD.
+      - name: Build postprocess image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/postprocess
+          push: false
+      - name: Checkout Hansard frontend (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: bigdataghana/Hansard
+          ref: ${{ vars.HANSARD_REF || 'feat/qa-assistant-recommendations' }}
+          path: frontend
+          token: ${{ secrets.HANSARD_PAT || github.token }}
+      - name: Build gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: false
+          build-args: |
+            VITE_COGNITO_REGION=us-east-1
