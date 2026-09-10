@@ -9,11 +9,14 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from langchain_core.messages import AIMessage
+from langgraph.errors import GraphRecursionError
 
 from app.rag.agent import (
     _MAX_SUMMARY_CHUNKS,
+    _RECURSION_LIMIT,
     GENERATION_FAILURE_TEXT,
     HansardChatAgent,
+    _bedrock_breaker,
     _format_passages,
     _make_search_tool,
     _make_summarize_record_tool,
@@ -850,3 +853,145 @@ class TestSummarizeRecordWiring:
 
         assert {c.chunk_id for c in response.citations} == {1, 2}
         assert len(response.source_chunks) == 2
+
+
+# ---------------------------------------------------------------------------
+# Recursion limit and circuit breaker isolation
+# ---------------------------------------------------------------------------
+
+_RECURSION_ANSWER_FRAGMENT = "more research steps than I can take"
+
+
+@pytest.fixture
+def clean_breaker():
+    """Hand each test a CLOSED breaker and leave it CLOSED afterwards.
+
+    `_bedrock_breaker` is module-level state shared by every agent instance in a
+    worker process, so a test that records a failure would otherwise leak that
+    count into whatever runs next.
+    """
+    _bedrock_breaker.reset()
+    yield _bedrock_breaker
+    _bedrock_breaker.reset()
+
+
+def _recursion_error() -> GraphRecursionError:
+    """The error langgraph raises when the super-step ceiling is exhausted."""
+    return GraphRecursionError(
+        f"Recursion limit of {_RECURSION_LIMIT} reached without hitting a stop condition."
+    )
+
+
+class TestRecursionLimit:
+    def test_limit_leaves_room_for_multi_tool_questions(self):
+        """A multi-part question fans out well past a handful of super-steps.
+
+        One assistant turn can issue several tool calls in parallel and each
+        batch of tool results is its own super-step, so an observed worst case
+        reached 7 tool calls across 3 assistant turns. A ceiling below langgraph's
+        own default of 25 cannot serve that, and the failure surfaces to the user
+        as a generation failure rather than as an answer.
+        """
+        assert _RECURSION_LIMIT >= 25
+
+    @pytest.mark.asyncio
+    async def test_returns_a_narrowing_hint_not_a_generation_failure(
+        self, mock_settings, clean_breaker
+    ):
+        """Exhausting the loop is an agent-shape problem, so say so specifically."""
+        with patch(
+            "app.rag.agent.create_agent",
+            return_value=_fake_agent_returning("", side_effect=_recursion_error()),
+        ):
+            agent = HansardChatAgent(
+                chat_model=AsyncMock(), retriever=FakeRetriever([]), settings=mock_settings
+            )
+            response = await agent.chat("Summarise every record, then cover X, Y and Z.")
+
+        assert _RECURSION_ANSWER_FRAGMENT in response.answer
+        assert response.answer != GENERATION_FAILURE_TEXT
+        assert len(response.recommendations) == 3
+
+    @pytest.mark.asyncio
+    async def test_does_not_record_a_breaker_failure(self, mock_settings, clean_breaker):
+        """Bedrock is healthy here, so the shared breaker must be left alone.
+
+        Counting these would open the breaker after five such questions and
+        disable Q&A for every user of the worker.
+        """
+        before_state = clean_breaker.state
+        before_failures = clean_breaker._failure_count
+
+        with patch(
+            "app.rag.agent.create_agent",
+            return_value=_fake_agent_returning("", side_effect=_recursion_error()),
+        ):
+            agent = HansardChatAgent(
+                chat_model=AsyncMock(), retriever=FakeRetriever([]), settings=mock_settings
+            )
+            await agent.chat("Summarise every record, then cover X, Y and Z.")
+
+        assert clean_breaker._failure_count == before_failures
+        assert clean_breaker.state == before_state
+        assert clean_breaker.allow_request() is True
+
+    @pytest.mark.asyncio
+    async def test_chunks_retrieved_before_exhaustion_are_still_returned(
+        self, mock_settings, clean_breaker
+    ):
+        """Retrieval succeeded, so the user still gets citable material.
+
+        The tool calls that consumed the budget are exactly the ones that
+        collected chunks; discarding them would throw away the useful half of the
+        turn and leave the UI with no sources to render.
+        """
+        chunk = _make_chunk(77)
+        captured_tools: dict = {}
+
+        def fake_create_agent(*args, **kwargs):
+            captured_tools["tools"] = kwargs["tools"]
+            fake_agent = MagicMock()
+
+            async def fake_ainvoke(*a, **kw):
+                # The model searched, then ran out of super-steps before it could
+                # write the final cited message.
+                await captured_tools["tools"][0].ainvoke({"query": "budget"})
+                raise _recursion_error()
+
+            fake_agent.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+            return fake_agent
+
+        with patch("app.rag.agent.create_agent", side_effect=fake_create_agent):
+            agent = HansardChatAgent(
+                chat_model=AsyncMock(), retriever=FakeRetriever([chunk]), settings=mock_settings
+            )
+            response = await agent.chat("Summarise every record, then cover X, Y and Z.")
+
+        assert [c.chunk_id for c in response.source_chunks] == [77]
+        assert _RECURSION_ANSWER_FRAGMENT in response.answer
+        # No citations were produced, so the answer stays ungrounded and the
+        # citation contract holds.
+        assert response.citations == []
+
+    @pytest.mark.asyncio
+    async def test_other_exceptions_still_fail_generically_and_trip_the_breaker(
+        self, mock_settings, clean_breaker
+    ):
+        """The new clause narrowed the error path rather than replacing it.
+
+        A genuine model fault is still a generation failure and still counts
+        towards opening the breaker.
+        """
+        before_failures = clean_breaker._failure_count
+
+        with patch(
+            "app.rag.agent.create_agent",
+            return_value=_fake_agent_returning("", side_effect=Exception("boom")),
+        ):
+            agent = HansardChatAgent(
+                chat_model=AsyncMock(), retriever=FakeRetriever([]), settings=mock_settings
+            )
+            response = await agent.chat("Hello!")
+
+        assert response.answer == GENERATION_FAILURE_TEXT
+        assert clean_breaker._failure_count == before_failures + 1

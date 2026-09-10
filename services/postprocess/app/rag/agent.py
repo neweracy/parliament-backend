@@ -30,6 +30,7 @@ from typing import Any
 import structlog
 from langchain.agents import create_agent
 from langchain_core.tools import tool
+from langgraph.errors import GraphRecursionError
 from sqlalchemy import text
 
 from app.rag.circuit_breaker import CircuitBreaker
@@ -58,9 +59,22 @@ _MAX_SEARCH_RESULTS = 10
 # Matches the conversation_history cap the gateway and router already enforce.
 _MAX_HISTORY_MESSAGES = 20
 
-# Super-step ceiling for the agent loop. Each tool round trip costs roughly two,
-# so this allows up to 3 searches while bounding a misbehaving model.
-_RECURSION_LIMIT = 6
+# Super-step ceiling for the agent loop.
+#
+# Was 6, on the assumption that a tool round trip costs "roughly two" super-steps
+# and that 6 therefore allowed three searches. That arithmetic was wrong: one
+# assistant turn can issue several tool calls in parallel, and each batch of tool
+# results is its own super-step, so a multi-part question ("summarise each recent
+# record, then what was said about X, Y and Z") reached 7 tool calls across 3
+# assistant turns and exhausted 6 before the model could emit its final cited
+# answer. langgraph then raised GraphRecursionError, which the caller turned into
+# a generic generation failure even though retrieval had succeeded.
+#
+# 25 matches langgraph's own default and comfortably fits the observed worst case
+# (12 messages, 3 assistant turns, 7 tool calls) while still bounding a
+# misbehaving model. A heavy turn at this limit completes in about 19s, well
+# inside rag_agent_timeout_s.
+_RECURSION_LIMIT = 25
 
 # Circuit breaker for the Bedrock model — shared across all agent instances
 # within a single worker process. Opens after 5 consecutive failures, recovers
@@ -948,6 +962,36 @@ class HansardChatAgent:
             return finalise_answer(
                 builder=self._builder,
                 answer="The request took too long to process. Please try a more specific question.",
+                citations=[],
+                context_chunks=retrieved,
+                parsed=[],
+                hint_chunks=retrieved,
+                corpus_hints=corpus_hints,
+                history_questions=history_questions,
+                grounded=False,
+                start_time=start_time,
+                registry_references=registry_refs,
+            )
+        except GraphRecursionError:
+            # Not a Bedrock fault, so the circuit breaker is deliberately left
+            # untouched: tripping it here would disable Q&A for every user
+            # because one question fanned out into too many tool calls.
+            #
+            # Retrieval did succeed, so the chunks are handed back as
+            # source_chunks — the user still gets citable material and the UI
+            # still renders sources, rather than an empty failure.
+            logger.warning(
+                "rag.agent.recursion_limit_reached",
+                question_preview=question[:80],
+                recursion_limit=_RECURSION_LIMIT,
+                retrieved_count=len(retrieved),
+            )
+            return finalise_answer(
+                builder=self._builder,
+                answer=(
+                    "That question needed more research steps than I can take in one "
+                    "turn. Try asking about one record or one topic at a time."
+                ),
                 citations=[],
                 context_chunks=retrieved,
                 parsed=[],
