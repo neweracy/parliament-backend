@@ -73,6 +73,7 @@ const khayaRoutes = require("./routes/khaya");
 const hybridRoutes = require("./routes/hybrid");
 const sittingsRoutes = require("./routes/sittings");
 const recordsRoutes = require("./routes/records");
+const templatesRoutes = require("./routes/templates");
 const audioRoutes = require("./routes/audio");
 const transcriptionRoutes = require("./routes/transcription");
 const transcriptRoutes = require("./routes/transcript");
@@ -805,6 +806,7 @@ app.use("/api/transcription/hybrid", hybridRoutes(authMiddleware, upload, hybrid
 
 app.use(sittingsRoutes(authMiddleware, db));
 app.use(recordsRoutes(authMiddleware, db));
+app.use(templatesRoutes(authMiddleware, db));
 app.use(audioRoutes(authMiddleware, db));
 app.use(transcriptionRoutes(authMiddleware, db, cache));
 app.use(transcriptRoutes(authMiddleware, db));
