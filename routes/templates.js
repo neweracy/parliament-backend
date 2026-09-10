@@ -102,6 +102,132 @@ function notFoundError(id) {
 }
 
 /**
+ * Builds the 409 envelope returned when a create or update would produce a row
+ * whose content is indistinguishable from an existing template.
+ *
+ * @param {Object} existing - The colliding row ({id, name})
+ * @returns {Object} Error response body
+ */
+function duplicateTemplateError(existing) {
+  return {
+    error: {
+      type: "ConflictError",
+      code: "DUPLICATE_TEMPLATE",
+      message: `An identical template already exists ("${existing.name}"). Change at least one field to save a new template.`,
+    },
+  };
+}
+
+/**
+ * Applies the storage defaults to every content field, so the values compared by
+ * the duplicate check are exactly the values the row will end up holding.
+ *
+ * Single source of truth for those defaults: both the duplicate check and the
+ * INSERT read from this, so the two cannot drift apart.
+ *
+ * @param {Object} body - Request body
+ * @returns {Object} Resolved content values
+ */
+function resolveTemplateFields(body) {
+  const {
+    name,
+    description,
+    type,
+    iconKey,
+    headerLines,
+    sections,
+    speakerFormat,
+    showTimestamps,
+    showConstituency,
+    paragraphNumbering,
+  } = body;
+
+  return {
+    name: typeof name === "string" ? name.trim() : name,
+    description: description || null,
+    type: type || "Custom",
+    iconKey: iconKey || "file-text",
+    headerLines: headerLines || [],
+    sections: sections || [],
+    speakerFormat: speakerFormat || DEFAULT_SPEAKER_FORMAT,
+    showTimestamps: showTimestamps === undefined ? false : showTimestamps,
+    showConstituency: showConstituency === undefined ? true : showConstituency,
+    paragraphNumbering: paragraphNumbering === undefined ? false : paragraphNumbering,
+  };
+}
+
+/**
+ * Finds an existing template whose every content attribute matches the given
+ * values. Server-owned fields (is_default, usage_count, timestamps) are
+ * excluded, so two templates differing only in default status or usage are
+ * considered identical.
+ *
+ * @param {Object} db
+ * @param {Object} fields - Resolved content values (post-defaulting, post-trim)
+ * @param {string|number|null} excludeId - Row to ignore, for PATCH self-comparison
+ * @returns {Promise<Object|null>} The colliding row, or null
+ */
+async function findIdenticalTemplate(db, fields, excludeId = null) {
+  const conditions = [
+    "name = $1",
+    // description is nullable and NULL = NULL is never true, so a plain
+    // equality test would let two description-less duplicates through.
+    // COALESCE folds NULL and '' together on both sides.
+    "COALESCE(description, '') = COALESCE($2, '')",
+    "type = $3",
+    "icon_key = $4",
+    // Cast to jsonb so the comparison is semantic: the same members in a
+    // different key order are equal, which a text comparison would miss.
+    "header_lines = $5::jsonb",
+    "sections = $6::jsonb",
+    "speaker_format = $7",
+    "show_timestamps = $8",
+    "show_constituency = $9",
+    "paragraph_numbering = $10",
+  ];
+
+  const params = [
+    // Compare the trimmed name, matching what the INSERT stores.
+    typeof fields.name === "string" ? fields.name.trim() : fields.name,
+    fields.description === undefined ? null : fields.description,
+    fields.type,
+    fields.iconKey,
+    JSON.stringify(fields.headerLines),
+    JSON.stringify(fields.sections),
+    fields.speakerFormat,
+    fields.showTimestamps,
+    fields.showConstituency,
+    fields.paragraphNumbering,
+  ];
+
+  if (excludeId !== null && excludeId !== undefined) {
+    params.push(excludeId);
+    conditions.push(`id <> $${params.length}`);
+  }
+
+  const result = await db.query(
+    `SELECT id, name FROM template WHERE ${conditions.join(" AND ")} LIMIT 1`,
+    params
+  );
+
+  return result.rows.length > 0 ? result.rows[0] : null;
+}
+
+/**
+ * Escapes the LIKE metacharacters in a literal so it can be embedded in a
+ * pattern. Without this a template named "Report_1" would also match
+ * "ReportX1 (Copy 2)", because `_` is a single-character wildcard.
+ *
+ * Pairs with an `ESCAPE '\'` clause on the LIKE.
+ *
+ * @param {string} value
+ * @returns {string} The literal with \, % and _ backslash-escaped
+ */
+function escapeLikeLiteral(value) {
+  return String(value).replace(/[\\%_]/g, "\\$&");
+}
+
+/**
  * Creates the Templates router.
  * @param {Function} requireSession - JWT auth middleware
  * @param {Object} db - Database client with query(text, params) helper
@@ -195,21 +321,14 @@ module.exports = function templatesRoutes(requireSession, db) {
    * Creates a new template. New templates are never the default — promoting one
    * goes through POST /api/templates/:id/set-default so the single-default
    * invariant stays in one place.
+   *
+   * A payload whose resolved content matches an existing template on all ten
+   * content attributes is rejected with 409 DUPLICATE_TEMPLATE; changing any one
+   * of them (a different name is enough) makes it distinct.
    */
   router.post("/api/templates", requireSession, requirePermission("manage_templates"), express.json(), async (req, res) => {
     try {
-      const {
-        name,
-        description,
-        type,
-        iconKey,
-        headerLines,
-        sections,
-        speakerFormat,
-        showTimestamps,
-        showConstituency,
-        paragraphNumbering,
-      } = req.body;
+      const { name } = req.body;
 
       if (!name || typeof name !== "string" || !name.trim()) {
         return res.status(400).json({
@@ -232,21 +351,31 @@ module.exports = function templatesRoutes(requireSession, db) {
         });
       }
 
+      // Resolve the values the row would actually get BEFORE looking for a
+      // duplicate, so an omitted field is compared against the default it will
+      // be stored with rather than against nothing.
+      const fields = resolveTemplateFields(req.body);
+
+      const existing = await findIdenticalTemplate(db, fields);
+      if (existing) {
+        return res.status(409).json(duplicateTemplateError(existing));
+      }
+
       const result = await db.query(
         `INSERT INTO template (name, description, type, icon_key, header_lines, sections, speaker_format, show_timestamps, show_constituency, paragraph_numbering)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING *`,
         [
-          name.trim(),
-          description || null,
-          type || "Custom",
-          iconKey || "file-text",
-          JSON.stringify(headerLines || []),
-          JSON.stringify(sections || []),
-          speakerFormat || DEFAULT_SPEAKER_FORMAT,
-          showTimestamps === undefined ? false : showTimestamps,
-          showConstituency === undefined ? true : showConstituency,
-          paragraphNumbering === undefined ? false : paragraphNumbering,
+          fields.name,
+          fields.description,
+          fields.type,
+          fields.iconKey,
+          JSON.stringify(fields.headerLines),
+          JSON.stringify(fields.sections),
+          fields.speakerFormat,
+          fields.showTimestamps,
+          fields.showConstituency,
+          fields.paragraphNumbering,
         ]
       );
 
@@ -271,6 +400,9 @@ module.exports = function templatesRoutes(requireSession, db) {
    *
    * Partial update of mutable template fields. `is_default` is deliberately not
    * patchable here — use POST /api/templates/:id/set-default.
+   *
+   * The patch is merged over the current row and rejected with 409
+   * DUPLICATE_TEMPLATE when the result would be identical to another template.
    */
   router.patch("/api/templates/:id", requireSession, requirePermission("manage_templates"), express.json(), async (req, res) => {
     try {
@@ -355,6 +487,37 @@ module.exports = function templatesRoutes(requireSession, db) {
         });
       }
 
+      // Read the current row up front: the duplicate check needs the fields the
+      // patch does not carry, and it also yields the 404 before any write.
+      const current = await db.query("SELECT * FROM template WHERE id = $1", [id]);
+
+      if (current.rows.length === 0) {
+        return res.status(404).json(notFoundError(id));
+      }
+
+      const row = current.rows[0];
+      const merged = {
+        name: name === undefined ? row.name : name,
+        description: description === undefined ? row.description : description,
+        type: type === undefined ? row.type : type,
+        iconKey: iconKey === undefined ? row.icon_key : iconKey,
+        headerLines: headerLines === undefined ? row.header_lines : headerLines,
+        sections: sections === undefined ? row.sections : sections,
+        speakerFormat: speakerFormat === undefined ? row.speaker_format : speakerFormat,
+        showTimestamps: showTimestamps === undefined ? row.show_timestamps : showTimestamps,
+        showConstituency: showConstituency === undefined ? row.show_constituency : showConstituency,
+        paragraphNumbering:
+          paragraphNumbering === undefined ? row.paragraph_numbering : paragraphNumbering,
+      };
+
+      // Without this the no-duplicates rule is trivially bypassable: create with
+      // one field different, then patch that field back. The row being patched is
+      // excluded, so a no-op patch never collides with itself.
+      const duplicate = await findIdenticalTemplate(db, merged, id);
+      if (duplicate) {
+        return res.status(409).json(duplicateTemplateError(duplicate));
+      }
+
       // Always update updated_at
       updates.push("updated_at = now()");
 
@@ -436,24 +599,61 @@ module.exports = function templatesRoutes(requireSession, db) {
   /**
    * POST /api/templates/:id/duplicate
    *
-   * Copies a template under a "<name> (Copy)" name. The copy is never the
-   * default and starts with a zeroed usage count.
+   * Copies a template under the first free name in the sequence "<name> (Copy)",
+   * "<name> (Copy 2)", "<name> (Copy 3)", … The copy is never the default and
+   * starts with a zeroed usage count.
    *
-   * A single INSERT ... SELECT does the read and the write in one statement, so
-   * the copy cannot be built from a row that changed or was deleted between two
-   * round-trips. No matching source row means the statement inserts nothing,
-   * which is how the 404 is detected.
+   * Deliberately no longer a single INSERT ... SELECT: the new name has to be
+   * computed against the names already taken, which needs a read before the
+   * write. A fixed "<name> (Copy)" would be rejected by the identical-content
+   * check the second time the same source is duplicated. The trade-off is the
+   * loss of the previous single-statement atomicity — the source row could change
+   * or a competing name could be claimed between the two round-trips — accepted
+   * here in exchange for duplicate always succeeding.
    */
   router.post("/api/templates/:id/duplicate", requireSession, requirePermission("manage_templates"), async (req, res) => {
     try {
       const { id } = req.params;
 
+      const source = await db.query("SELECT * FROM template WHERE id = $1", [id]);
+
+      if (source.rows.length === 0) {
+        return res.status(404).json(notFoundError(id));
+      }
+
+      const row = source.rows[0];
+
+      // One query for every name already in the sequence, rather than a probe
+      // per candidate. ESCAPE pairs with escapeLikeLiteral so % and _ in the
+      // source name stay literal.
+      const firstCandidate = `${row.name} (Copy)`;
+      const taken = await db.query(
+        `SELECT name FROM template WHERE name = $1 OR name LIKE $2 ESCAPE '\\'`,
+        [firstCandidate, `${escapeLikeLiteral(row.name)} (Copy %)`]
+      );
+
+      const takenNames = new Set(taken.rows.map((r) => r.name));
+      let copyName = firstCandidate;
+      for (let suffix = 2; takenNames.has(copyName); suffix++) {
+        copyName = `${row.name} (Copy ${suffix})`;
+      }
+
       const result = await db.query(
         `INSERT INTO template (name, description, type, icon_key, is_default, usage_count, header_lines, sections, speaker_format, show_timestamps, show_constituency, paragraph_numbering)
-         SELECT name || $2, description, type, icon_key, false, 0, header_lines, sections, speaker_format, show_timestamps, show_constituency, paragraph_numbering
-         FROM template WHERE id = $1
+         VALUES ($1, $2, $3, $4, false, 0, $5::jsonb, $6::jsonb, $7, $8, $9, $10)
          RETURNING *`,
-        [id, " (Copy)"]
+        [
+          copyName,
+          row.description,
+          row.type,
+          row.icon_key,
+          JSON.stringify(row.header_lines),
+          JSON.stringify(row.sections),
+          row.speaker_format,
+          row.show_timestamps,
+          row.show_constituency,
+          row.paragraph_numbering,
+        ]
       );
 
       if (result.rows.length === 0) {
