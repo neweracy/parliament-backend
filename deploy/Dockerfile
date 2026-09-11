@@ -7,7 +7,10 @@ RUN xcaddy build --with github.com/mholt/caddy-ratelimit
 
 # Stage 2: Build frontend
 FROM node:24-slim AS frontend-builder
-RUN corepack enable
+# Pin pnpm to 10.x. The frontend lockfile uses the pnpm<=10 `pnpm.overrides`
+# format (in package.json). Newer corepack defaults to pnpm 12, which ignores
+# that field and fails --frozen-lockfile with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
+RUN corepack enable && corepack prepare pnpm@10.0.0 --activate
 WORKDIR /build
 
 # Cognito config baked into the SPA at build time (Vite reads VITE_* at build).
