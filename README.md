@@ -124,7 +124,8 @@ Built with a three-tier architecture: a React SPA frontend, an Express 5 API gat
 | `GET` | `/api/metadata` | App metadata from `deepgram.toml` |
 | `GET` | `/api/audio-proxy` | CORS-friendly remote audio proxy |
 | `GET` | `/health` | Health check |
-| `GET` | `/docs` | Swagger UI (OpenAPI spec) |
+| `GET` | `/docs` | Swagger UI — interactive API docs (see below) |
+| `GET` | `/api/openapi.yml` | Raw OpenAPI spec (YAML) that Swagger UI loads |
 | `GET` | `/api/settings` | Get app settings including export config |
 | `PATCH` | `/api/settings` | Update settings fields |
 | `GET` | `/api/settings/export` | Get export configuration |
@@ -147,6 +148,19 @@ Built with a three-tier architecture: a React SPA frontend, an Express 5 API gat
 
 All transcription endpoints require a valid JWT (obtain via `/api/session`).
 Settings, dictionary, and user management endpoints require appropriate RBAC permissions (see below).
+
+### API Documentation (Swagger UI)
+
+Interactive API docs are served by Swagger UI at **`/docs`**:
+
+| Environment | URL |
+|-------------|-----|
+| Local (default port) | http://localhost:8081/docs |
+| Behind Caddy / prod | `https://<host>/docs` |
+
+Swagger UI does not embed the spec — it fetches it at runtime from **`/api/openapi.yml`**, which serves the raw OpenAPI YAML. You can open or download that URL directly (e.g. `curl http://localhost:8081/api/openapi.yml`) to feed the spec into other tooling (Postman, code generators).
+
+The spec is loaded from `contracts/interfaces/transcription/openapi.yml`. Both `/docs` and `/api/openapi.yml` are mounted **only when that file exists** — if it is missing (e.g. the `contracts` submodule was not checked out), the gateway starts normally but neither route is registered and `/docs` returns 404. On startup the gateway logs `📖 API Docs at http://localhost:<port>/docs` when the spec loaded successfully.
 
 ## Authentication & RBAC
 
