@@ -52,6 +52,11 @@ jobs:
           push: false
           load: true
           tags: parliament-gateway:${{ steps.meta.outputs.tag }}
+          # Cache layers across runs (incl. the expensive Caddy Go compile and
+          # pnpm install) via the free GitHub Actions cache backend. Unchanged
+          # layers are reused, cutting emulated-build time dramatically.
+          cache-from: type=gha,scope=gateway
+          cache-to: type=gha,scope=gateway,mode=max
           build-args: |
             VITE_COGNITO_DOMAIN=${{ vars.COGNITO_DOMAIN }}
             VITE_COGNITO_CLIENT_ID=${{ vars.COGNITO_CLIENT_ID }}
@@ -67,6 +72,8 @@ jobs:
           push: false
           load: true
           tags: parliament-postprocess:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=postprocess
+          cache-to: type=gha,scope=postprocess,mode=max
 
       - name: Export images + config
         run: |
