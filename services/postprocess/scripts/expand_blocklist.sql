@@ -106,7 +106,12 @@ INSERT INTO block_list (token, list_kind, reason) VALUES
   ('resume', 'block', 'common word, fuzzy match risk'),
   ('surprise', 'block', 'common word, fuzzy match risk'),
   ('reason', 'block', 'common word, fuzzy match risk'),
-  ('priority', 'block', 'common word, fuzzy match risk')
+  ('priority', 'block', 'common word, fuzzy match risk'),
+  ('later', 'block', 'fuzzy match to Lartey (Agnes Naa Momo Lartey alias)'),
+  ('evolved', 'block', 'common word, fuzzy match risk'),
+  ('evolve', 'block', 'common word, fuzzy match risk'),
+  ('group', 'block', 'common word, fuzzy match risk'),
+  ('groups', 'block', 'common word, fuzzy match risk')
 ON CONFLICT DO NOTHING;
 
 -- Also add stopword entries for the most common false-positive triggers
