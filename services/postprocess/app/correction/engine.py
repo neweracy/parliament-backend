@@ -17,11 +17,20 @@ import re
 from dataclasses import dataclass
 
 from app.correction.blocklist import is_stopword, is_title, is_word_stopword
-from app.correction.scoring import JOINED_CONFIDENCE, STRATEGY_RANK
+from app.correction.confidence import (
+    align_span_to_words,
+    confidence_gate_blocks_approximate,
+    span_confidence,
+)
+from app.correction.gates import GateContext, GateTally
+from app.correction.lexicon import lexicon_gate_blocks_approximate
+from app.correction.scoring import JOINED_CONFIDENCE, STRATEGY_RANK, TITLE_PERSON_CONFIDENCE
 from app.correction.strategies import (
     MIN_CANDIDATE_LENGTH,
+    EvidenceParams,
     MatchResult,
     get_party_display,
+    match_component,
     match_exact,
     match_fused,
     match_fuzzy,
@@ -41,6 +50,9 @@ def correct_single(
     *,
     fuzzy_score_cutoff: float = 0.70,
     min_candidate_length: int = MIN_CANDIDATE_LENGTH,
+    gate_context: GateContext | None = None,
+    span_conf: float | None = None,
+    tally: GateTally | None = None,
 ) -> MatchResult | None:
     """Run the short-circuiting strategy chain for a single text span.
 
@@ -52,6 +64,33 @@ def correct_single(
       4. Otherwise, try each strategy in order, returning on first hit:
          exact → fused → initials → phonetic → fuzzy → substring.
       5. If no strategy matches, return None.
+
+    Confidence_Gate (Req 1)
+    -----------------------
+    The Deterministic_Strategy members (``exact``, ``fused``, ``initials``) are
+    evaluated at every Span_Confidence including Unknown (Req 1.1). The
+    Approximate_Strategy members (``phonetic``, ``fuzzy``, ``substring``) are
+    evaluated only when the Confidence_Gate does not block them. The gate is
+    consulted **only when the GateContext is non-inert** — i.e. at least one
+    feature flag is on — so that with every flag off this function reproduces
+    the Baseline chain exactly (Req 12.9); see ``app.correction.confidence`` for
+    the activation rationale. When the gate blocks approximate matching and no
+    deterministic strategy hits, the caller preserves the Span unchanged
+    (Req 1.9).
+
+    Lexicon_Gate (Req 2)
+    --------------------
+    A Span of ordinary English words is also excluded from the
+    Approximate_Strategy members when the ``lexicon_gate_enabled`` flag is on
+    (and the context non-inert), the Span is absent from the Dataset_Cache
+    alias set, every token is a lexicon member, and Span_Confidence is Unknown
+    or at/above the Lexicon_Override_Threshold (Req 2.5, 2.6, 2.8). A known
+    confidence strictly below the override permits approximate evaluation
+    (Req 2.7). Deterministic strategies are never gated (Req 2.9, 2.14). When
+    the flag is off or the lexicon failed to load, approximate evaluation is
+    permitted for any Span no other gate rejects (Req 2.13). A rejected Span is
+    preserved unchanged with no correction entry (Req 2.12), handled by the
+    caller exactly as for the Confidence_Gate.
 
     Parameters
     ----------
@@ -68,19 +107,110 @@ def correct_single(
         Minimum score cutoff passed to ``match_fuzzy`` (default 0.70).
     min_candidate_length : int
         Minimum input length for full strategy chain (default 4).
+    gate_context : GateContext | None
+        The per-request gate inputs (task 1.4). ``None`` is normalised to an
+        inert context, which is the Baseline path: no gate applies and the
+        strategy chain runs exactly as before. Later tasks (2.x, 4.x) read the
+        resolved thresholds and request-scoped inputs from this context to
+        gate the Approximate_Strategy members; this task only threads it
+        through so those tasks widen no signature.
+    span_conf : float | None
+        The Span_Confidence for this Span (Req 1.3-1.5), or ``None`` for
+        Unknown. Consulted for the Confidence_Gate only when the gate context
+        is non-inert. Callers (``correct_text``, ``correct_words``, and the
+        title-person helpers) derive it from the Words aligned to the Span.
+    tally : GateTally | None
+        Optional per-request observability collector (task 6.1, Req 13). When
+        supplied and the gate context is non-inert, this function records which
+        gate rejected the Span from approximate matching — attributed to the
+        first gate in evaluation order (asr_confidence before lexicon before
+        the phonetic/fuzzy/component sub-gates, Req 13.9) — and records the Span
+        as having had an Approximate_Strategy evaluated when the approximate
+        chain runs (Req 13.4). Purely observational: it never changes the match
+        outcome, is ``None`` on the Baseline path, and its bookkeeping never
+        raises (Req 13.11).
 
     Returns
     -------
     MatchResult | None
         The best match if any strategy succeeds, otherwise None.
     """
+    # Normalise an absent context to an inert one so callers and later gate
+    # tasks share one shape. An inert context leaves this function's path
+    # unchanged (Req 12.9).
+    if gate_context is None:
+        gate_context = GateContext.inert()
+
     text_lower = text.lower()
+
+    # Confidence_Gate (Req 1.2, 1.11): the Approximate_Strategy members are
+    # excluded when the gate is active AND blocks them. The gate is active only
+    # when the context is non-inert (at least one flag on) — with every flag
+    # off this stays False and the full Baseline chain runs (Req 12.9). See
+    # app.correction.confidence for the activation rationale. The
+    # High_Confidence_Threshold is read from the provider profile on the context
+    # (task 2.12.3), so it branches on ``CorrectionOptions.provider``; with
+    # ``provider_profiles_enabled`` off every provider resolves the ``deepgram``
+    # profile — the task 1.1 threshold — so the value is unchanged (Req 12.9).
+    block_approximate = (
+        not gate_context.is_inert
+        and confidence_gate_blocks_approximate(
+            span_conf, gate_context.profile.high_confidence_threshold
+        )
+    )
+    # Observability (Req 13.1, 13.5, 13.9): attribute a Confidence_Gate
+    # rejection to the ``asr_confidence`` gate — the first gate in evaluation
+    # order. Purely a tally write; does not change the outcome.
+    if block_approximate and tally is not None:
+        tally.record_rejection("asr_confidence", text, span_conf)
+
+    # Lexicon_Gate (Req 2.5-2.8, 2.10, 2.13): reject the Approximate_Strategy
+    # members for a Span of ordinary English words. Active only when the
+    # ``lexicon_gate_enabled`` flag is on and the context is non-inert — with
+    # the flag off (or every flag off) this stays False and approximate
+    # evaluation is permitted (Req 2.13, 12.9). Deterministic strategies are
+    # never gated (Req 2.9, 2.14), so the check sits alongside the
+    # Confidence_Gate before the approximate chain. Alias membership is the
+    # whole Span against the Dataset_Cache alias set (``index.canonical_map``
+    # holds lowercased alias/canonical keys); an alias is never gated
+    # (Req 2.5, 2.8). Multi-token Spans are gated only when every token is a
+    # lexicon member and the Span is not an alias (Req 2.8) — the helper
+    # enforces this. Membership is evaluated per token lowercased and stripped
+    # of edge punctuation inside the helper (Req 2.10). The
+    # Lexicon_Override_Threshold and the Unknown-confidence rejection policy are
+    # read from the provider profile on the context (task 2.12.3), so the gate
+    # branches on ``CorrectionOptions.provider``: ``deepgram`` keeps the Req 2.6
+    # unconditional Unknown-confidence rejection, while ``khaya``/``hybrid`` opt
+    # out of it (``lexicon_gate_reject_unknown=False``) only when
+    # ``provider_profiles_enabled`` is on. With the flag off every provider
+    # resolves the ``deepgram`` profile, so the threshold and policy are the
+    # task 1.1 / Req 2.6 values and behaviour is unchanged (Req 12.9).
+    if (
+        not block_approximate
+        and not gate_context.is_inert
+        and gate_context.config.lexicon_gate_enabled
+    ):
+        block_approximate = lexicon_gate_blocks_approximate(
+            text_lower.split(),
+            span_conf,
+            lexicon=gate_context.lexicon,
+            is_alias=text_lower in index.canonical_map,
+            override_threshold=gate_context.profile.lexicon_override_threshold,
+            reject_unknown=gate_context.profile.lexicon_gate_reject_unknown,
+        )
+        # Observability (Req 13.1, 13.5, 13.9): attribute a Lexicon_Gate
+        # rejection to the ``lexicon`` gate. This branch only runs when the
+        # Confidence_Gate did not already block, so ``lexicon`` is correctly
+        # the first gate to reject this Span here (Req 13.9). Tally-only.
+        if block_approximate and tally is not None:
+            tally.record_rejection("lexicon", text, span_conf)
 
     # Stopword guard — checked before any strategy (Requirement 4.7)
     if is_stopword(text_lower, snapshot):
         return None
 
     # Short inputs (< min_candidate_length chars): only exact and fused
+    # (both Deterministic — evaluated at every Span_Confidence, Req 1.1).
     if len(text_lower) < min_candidate_length:
         result = match_exact(text_lower, index)
         if result is not None:
@@ -90,7 +220,8 @@ def correct_single(
             return result
         return None
 
-    # Full strategy chain — short-circuit on first hit
+    # --- Deterministic_Strategy members: evaluated at every Span_Confidence
+    #     including Unknown, never gated (Req 1.1) ---
     result = match_exact(text_lower, index)
     if result is not None:
         return result
@@ -103,7 +234,27 @@ def correct_single(
     if result is not None:
         return result
 
-    result = match_phonetic(text_lower, index, snapshot)
+    # --- Approximate_Strategy members: excluded when the Confidence_Gate
+    #     blocks them (Req 1.2, 1.11) ---
+    if block_approximate:
+        return None
+
+    # Observability (Req 13.4): the Span has passed every gate that would keep
+    # it out of approximate matching, so at least one Approximate_Strategy is
+    # about to be evaluated for it. Record it once for the
+    # approx-spans-evaluated metric. Tally-only; does not change the outcome.
+    if tally is not None:
+        tally.record_approx_evaluated(text)
+
+    # Evidence-scaled scoring (Req 3). When ``evidence_confidence_enabled`` is
+    # on (and the context non-inert), the phonetic and fuzzy strategies compute
+    # an Evidence_Score and the phonetic Min_Phonetic_Key_Length /
+    # Min_Phonetic_Similarity sub-gates apply (Req 3.1-3.8, 3.12-3.14). With the
+    # flag off the params are inert and the strategies return their legacy flat
+    # constants, so the flag-off path is Baseline-equivalent (Req 12.9).
+    evidence = _resolve_evidence_params(gate_context)
+
+    result = match_phonetic(text_lower, index, snapshot, evidence=evidence)
     if result is not None:
         return result
 
@@ -113,15 +264,67 @@ def correct_single(
         snapshot,
         fuzzy_score_cutoff=fuzzy_score_cutoff,
         min_candidate_length=min_candidate_length,
+        evidence=evidence,
     )
     if result is not None:
         return result
 
-    result = match_substring(text_lower, index, snapshot)
+    # Component_Match (Req 5) replaces the legacy arbitrary-infix substring
+    # strategy, ranked last after ``fuzzy`` (Req 5.10). Because it changes the
+    # accepted-match set, it rides the same non-inert-context gate as the other
+    # precision behaviours: an inert context (every flag off) takes the legacy
+    # ``match_substring`` path so the flag-off output stays Baseline-equivalent
+    # (Req 12.9); a non-inert context uses ``match_component``. The Lexicon_Gate
+    # sub-check (Req 5.5) is active only when ``lexicon_gate_enabled`` is on and
+    # the lexicon loaded — independent of the Confidence_Gate's earlier block,
+    # so a lexicon word whose confidence sits just below the override (which the
+    # Lexicon_Gate above lets through) is still rejected here (Req 5.5).
+    if gate_context.is_inert:
+        result = match_substring(text_lower, index, snapshot)
+    else:
+        lexicon_active = (
+            gate_context.config.lexicon_gate_enabled
+            and gate_context.lexicon is not None
+            and getattr(gate_context.lexicon, "loaded", False)
+        )
+        result = match_component(
+            text_lower,
+            index,
+            snapshot,
+            min_len=gate_context.config.component_match_min_length,
+            lexicon=gate_context.lexicon,
+            lexicon_active=lexicon_active,
+        )
     if result is not None:
         return result
 
     return None
+
+
+def _resolve_evidence_params(gate_context: GateContext) -> EvidenceParams:
+    """Build the :class:`EvidenceParams` for the Approximate_Strategy scorers.
+
+    Evidence scoring is active only when the context is non-inert (at least one
+    flag on) **and** ``evidence_confidence_enabled`` is set. Otherwise an inert
+    ``EvidenceParams`` (``enabled=False``) is returned so the strategies take
+    their legacy flat-confidence path and the output stays Baseline-equivalent
+    (Req 12.9).
+    """
+    if gate_context.is_inert or not gate_context.config.evidence_confidence_enabled:
+        return EvidenceParams(enabled=False)
+    # The two provider-calibrated thresholds (Min_Phonetic_Similarity,
+    # Max_Relative_Distance) are read from the provider profile on the context
+    # (task 2.12.3) so they branch on ``CorrectionOptions.provider``; the
+    # non-calibrated params (key length, candidate cap) stay on GateConfig. With
+    # ``provider_profiles_enabled`` off every provider resolves the ``deepgram``
+    # profile — the task 1.1 values — so these are unchanged (Req 12.9).
+    return EvidenceParams(
+        enabled=True,
+        min_phonetic_key_length=gate_context.config.min_phonetic_key_length,
+        min_phonetic_similarity=gate_context.profile.min_phonetic_similarity,
+        max_relative_distance=gate_context.profile.max_relative_distance,
+        max_candidates_per_span=gate_context.config.max_candidates_per_span,
+    )
 
 
 def correction_sort_key(result: MatchResult, span_len: int) -> tuple:
@@ -255,14 +458,20 @@ def _match_title_person(
     *,
     fuzzy_score_cutoff: float = 0.70,
     min_candidate_length: int = MIN_CANDIDATE_LENGTH,
+    gate_context: GateContext | None = None,
+    words: list[dict] | None = None,
+    tally: GateTally | None = None,
 ) -> tuple[MatchResult, int] | None:
     """Try to match person name tokens following a title token.
 
     Tries windows of 3, 2, 1 tokens after the title. On match, returns
     the MatchResult and the number of name tokens consumed.
 
-    This is a simplified version for task 6.5 — the full title-person
-    path with surname/phonetic/fuzzy fallback is task 6.6.
+    Span_Confidence for each name window is derived from the Words aligned to
+    that window (Req 1.7). A Title_Prefix immediately preceding a high-confidence
+    Span still excludes the Approximate_Strategy members from the name window,
+    because the Confidence_Gate applies to the name Span regardless of the
+    preceding title (Req 1.11).
     """
     threshold = min(min_confidence, 0.65)
     max_lookahead = min(3, len(tokens) - title_index - 1)
@@ -270,9 +479,13 @@ def _match_title_person(
     if max_lookahead < 1:
         return None
 
+    # Name tokens begin at the token position immediately after the title,
+    # which aligns to the same index in the Words list (Req 1.7, 1.11).
+    name_start = title_index + 1
+
     # Try window sizes from largest to smallest
     for win_size in range(max_lookahead, 0, -1):
-        name_tokens = tokens[title_index + 1 : title_index + 1 + win_size]
+        name_tokens = tokens[name_start : name_start + win_size]
         phrase = " ".join(t.word for t in name_tokens)
 
         # Skip if single-token window is a stopword
@@ -283,6 +496,9 @@ def _match_title_person(
         if win_size > 1 and is_stopword(name_tokens[-1].word.lower(), snapshot):
             continue
 
+        span_conf = _slice_span_confidence(
+            words, name_start, [t.word for t in name_tokens]
+        )
         match = correct_single(
             phrase,
             win_size,
@@ -290,6 +506,9 @@ def _match_title_person(
             snapshot,
             fuzzy_score_cutoff=fuzzy_score_cutoff,
             min_candidate_length=min_candidate_length,
+            gate_context=gate_context,
+            span_conf=span_conf,
+            tally=tally,
         )
         if match and match.entity_kind == "person" and match.confidence >= threshold:
             return (match, win_size)
@@ -306,20 +525,33 @@ def _match_title_person(
                 entity_type = index.entity_type_map.get(canonical, "person")
                 result = MatchResult(
                     canonical=canonical,
-                    confidence=0.90,
+                    confidence=TITLE_PERSON_CONFIDENCE,
                     strategy="title_person",
                     entity_kind="person",
                     entity_type=entity_type,
                 )
                 return (result, 1)
 
-        # Phonetic then fuzzy on single token after title
-        phonetic_match = match_phonetic(surname, index)
-        if phonetic_match and phonetic_match.entity_kind == "person" and phonetic_match.confidence >= threshold:
+        # Phonetic then fuzzy on single token after title. Evidence-scaled
+        # scoring (Req 3) applies to these surname fallbacks too when enabled;
+        # inert when the flag is off (Req 12.9).
+        evidence = _resolve_evidence_params(
+            gate_context if gate_context is not None else GateContext.inert()
+        )
+        phonetic_match = match_phonetic(surname, index, evidence=evidence)
+        if (
+            phonetic_match
+            and phonetic_match.entity_kind == "person"
+            and phonetic_match.confidence >= threshold
+        ):
             return (phonetic_match, 1)
 
-        fuzzy_match = match_fuzzy(surname, index, snapshot)
-        if fuzzy_match and fuzzy_match.entity_kind == "person" and fuzzy_match.confidence >= threshold:
+        fuzzy_match = match_fuzzy(surname, index, snapshot, evidence=evidence)
+        if (
+            fuzzy_match
+            and fuzzy_match.entity_kind == "person"
+            and fuzzy_match.confidence >= threshold
+        ):
             return (fuzzy_match, 1)
 
     return None
@@ -330,6 +562,27 @@ def _match_title_person(
 # ---------------------------------------------------------------------------
 
 
+def _slice_span_confidence(
+    words: list[dict] | None,
+    start_index: int,
+    token_words: list[str],
+) -> float | None:
+    """Derive Span_Confidence for a token slice from the request Words (Req 1.7-1.10).
+
+    Aligns the Span tokens to the Words at the same sequence positions and
+    returns the minimum clamped Word_Confidence over the aligned Words. Returns
+    Unknown (``None``) when the Words list is absent or empty (Req 1.10) or when
+    the tokens do not align (Req 1.8), which leaves the Confidence_Gate inactive
+    for that Span (Req 1.6).
+    """
+    if not words:
+        return None
+    covered = align_span_to_words(token_words, words, start_index)
+    if covered is None:
+        return None
+    return span_confidence(covered)
+
+
 def correct_text(
     text: str,
     index: MatchIndex,
@@ -338,6 +591,9 @@ def correct_text(
     min_confidence: float = 0.75,
     fuzzy_score_cutoff: float = 0.70,
     min_candidate_length: int = MIN_CANDIDATE_LENGTH,
+    gate_context: GateContext | None = None,
+    words: list[dict] | None = None,
+    tally: GateTally | None = None,
 ) -> TextCorrectionResult:
     """Correct all entity references in a transcript text.
 
@@ -366,12 +622,27 @@ def correct_text(
         Minimum score cutoff passed to ``match_fuzzy`` (default 0.70).
     min_candidate_length : int
         Minimum input length for full strategy chain (default 4).
+    gate_context : GateContext | None
+        The per-request gate inputs (task 1.4), forwarded to ``correct_single``
+        and the title-person helper. ``None`` is normalised to an inert
+        context so the transcript-text path is unchanged from Baseline
+        (Req 12.9).
+    words : list[dict] | None
+        The request's Words list, used to derive Span_Confidence for each Span
+        by aligning Span tokens to the Words at the same sequence positions
+        (Req 1.7). When absent or empty, every Span_Confidence is Unknown so the
+        Confidence_Gate stays inactive for the transcript path (Req 1.10). When
+        the gate context is inert this is unused (Baseline path).
 
     Returns
     -------
     TextCorrectionResult
         The corrected text, list of corrections applied, and entities found.
     """
+    # Normalise an absent context to an inert one (Baseline path, Req 12.9).
+    if gate_context is None:
+        gate_context = GateContext.inert()
+
     if not text or not text.strip():
         return TextCorrectionResult(text=text, corrections=[], entities_found=[])
 
@@ -403,6 +674,9 @@ def correct_text(
                 min_confidence,
                 fuzzy_score_cutoff=fuzzy_score_cutoff,
                 min_candidate_length=min_candidate_length,
+                gate_context=gate_context,
+                words=words,
+                tally=tally,
             )
             if title_result:
                 match, tokens_consumed = title_result
@@ -482,7 +756,12 @@ def correct_text(
                 if is_stopword(last_word, snapshot):
                     continue
 
-            # Strategy A: try the phrase as-is via correct_single
+            # Strategy A: try the phrase as-is via correct_single.
+            # Derive Span_Confidence from the Words aligned to this token slice
+            # (Req 1.7); Unknown when no Words list or the tokens diverge.
+            span_conf = _slice_span_confidence(
+                words, i, [t.word for t in token_slice]
+            )
             match = correct_single(
                 phrase,
                 n,
@@ -490,6 +769,9 @@ def correct_text(
                 snapshot,
                 fuzzy_score_cutoff=fuzzy_score_cutoff,
                 min_candidate_length=min_candidate_length,
+                gate_context=gate_context,
+                span_conf=span_conf,
+                tally=tally,
             )
 
             # Strategy B: joined match (for n > 1 when correct_single fails)
@@ -611,6 +893,8 @@ def _match_title_person_words(
     *,
     fuzzy_score_cutoff: float = 0.70,
     min_candidate_length: int = MIN_CANDIDATE_LENGTH,
+    gate_context: GateContext | None = None,
+    tally: GateTally | None = None,
 ) -> tuple[MatchResult, int] | None:
     """Try to match person name tokens following a title in word dicts.
 
@@ -634,6 +918,10 @@ def _match_title_person_words(
         ):
             continue
 
+        # Span_Confidence is derived directly from the covered Word dicts
+        # (Req 1.3-1.5); a high-confidence name Span still excludes the
+        # Approximate_Strategy members even behind a Title_Prefix (Req 1.11).
+        span_conf = span_confidence(name_words)
         match = correct_single(
             phrase,
             win_size,
@@ -641,6 +929,9 @@ def _match_title_person_words(
             snapshot,
             fuzzy_score_cutoff=fuzzy_score_cutoff,
             min_candidate_length=min_candidate_length,
+            gate_context=gate_context,
+            span_conf=span_conf,
+            tally=tally,
         )
         if match and match.entity_kind == "person" and match.confidence >= threshold:
             return (match, win_size)
@@ -657,14 +948,19 @@ def _match_title_person_words(
                 entity_type = index.entity_type_map.get(canonical, "person")
                 result = MatchResult(
                     canonical=canonical,
-                    confidence=0.90,
+                    confidence=TITLE_PERSON_CONFIDENCE,
                     strategy="title_person",
                     entity_kind="person",
                     entity_type=entity_type,
                 )
                 return (result, 1)
 
-        phonetic_match = match_phonetic(surname, index)
+        # Evidence-scaled scoring (Req 3) applies to these surname fallbacks
+        # too when enabled; inert when the flag is off (Req 12.9).
+        evidence = _resolve_evidence_params(
+            gate_context if gate_context is not None else GateContext.inert()
+        )
+        phonetic_match = match_phonetic(surname, index, evidence=evidence)
         if (
             phonetic_match
             and phonetic_match.entity_kind == "person"
@@ -672,7 +968,7 @@ def _match_title_person_words(
         ):
             return (phonetic_match, 1)
 
-        fuzzy_match = match_fuzzy(surname, index, snapshot)
+        fuzzy_match = match_fuzzy(surname, index, snapshot, evidence=evidence)
         if (
             fuzzy_match
             and fuzzy_match.entity_kind == "person"
@@ -692,6 +988,8 @@ def correct_words(
     min_confidence: float = 0.75,
     fuzzy_score_cutoff: float = 0.70,
     min_candidate_length: int = MIN_CANDIDATE_LENGTH,
+    gate_context: GateContext | None = None,
+    tally: GateTally | None = None,
 ) -> WordCorrectionResult:
     """Correct all entity references in a transcript word list.
 
@@ -724,6 +1022,12 @@ def correct_words(
         Minimum score cutoff passed to ``match_fuzzy`` (default 0.70).
     min_candidate_length : int
         Minimum input length for full strategy chain (default 4).
+    gate_context : GateContext | None
+        The per-request gate inputs (task 1.4), forwarded to ``correct_single``
+        and the title-person helper. ``None`` is normalised to an inert
+        context so the word-level path is unchanged from Baseline (Req 12.9).
+        Span_Confidence is derived directly from the covered Word dicts
+        (Req 1.3-1.5) and passed to ``correct_single`` for the Confidence_Gate.
 
     Returns
     -------
@@ -731,6 +1035,10 @@ def correct_words(
         The corrected words list (may be shorter due to joining),
         the corrections list, and entities_found.
     """
+    # Normalise an absent context to an inert one (Baseline path, Req 12.9).
+    if gate_context is None:
+        gate_context = GateContext.inert()
+
     if not words:
         return WordCorrectionResult(words=[], corrections=[], entities_found=[])
 
@@ -753,6 +1061,8 @@ def correct_words(
                 min_confidence,
                 fuzzy_score_cutoff=fuzzy_score_cutoff,
                 min_candidate_length=min_candidate_length,
+                gate_context=gate_context,
+                tally=tally,
             )
             if title_result:
                 match, name_count = title_result
@@ -850,6 +1160,10 @@ def correct_words(
 
             phrase = " ".join(window_words)
 
+            # Span_Confidence for this window derives directly from its covered
+            # Word dicts (Req 1.3-1.5); Unknown when none carry a confidence.
+            span_conf = span_confidence(window)
+
             # Try correction via correct_single
             match = correct_single(
                 phrase,
@@ -858,6 +1172,9 @@ def correct_words(
                 snapshot,
                 fuzzy_score_cutoff=fuzzy_score_cutoff,
                 min_candidate_length=min_candidate_length,
+                gate_context=gate_context,
+                span_conf=span_conf,
+                tally=tally,
             )
 
             # For n > 1: also try joined (fused) match
