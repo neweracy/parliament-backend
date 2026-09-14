@@ -97,6 +97,46 @@ class Settings(BaseSettings):
     fuzzy_score_cutoff: float = 0.70
     min_candidate_length: int = 4
 
+    # --- Correction precision gating tunables (Req 12) ---
+    # Each is read from its own SCREAMING_SNAKE_CASE env var. Fractional values
+    # clamp to [0, 1]; whole-number values clamp to the range noted alongside.
+    # Ranges are enforced once at startup by ``clamp_ranges``.
+    # Span_Confidence at or above which a Span is restricted to deterministic
+    # strategies. Range [0.0, 1.0].
+    high_confidence_threshold: float = 0.90
+    # Span_Confidence below which a lexicon Span is exempt from the Lexicon_Gate.
+    # Range [0.0, 1.0].
+    lexicon_override_threshold: float = 0.60
+    # Maximum Levenshtein distance / Span length accepted for a fuzzy match.
+    # Range [0.0, 1.0].
+    max_relative_distance: float = 0.25
+    # Minimum Phonetic_Key length required to attempt a phonetic match.
+    # Range [1, 12].
+    min_phonetic_key_length: int = 4
+    # Minimum Normalized_Similarity required for a phonetic candidate.
+    # Range [0.0, 1.0].
+    min_phonetic_similarity: float = 0.60
+    # Minimum Span length required to attempt a Component_Match. Range [1, 20].
+    component_match_min_length: int = 6
+    # Maximum number of fuzzy candidates scored for one Span. Range [1, 5000].
+    max_candidates_per_span: int = 200
+    # Number of Words either side of a Span forming the Context_Window when no
+    # speaker attribution is present. Range [1, 500].
+    context_window_words: int = 40
+    # Amount subtracted from the Evidence_Score of an out-of-scope person
+    # candidate. Range [0.0, 1.0].
+    out_of_scope_penalty: float = 0.10
+
+    # --- Correction precision gating feature flags (Req 12) ---
+    # Each flag is resolved independently from its own SCREAMING_SNAKE_CASE env
+    # var and never reads another flag. When every flag is disabled the engine
+    # is baseline-equivalent (Req 12.9).
+    lexicon_gate_enabled: bool = True
+    evidence_confidence_enabled: bool = True
+    context_gate_enabled: bool = True
+    sitting_scope_enabled: bool = False
+    llm_veto_enabled: bool = False
+
     # --- AWS / Bedrock ---
     aws_region: str = "us-east-1"
     bedrock_model_id: str = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
@@ -183,11 +223,22 @@ class Settings(BaseSettings):
             "HISTORY_QUEUE_SIZE": 1000,
             "HISTORY_RETENTION_DAYS": 90,
             "HISTORY_RETENTION_INTERVAL_SECONDS": 86400,
+            # Correction precision gating (Req 12)
+            "MIN_PHONETIC_KEY_LENGTH": 4,
+            "COMPONENT_MATCH_MIN_LENGTH": 6,
+            "MAX_CANDIDATES_PER_SPAN": 200,
+            "CONTEXT_WINDOW_WORDS": 40,
         }
         numeric_float_fields: dict[str, float] = {
             "MIN_CONFIDENCE": 0.75,
             "WORD_ACCEPT_THRESHOLD": 0.90,
             "FUZZY_SCORE_CUTOFF": 0.70,
+            # Correction precision gating (Req 12)
+            "HIGH_CONFIDENCE_THRESHOLD": 0.90,
+            "LEXICON_OVERRIDE_THRESHOLD": 0.60,
+            "MAX_RELATIVE_DISTANCE": 0.25,
+            "MIN_PHONETIC_SIMILARITY": 0.60,
+            "OUT_OF_SCOPE_PENALTY": 0.10,
         }
 
         for field_name, default in numeric_int_fields.items():
@@ -203,6 +254,52 @@ class Settings(BaseSettings):
                 values[key] = _safe_float(raw, default, field_name)
 
         return values
+
+
+# Valid ranges for correction precision gating tunables (Req 12.11), keyed by
+# the Settings field name and paired with the SCREAMING_SNAKE_CASE variable
+# name used in the warning. Each entry is (env_name, lower_bound, upper_bound).
+_GATING_RANGES: dict[str, tuple[str, float, float]] = {
+    "high_confidence_threshold": ("HIGH_CONFIDENCE_THRESHOLD", 0.0, 1.0),
+    "lexicon_override_threshold": ("LEXICON_OVERRIDE_THRESHOLD", 0.0, 1.0),
+    "max_relative_distance": ("MAX_RELATIVE_DISTANCE", 0.0, 1.0),
+    "min_phonetic_similarity": ("MIN_PHONETIC_SIMILARITY", 0.0, 1.0),
+    "out_of_scope_penalty": ("OUT_OF_SCOPE_PENALTY", 0.0, 1.0),
+    "min_phonetic_key_length": ("MIN_PHONETIC_KEY_LENGTH", 1, 12),
+    "component_match_min_length": ("COMPONENT_MATCH_MIN_LENGTH", 1, 20),
+    "max_candidates_per_span": ("MAX_CANDIDATES_PER_SPAN", 1, 5000),
+    "context_window_words": ("CONTEXT_WINDOW_WORDS", 1, 500),
+}
+
+
+def clamp_ranges(settings: Settings) -> Settings:
+    """Clamp out-of-range gating tunables to the nearest bound.
+
+    Runs once at startup. For every correction precision gating tunable whose
+    resolved value falls outside its documented range (Req 12.11), the value is
+    clamped to the nearest bound and one ``config.invalid_value`` warning is
+    logged naming the offending variable (Req 12.8). In-range values are left
+    untouched and log nothing. Mutates and returns *settings*.
+    """
+    for field_name, (env_name, lower, upper) in _GATING_RANGES.items():
+        value = getattr(settings, field_name)
+        if value < lower:
+            clamped: float | int = lower
+        elif value > upper:
+            clamped = upper
+        else:
+            continue
+        # Preserve int type for whole-number fields.
+        if isinstance(value, int) and not isinstance(value, bool):
+            clamped = int(clamped)
+        logger.warning(
+            "config.invalid_value",
+            variable=env_name,
+            raw=value,
+            clamped=clamped,
+        )
+        setattr(settings, field_name, clamped)
+    return settings
 
 
 def validate_required(settings: Settings) -> None:
@@ -230,5 +327,6 @@ def get_settings() -> Settings:
     Exits non-zero if required secrets are absent.
     """
     settings = Settings()
+    clamp_ranges(settings)
     validate_required(settings)
     return settings
