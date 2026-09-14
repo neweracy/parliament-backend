@@ -196,6 +196,7 @@ def lexicon_gate_blocks_approximate(
     lexicon: EnglishLexicon | None,
     is_alias: bool,
     override_threshold: float,
+    reject_unknown: bool = True,
 ) -> bool:
     """Decide whether the Lexicon_Gate rejects a Span for approximate matching.
 
@@ -212,7 +213,8 @@ def lexicon_gate_blocks_approximate(
       ``False``; Req 2.5, 2.8);
     * every token is a member of the lexicon (Req 2.8) — for a single-token
       Span this is just that token (Req 2.5);
-    * Span_Confidence is Unknown (``None``; Req 2.6) **or** Span_Confidence is
+    * Span_Confidence is Unknown (``None``) **and** ``reject_unknown`` is
+      ``True`` (Req 2.6, the ``deepgram`` policy) **or** Span_Confidence is
       known and greater than or equal to ``override_threshold`` (Req 2.5).
 
     A known Span_Confidence strictly below ``override_threshold`` permits
@@ -220,6 +222,15 @@ def lexicon_gate_blocks_approximate(
     Membership is evaluated on each token lowercased and stripped of leading and
     trailing punctuation, which :meth:`EnglishLexicon.contains` performs
     (Req 2.10).
+
+    The Unknown-confidence outcome is provider-calibrated (task 2.12.1). When
+    ``reject_unknown`` is ``True`` (the default and the ``deepgram`` policy) an
+    Unknown-confidence Span is rejected exactly as Req 2.6 mandates. When it is
+    ``False`` (the ``khaya``/``hybrid`` policy, active only when
+    ``provider_profiles_enabled`` is on) an Unknown-confidence Span is **not**
+    rejected on that basis — a provider that structurally cannot supply per-word
+    confidence is not blanket-blocked — so approximate evaluation is permitted
+    for it (returns ``False``).
 
     Parameters
     ----------
@@ -235,6 +246,11 @@ def lexicon_gate_blocks_approximate(
         alias set. An alias is never gated (Req 2.5, 2.8).
     override_threshold:
         The resolved Lexicon_Override_Threshold (Req 2.5, 2.7).
+    reject_unknown:
+        The provider-calibrated Unknown-confidence policy (task 2.12.1).
+        ``True`` (default, ``deepgram``) rejects an Unknown-confidence Span per
+        Req 2.6; ``False`` (``khaya``/``hybrid`` with ``provider_profiles_enabled``
+        on) permits approximate evaluation for an Unknown-confidence Span.
 
     Returns
     -------
@@ -250,9 +266,10 @@ def lexicon_gate_blocks_approximate(
         return False
     if not all(lexicon.contains(token) for token in tokens):
         return False
-    # Confidence condition: Unknown always gates (Req 2.6); a known confidence
-    # gates only at or above the override (Req 2.5), and below it permits
-    # approximate evaluation (Req 2.7).
+    # Confidence condition: Unknown gates only under the ``reject_unknown``
+    # policy (Req 2.6 for ``deepgram``; task 2.12.1 exempts ``khaya``/``hybrid``);
+    # a known confidence gates only at or above the override (Req 2.5), and
+    # below it permits approximate evaluation (Req 2.7).
     if span_conf is None:
-        return True
+        return reject_unknown
     return span_conf >= override_threshold

@@ -136,11 +136,15 @@ def correct_single(
     # excluded when the gate is active AND blocks them. The gate is active only
     # when the context is non-inert (at least one flag on) — with every flag
     # off this stays False and the full Baseline chain runs (Req 12.9). See
-    # app.correction.confidence for the activation rationale.
+    # app.correction.confidence for the activation rationale. The
+    # High_Confidence_Threshold is read from the provider profile on the context
+    # (task 2.12.3), so it branches on ``CorrectionOptions.provider``; with
+    # ``provider_profiles_enabled`` off every provider resolves the ``deepgram``
+    # profile — the task 1.1 threshold — so the value is unchanged (Req 12.9).
     block_approximate = (
         not gate_context.is_inert
         and confidence_gate_blocks_approximate(
-            span_conf, gate_context.config.high_confidence_threshold
+            span_conf, gate_context.profile.high_confidence_threshold
         )
     )
 
@@ -156,7 +160,15 @@ def correct_single(
     # (Req 2.5, 2.8). Multi-token Spans are gated only when every token is a
     # lexicon member and the Span is not an alias (Req 2.8) — the helper
     # enforces this. Membership is evaluated per token lowercased and stripped
-    # of edge punctuation inside the helper (Req 2.10).
+    # of edge punctuation inside the helper (Req 2.10). The
+    # Lexicon_Override_Threshold and the Unknown-confidence rejection policy are
+    # read from the provider profile on the context (task 2.12.3), so the gate
+    # branches on ``CorrectionOptions.provider``: ``deepgram`` keeps the Req 2.6
+    # unconditional Unknown-confidence rejection, while ``khaya``/``hybrid`` opt
+    # out of it (``lexicon_gate_reject_unknown=False``) only when
+    # ``provider_profiles_enabled`` is on. With the flag off every provider
+    # resolves the ``deepgram`` profile, so the threshold and policy are the
+    # task 1.1 / Req 2.6 values and behaviour is unchanged (Req 12.9).
     if (
         not block_approximate
         and not gate_context.is_inert
@@ -167,7 +179,8 @@ def correct_single(
             span_conf,
             lexicon=gate_context.lexicon,
             is_alias=text_lower in index.canonical_map,
-            override_threshold=gate_context.config.lexicon_override_threshold,
+            override_threshold=gate_context.profile.lexicon_override_threshold,
+            reject_unknown=gate_context.profile.lexicon_gate_reject_unknown,
         )
 
     # Stopword guard — checked before any strategy (Requirement 4.7)
@@ -270,11 +283,17 @@ def _resolve_evidence_params(gate_context: GateContext) -> EvidenceParams:
     """
     if gate_context.is_inert or not gate_context.config.evidence_confidence_enabled:
         return EvidenceParams(enabled=False)
+    # The two provider-calibrated thresholds (Min_Phonetic_Similarity,
+    # Max_Relative_Distance) are read from the provider profile on the context
+    # (task 2.12.3) so they branch on ``CorrectionOptions.provider``; the
+    # non-calibrated params (key length, candidate cap) stay on GateConfig. With
+    # ``provider_profiles_enabled`` off every provider resolves the ``deepgram``
+    # profile — the task 1.1 values — so these are unchanged (Req 12.9).
     return EvidenceParams(
         enabled=True,
         min_phonetic_key_length=gate_context.config.min_phonetic_key_length,
-        min_phonetic_similarity=gate_context.config.min_phonetic_similarity,
-        max_relative_distance=gate_context.config.max_relative_distance,
+        min_phonetic_similarity=gate_context.profile.min_phonetic_similarity,
+        max_relative_distance=gate_context.profile.max_relative_distance,
         max_candidates_per_span=gate_context.config.max_candidates_per_span,
     )
 

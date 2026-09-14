@@ -13,10 +13,13 @@ widening as each gate (tasks 2.x, 4.x) is layered on:
 * :class:`GateContext` — the per-request bundle wrapping a :class:`GateConfig`
   together with the request-scoped gate inputs later tasks populate: the
   per-Span Span_Confidence hook, the process-global English_Lexicon handle,
-  and the sitting-scope member set. Fields for signals not yet implemented
-  (English_Lexicon in task 2.3, sitting scope in task 4.5, provider profiles
-  in task 2.12.3) are typed permissively and default to inert values so this
-  task introduces the plumbing without changing behaviour.
+  the sitting-scope member set, and (task 2.12.3) the request's ``provider``
+  value together with the :class:`~app.correction.provider_profiles.ProviderGateProfile`
+  resolved for it. The engine reads the four provider-calibrated thresholds
+  (High_Confidence_Threshold, Lexicon_Override_Threshold, Min_Phonetic_Similarity,
+  Max_Relative_Distance) and the Unknown-confidence Lexicon_Gate policy from that
+  profile, so gate evaluation branches on provider without widening any
+  individual strategy signature.
 
 Baseline equivalence (Req 12.9)
 -------------------------------
@@ -35,6 +38,8 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+from app.correction.provider_profiles import ProviderGateProfile, default_profile
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from app.config import Settings
@@ -159,6 +164,16 @@ class GateContext:
     * :attr:`sitting_scope` — the resolved sitting-scope member set (Req 8),
       a frozenset of canonical names. ``None`` when no scope applies, which
       leaves the Sitting_Scope preference inert (Req 8.2).
+    * :attr:`provider` — the request's ``CorrectionOptions.provider`` value
+      (task 2.12.3), defaulting to ``"deepgram"`` so a request that omits it
+      behaves exactly as today.
+    * :attr:`profile` — the :class:`~app.correction.provider_profiles.ProviderGateProfile`
+      resolved for :attr:`provider` at the pipeline boundary (task 2.12.2's
+      ``provider_profiles``). The engine reads the four provider-calibrated
+      thresholds and the Unknown-confidence Lexicon_Gate policy from here rather
+      than from :class:`GateConfig`. Defaults to the ``deepgram`` profile — the
+      task 1.1 values with the Req 2.6 reject policy — so an all-defaults
+      context is Baseline-equivalent (Req 12.9).
 
     The fields for not-yet-implemented signals are typed permissively (``Any``
     for the lexicon so this task need not depend on task 2.3's module) and
@@ -173,6 +188,14 @@ class GateContext:
     lexicon: Any | None = None
     # Resolved sitting-scope member set (task 4.5); ``None`` when no scope.
     sitting_scope: frozenset[str] | None = field(default=None)
+    # The request's ASR provider (``CorrectionOptions.provider``); default
+    # ``"deepgram"`` so an omitted value behaves as today (task 2.12.3).
+    provider: str = "deepgram"
+    # The gate profile resolved for ``provider`` (task 2.12.2). The engine reads
+    # the four calibrated thresholds and the Unknown-confidence Lexicon_Gate
+    # policy from this profile. Defaults to the ``deepgram`` profile so an
+    # all-defaults context reproduces the task 1.1 Baseline (Req 12.9).
+    profile: ProviderGateProfile = field(default_factory=lambda: default_profile("deepgram"))
 
     @classmethod
     def inert(cls) -> GateContext:
@@ -192,6 +215,8 @@ class GateContext:
         span_confidence_hook: SpanConfidenceHook | None = None,
         lexicon: Any | None = None,
         sitting_scope: frozenset[str] | None = None,
+        provider: str = "deepgram",
+        profile: ProviderGateProfile | None = None,
     ) -> GateContext:
         """Build a :class:`GateContext` at the pipeline boundary from settings.
 
@@ -199,6 +224,15 @@ class GateContext:
         request-scoped inputs. Later tasks pass the real Span_Confidence hook
         (task 2.1), lexicon (task 2.3), and sitting scope (task 4.5); omitting
         one keeps the corresponding gate inert.
+
+        The *provider* (``CorrectionOptions.provider``) and its resolved
+        *profile* thread the per-provider gate calibration through the context
+        (task 2.12.3). When *profile* is omitted the ``deepgram`` default is
+        used, which reproduces the task 1.1 thresholds and the Req 2.6
+        Unknown-confidence policy — so an omitted profile is Baseline-equivalent
+        (Req 12.9). Callers resolve the profile from ``provider_profiles``
+        (``app.config``), which returns the ``deepgram`` profile for every
+        provider when ``provider_profiles_enabled`` is off.
         """
         return cls(
             config=GateConfig.from_settings(settings),
@@ -209,6 +243,8 @@ class GateContext:
             ),
             lexicon=lexicon,
             sitting_scope=sitting_scope,
+            provider=provider,
+            profile=profile if profile is not None else default_profile("deepgram"),
         )
 
     @property

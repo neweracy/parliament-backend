@@ -327,3 +327,104 @@ class TestMetadataCounterOmission:
 
         response_dict = response.model_dump(by_alias=True, exclude_none=True)
         assert response_dict["metadata"]["correlationId"] == "abc-123-def"
+
+
+# ---------------------------------------------------------------------------
+# Provider profile threading at the pipeline boundary (task 2.12.3;
+# Req 1.5, 2.6, 2.7, 12.9, 14.1, 14.10)
+# ---------------------------------------------------------------------------
+
+from app.config import Settings  # noqa: E402
+from app.correction.provider_profiles import default_profile  # noqa: E402
+
+
+def _capture_gate_context(request: CorrectionRequest, settings: Settings):
+    """Run _run_rule_stages capturing the GateContext handed to the engine.
+
+    Patches correct_text (the first engine call) to record its gate_context
+    kwarg, so tests can assert what provider/profile the boundary resolved.
+    """
+    captured = {}
+
+    real_snapshot = _make_snapshot()
+
+    def _fake_correct_text(*args, **kwargs):
+        captured["gate_context"] = kwargs.get("gate_context")
+        from app.correction.engine import TextCorrectionResult
+
+        return TextCorrectionResult(text=request.transcript, corrections=[], entities_found=[])
+
+    def _fake_correct_words(*args, **kwargs):
+        from app.correction.engine import WordCorrectionResult
+
+        return WordCorrectionResult(words=[], corrections=[], entities_found=[])
+
+    with (
+        patch("app.pipeline.correct_text", _fake_correct_text),
+        patch("app.pipeline.correct_words", _fake_correct_words),
+    ):
+        _run_rule_stages(request, real_snapshot, settings, None)
+
+    return captured["gate_context"]
+
+
+class TestPipelineProviderProfileThreading:
+    """The pipeline boundary threads request.options.provider and its resolved
+    profile onto the GateContext (task 2.12.3)."""
+
+    def test_flag_off_resolves_deepgram_for_khaya(self):
+        # Req 12.9: with provider_profiles_enabled off (default), a khaya request
+        # still resolves the deepgram profile — baseline-equivalent.
+        settings = Settings(service_token="x", database_url="x")
+        assert settings.provider_profiles_enabled is False
+        request = CorrectionRequest(
+            transcript="hello",
+            words=[Word(word="hello")],
+            options=CorrectionOptions(provider="khaya"),
+        )
+        ctx = _capture_gate_context(request, settings)
+        assert ctx.provider == "khaya"
+        # Flag off → deepgram profile for every provider (reject_unknown=True).
+        assert ctx.profile == default_profile("deepgram")
+        assert ctx.profile.lexicon_gate_reject_unknown is True
+
+    def test_flag_off_default_provider_is_deepgram(self):
+        # Req 14.1: an omitted provider defaults to "deepgram".
+        settings = Settings(service_token="x", database_url="x")
+        request = CorrectionRequest(transcript="hello", words=[Word(word="hello")])
+        ctx = _capture_gate_context(request, settings)
+        assert ctx.provider == "deepgram"
+        assert ctx.profile == default_profile("deepgram")
+
+    def test_flag_on_resolves_khaya_policy(self):
+        # Task 2.12.1: with the flag on, a khaya request resolves the khaya
+        # profile whose Unknown-confidence policy opts out of rejection.
+        settings = Settings(
+            service_token="x",
+            database_url="x",
+            provider_profiles_enabled=True,
+        )
+        request = CorrectionRequest(
+            transcript="hello",
+            words=[Word(word="hello")],
+            options=CorrectionOptions(provider="khaya"),
+        )
+        ctx = _capture_gate_context(request, settings)
+        assert ctx.provider == "khaya"
+        assert ctx.profile.lexicon_gate_reject_unknown is False
+
+    def test_flag_on_deepgram_keeps_reject_policy(self):
+        # Task 2.12.1: deepgram keeps the Req 2.6 rejection even with the flag on.
+        settings = Settings(
+            service_token="x",
+            database_url="x",
+            provider_profiles_enabled=True,
+        )
+        request = CorrectionRequest(
+            transcript="hello",
+            words=[Word(word="hello")],
+            options=CorrectionOptions(provider="deepgram"),
+        )
+        ctx = _capture_gate_context(request, settings)
+        assert ctx.provider == "deepgram"
+        assert ctx.profile.lexicon_gate_reject_unknown is True

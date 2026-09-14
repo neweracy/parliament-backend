@@ -215,6 +215,37 @@ class TestLexiconGateBlocksApproximate:
             ["Thank,"], None, lexicon=_LEX, is_alias=False, override_threshold=0.60
         )
 
+    def test_reject_unknown_true_is_default_and_gates(self):
+        # Task 2.12.1 / Req 2.6: default reject_unknown=True gates Unknown conf
+        # exactly as the deepgram policy — matches the no-arg behaviour.
+        assert lexicon_gate_blocks_approximate(
+            ["thank"], None, lexicon=_LEX, is_alias=False,
+            override_threshold=0.60, reject_unknown=True,
+        )
+
+    def test_reject_unknown_false_permits_unknown(self):
+        # Task 2.12.1: khaya/hybrid policy — Unknown confidence is NOT rejected
+        # on that basis, so approximate evaluation is permitted.
+        assert not lexicon_gate_blocks_approximate(
+            ["thank"], None, lexicon=_LEX, is_alias=False,
+            override_threshold=0.60, reject_unknown=False,
+        )
+
+    def test_reject_unknown_false_still_gates_confident(self):
+        # Task 2.12.1: the Unknown exemption does not touch the known-confidence
+        # branch — a confident lexicon word at/above the override still gates.
+        assert lexicon_gate_blocks_approximate(
+            ["thank"], 0.95, lexicon=_LEX, is_alias=False,
+            override_threshold=0.60, reject_unknown=False,
+        )
+
+    def test_reject_unknown_false_below_override_still_permits(self):
+        # Req 2.7 unaffected: known confidence below override permits regardless.
+        assert not lexicon_gate_blocks_approximate(
+            ["thank"], 0.30, lexicon=_LEX, is_alias=False,
+            override_threshold=0.60, reject_unknown=False,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Engine integration: correct_single Lexicon_Gate wiring (Req 2.5-2.9, 2.13, 12.9)
@@ -371,5 +402,116 @@ class TestCorrectSingleLexiconGate:
             "sage", 1, index, snapshot,
             gate_context=GateContext.inert(), span_conf=0.99,
         )
+        assert result is not None
+        assert result.canonical == "Sege"
+
+
+# ---------------------------------------------------------------------------
+# Engine integration: provider profile threading (task 2.12.3; Req 1.5, 2.6,
+# 2.7, 12.9, 14.10)
+# ---------------------------------------------------------------------------
+
+from app.correction.provider_profiles import default_profile  # noqa: E402
+
+
+def _lexicon_context_with_profile(profile) -> GateContext:
+    """Non-inert Lexicon_Gate context carrying an explicit provider profile.
+
+    Only the Lexicon_Gate flag is on; thresholds are read from *profile*, so
+    each test exercises the provider branch without touching the Confidence_Gate
+    (the profile's high_confidence_threshold is left at the deepgram default and
+    span confidences are chosen below it).
+    """
+    lex = EnglishLexicon(frozenset({"sage"}), loaded=True)
+    return GateContext(
+        config=GateConfig(lexicon_gate_enabled=True),
+        lexicon=lex,
+        provider="khaya",
+        profile=profile,
+    )
+
+
+class TestCorrectSingleProviderProfileBranch:
+    """correct_single reads calibrated thresholds and the Unknown policy from
+    the provider profile on the context (task 2.12.3)."""
+
+    def test_deepgram_profile_rejects_unknown(self):
+        # Req 2.6 / task 2.12.1: the deepgram profile keeps the unconditional
+        # Unknown-confidence rejection (reject_unknown=True).
+        index, snapshot = _gate_env()
+        result = correct_single(
+            "sage", 1, index, snapshot,
+            gate_context=_lexicon_context_with_profile(default_profile("deepgram")),
+            span_conf=None,
+        )
+        assert result is None
+
+    def test_khaya_profile_permits_unknown(self):
+        # Task 2.12.1: the khaya profile (reject_unknown=False) does NOT reject
+        # an Unknown-confidence lexicon Span, so approximate matching proceeds.
+        index, snapshot = _gate_env()
+        khaya = default_profile("khaya")
+        assert khaya.lexicon_gate_reject_unknown is False
+        result = correct_single(
+            "sage", 1, index, snapshot,
+            gate_context=_lexicon_context_with_profile(khaya),
+            span_conf=None,
+        )
+        assert result is not None
+        assert result.canonical == "Sege"
+
+    def test_hybrid_profile_permits_unknown(self):
+        # Task 2.12.1: hybrid mirrors khaya's Unknown-confidence policy.
+        index, snapshot = _gate_env()
+        result = correct_single(
+            "sage", 1, index, snapshot,
+            gate_context=_lexicon_context_with_profile(default_profile("hybrid")),
+            span_conf=None,
+        )
+        assert result is not None
+        assert result.canonical == "Sege"
+
+    def test_khaya_profile_still_gates_confident_lexicon_word(self):
+        # The khaya Unknown exemption does not weaken the known-confidence
+        # Lexicon_Gate: a confident lexicon word is still rejected (Req 2.5).
+        index, snapshot = _gate_env()
+        result = correct_single(
+            "sage", 1, index, snapshot,
+            gate_context=_lexicon_context_with_profile(default_profile("khaya")),
+            span_conf=0.95,
+        )
+        assert result is None
+
+    def test_override_threshold_read_from_profile(self):
+        # Req 2.7: the Lexicon_Override_Threshold comes from the profile. A
+        # profile with a raised override lets a mid-confidence lexicon word
+        # through where the deepgram default (0.60) would still gate it.
+        index, snapshot = _gate_env()
+        from dataclasses import replace
+
+        high_override = replace(default_profile("deepgram"), lexicon_override_threshold=0.80)
+        result = correct_single(
+            "sage", 1, index, snapshot,
+            gate_context=_lexicon_context_with_profile(high_override),
+            span_conf=0.70,  # below the raised 0.80 override → permitted (Req 2.7)
+        )
+        assert result is not None
+        assert result.canonical == "Sege"
+
+    def test_high_confidence_threshold_read_from_profile(self):
+        # Req 1.2 / 12.9: the Confidence_Gate threshold comes from the profile.
+        # A profile with a raised high threshold lets a 0.95-confidence Span
+        # reach approximate matching where the deepgram default (0.90) blocks it.
+        index, snapshot = _gate_env()
+        from dataclasses import replace
+
+        # Disable the lexicon gate so only the Confidence_Gate is under test.
+        high_conf = replace(default_profile("deepgram"), high_confidence_threshold=0.99)
+        ctx = GateContext(
+            config=GateConfig(evidence_confidence_enabled=True),
+            lexicon=EnglishLexicon(frozenset({"sage"}), loaded=True),
+            profile=high_conf,
+        )
+        result = correct_single("sage", 1, index, snapshot, gate_context=ctx, span_conf=0.95)
         assert result is not None
         assert result.canonical == "Sege"

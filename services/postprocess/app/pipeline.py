@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.config import Settings
+from app.config import Settings, provider_profiles
 from app.correction.engine import (
     TextCorrectionResult,
     WordCorrectionResult,
@@ -92,11 +92,27 @@ def _run_rule_stages(
     # to load, leaves the gate inactive (Req 2.13). When settings is absent
     # (unit tests calling the rule stages directly) an inert context is used,
     # preserving the Baseline path.
-    gate_context = (
-        GateContext.from_settings(settings, lexicon=lexicon)
-        if settings is not None
-        else GateContext.inert()
-    )
+    #
+    # The request's ``provider`` (``CorrectionOptions.provider``, default
+    # ``"deepgram"``) and the gate profile resolved for it are threaded onto the
+    # context here (task 2.12.3) so the Confidence_Gate and Lexicon_Gate branch
+    # on provider without any strategy signature widening. ``provider_profiles``
+    # returns the ``deepgram`` profile for every provider when
+    # ``provider_profiles_enabled`` is off (the default), so the flag-off path
+    # resolves the task 1.1 thresholds for every request and stays
+    # baseline-equivalent (Req 12.9). Resolving the dict here is cheap (a small
+    # fixed number of frozen dataclasses); ``clamp_ranges`` has already run at
+    # startup so the values are parsed and range-clamped.
+    if settings is not None:
+        profile = provider_profiles(settings).get(request.options.provider)
+        gate_context = GateContext.from_settings(
+            settings,
+            lexicon=lexicon,
+            provider=request.options.provider,
+            profile=profile,
+        )
+    else:
+        gate_context = GateContext.inert()
 
     # correct_words operates on the word list
     # Serialize words to dicts preserving extra fields (by_alias for camelCase)
