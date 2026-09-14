@@ -10,6 +10,52 @@ The ``narrow()`` function provides candidate selection for fuzzy matching
 using the intersection of length_buckets and bk_tree results.
 
 Requirements: 3.1, 3.3, 3.4, 3.5, 3.7, 3.8, 3.9, 4.1, 4.7, 10.4
+
+Strategy classification (task 1.3, Req 14.3)
+--------------------------------------------
+The requirements classify every match strategy as either **Deterministic**
+(``exact``, ``fused``, ``joined``, ``initials`` — an exact key lookup, never
+gated by confidence / lexicon / context / block-list) or **Approximate**
+(``phonetic``, ``fuzzy``, ``substring`` — tolerates spelling divergence and
+passes through the precision gates). The ``title_person`` value sits in the
+``MatchStrategy`` set (Req 14.3) and in ``STRATEGY_RANK`` (rank 4, between
+``initials`` and ``phonetic``), yet the requirements' Deterministic/Approximate
+lists name neither it, and ``scoring.py`` historically carried no confidence
+constant for it. The design flagged this as an open item; this module resolves
+it.
+
+Decision: ``title_person`` is **Deterministic**.
+
+Rationale:
+  * Mechanism. ``title_person`` is emitted from exactly one place — the
+    surname-only fallback inside ``engine._match_title_person`` /
+    ``_match_title_person_words``. That branch performs a direct
+    ``surname_map`` dictionary lookup of a single token following a
+    Title_Prefix. It is an exact key lookup with no spelling tolerance, which
+    is the defining property of a Deterministic_Strategy. (The phonetic and
+    fuzzy fallbacks in the same helper keep their own ``phonetic`` / ``fuzzy``
+    labels and remain Approximate; they are not tagged ``title_person``.)
+  * Gate behaviour. Deterministic strategies are never gated. This preserves
+    the current behaviour of confident, contextually-anchored
+    "Hon. <surname>" corrections: the Title_Prefix supplies its own strong
+    person-context signal, so subjecting the surname lookup to the
+    confidence, lexicon, or context gates would suppress legitimate
+    corrections. Ranking it inside the deterministic block (rank 4, before
+    ``phonetic``) is consistent with this.
+  * Confidence constant. As a Deterministic strategy it carries a fixed
+    per-strategy constant, not an Evidence_Score. ``scoring.py`` now defines
+    ``TITLE_PERSON_CONFIDENCE = 0.90`` — the exact value already hardcoded at
+    the emission site — so this classification changes no observed output and
+    keeps the flag-off path Baseline-equivalent (Req 12.9).
+  * Contract. ``title_person`` remains a reported ``Match_Strategy`` value
+    (Req 14.3); this decision renames / removes nothing.
+
+Gates that apply to ``title_person``: none. It is Deterministic, so the
+Confidence_Gate, Lexicon_Gate, Context_Gate, Sitting_Scope penalty, and
+Block_List guard all skip it, exactly as they skip ``exact`` / ``fused`` /
+``joined`` / ``initials``. The ``DETERMINISTIC_STRATEGIES`` /
+``APPROXIMATE_STRATEGIES`` sets and ``is_deterministic`` helper below are the
+single source of truth the gate tasks (2.x, 4.x) branch on.
 """
 
 from __future__ import annotations
@@ -42,6 +88,41 @@ MIN_CANDIDATE_LENGTH: int = 4
 
 # Minimum input length for substring matching
 MIN_SUBSTRING_LENGTH: int = 6
+
+
+# ---------------------------------------------------------------------------
+# Strategy classification (task 1.3, Req 14.3)
+# ---------------------------------------------------------------------------
+#
+# Single source of truth the precision gates (tasks 2.x, 4.x) branch on.
+# See the module docstring for the ``title_person`` classification decision:
+# ``title_person`` is a Deterministic surname_map lookup, so it lives in
+# DETERMINISTIC_STRATEGIES and no gate applies to it.
+
+DETERMINISTIC_STRATEGIES: frozenset[str] = frozenset(
+    {"exact", "fused", "joined", "initials", "title_person"}
+)
+
+APPROXIMATE_STRATEGIES: frozenset[str] = frozenset(
+    {"phonetic", "fuzzy", "substring"}
+)
+
+
+def is_deterministic(strategy: str) -> bool:
+    """Return True when ``strategy`` is a Deterministic_Strategy.
+
+    Deterministic strategies (``exact``, ``fused``, ``joined``, ``initials``,
+    ``title_person``) are exact key lookups and are never subject to the
+    Confidence_Gate, Lexicon_Gate, Context_Gate, Sitting_Scope penalty, or
+    Block_List guard. Approximate strategies (``phonetic``, ``fuzzy``,
+    ``substring``) tolerate spelling divergence and pass through those gates.
+    """
+    return strategy in DETERMINISTIC_STRATEGIES
+
+
+def is_approximate(strategy: str) -> bool:
+    """Return True when ``strategy`` is an Approximate_Strategy."""
+    return strategy in APPROXIMATE_STRATEGIES
 
 
 # ---------------------------------------------------------------------------

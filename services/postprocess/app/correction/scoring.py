@@ -18,6 +18,11 @@ FUSED_CONFIDENCE: float = 0.98
 JOINED_CONFIDENCE: float = 0.97
 INITIALS_SINGLE_CONFIDENCE: float = 0.95
 INITIALS_MULTI_CONFIDENCE: float = 0.93
+# title_person is a Deterministic surname lookup (see the strategies.py module
+# docstring, task 1.3). It carries a fixed per-strategy constant rather than an
+# Evidence_Score, matching the value historically emitted by the
+# title-prefixed surname_map fallback in engine.py.
+TITLE_PERSON_CONFIDENCE: float = 0.90
 PHONETIC_CONFIDENCE: float = 0.90
 SUBSTRING_CONFIDENCE: float = 0.80
 FUZZY_MIN_CONFIDENCE: float = 0.70

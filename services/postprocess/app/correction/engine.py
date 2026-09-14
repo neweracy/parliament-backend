@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass
 
 from app.correction.blocklist import is_stopword, is_title, is_word_stopword
-from app.correction.scoring import JOINED_CONFIDENCE, STRATEGY_RANK
+from app.correction.scoring import JOINED_CONFIDENCE, STRATEGY_RANK, TITLE_PERSON_CONFIDENCE
 from app.correction.strategies import (
     MIN_CANDIDATE_LENGTH,
     MatchResult,
@@ -306,7 +306,7 @@ def _match_title_person(
                 entity_type = index.entity_type_map.get(canonical, "person")
                 result = MatchResult(
                     canonical=canonical,
-                    confidence=0.90,
+                    confidence=TITLE_PERSON_CONFIDENCE,
                     strategy="title_person",
                     entity_kind="person",
                     entity_type=entity_type,
@@ -657,7 +657,7 @@ def _match_title_person_words(
                 entity_type = index.entity_type_map.get(canonical, "person")
                 result = MatchResult(
                     canonical=canonical,
-                    confidence=0.90,
+                    confidence=TITLE_PERSON_CONFIDENCE,
                     strategy="title_person",
                     entity_kind="person",
                     entity_type=entity_type,
