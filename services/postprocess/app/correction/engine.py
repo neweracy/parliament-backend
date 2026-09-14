@@ -30,6 +30,7 @@ from app.correction.strategies import (
     EvidenceParams,
     MatchResult,
     get_party_display,
+    match_component,
     match_exact,
     match_fused,
     match_fuzzy,
@@ -226,7 +227,32 @@ def correct_single(
     if result is not None:
         return result
 
-    result = match_substring(text_lower, index, snapshot)
+    # Component_Match (Req 5) replaces the legacy arbitrary-infix substring
+    # strategy, ranked last after ``fuzzy`` (Req 5.10). Because it changes the
+    # accepted-match set, it rides the same non-inert-context gate as the other
+    # precision behaviours: an inert context (every flag off) takes the legacy
+    # ``match_substring`` path so the flag-off output stays Baseline-equivalent
+    # (Req 12.9); a non-inert context uses ``match_component``. The Lexicon_Gate
+    # sub-check (Req 5.5) is active only when ``lexicon_gate_enabled`` is on and
+    # the lexicon loaded — independent of the Confidence_Gate's earlier block,
+    # so a lexicon word whose confidence sits just below the override (which the
+    # Lexicon_Gate above lets through) is still rejected here (Req 5.5).
+    if gate_context.is_inert:
+        result = match_substring(text_lower, index, snapshot)
+    else:
+        lexicon_active = (
+            gate_context.config.lexicon_gate_enabled
+            and gate_context.lexicon is not None
+            and getattr(gate_context.lexicon, "loaded", False)
+        )
+        result = match_component(
+            text_lower,
+            index,
+            snapshot,
+            min_len=gate_context.config.component_match_min_length,
+            lexicon=gate_context.lexicon,
+            lexicon_active=lexicon_active,
+        )
     if result is not None:
         return result
 
@@ -248,6 +274,8 @@ def _resolve_evidence_params(gate_context: GateContext) -> EvidenceParams:
         enabled=True,
         min_phonetic_key_length=gate_context.config.min_phonetic_key_length,
         min_phonetic_similarity=gate_context.config.min_phonetic_similarity,
+        max_relative_distance=gate_context.config.max_relative_distance,
+        max_candidates_per_span=gate_context.config.max_candidates_per_span,
     )
 
 

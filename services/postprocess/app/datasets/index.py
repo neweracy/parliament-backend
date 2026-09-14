@@ -2,7 +2,9 @@
 
 Builds all index structures once per Dataset_Cache load (Requirement 10.5),
 using a candidate-narrowing BK-tree so edit-distance comparisons do not grow
-linearly with total alias count (Requirement 10.4).
+linearly with total alias count (Requirement 10.4). Derived indexes built at
+refresh (never during request handling) include the phonetic Key_Fanout
+(Req 3, 15.5) and the Component_Match ``component_map`` (Req 5, 15.4).
 
 The write-order semantics reproduce the JavaScript `buildDataset()` logic
 exactly (Requirement 3.12):
@@ -95,6 +97,17 @@ class MatchIndex:
     # never computed during request handling. A high fanout means the key is
     # weak evidence, which the phonetic Evidence_Score penalises.
     phonetic_fanout: dict[str, int] = field(default_factory=dict)
+
+    # component (lowercase) → set of distinct canonical entities holding it.
+    # Each whitespace-delimited component of every canonical name and alias is
+    # mapped to the set of distinct canonical names that hold it as a complete
+    # component. Built once per Dataset_Cache refresh (Req 5.1, 5.2, 15.4);
+    # never computed during request handling. Component_Match reads only
+    # ``component_map[key]`` so the entries it examines are independent of the
+    # total alias count (Req 15.4). Repeated occurrences of a component across
+    # the aliases of one canonical entity collapse to a single set member, so
+    # the set size is the distinct-entity count Req 5.4 compares against.
+    component_map: dict[str, set[str]] = field(default_factory=dict)
 
     # surname (lowercase) → list of canonical names (person records only)
     surname_map: dict[str, list[str]] = field(default_factory=dict)
@@ -236,6 +249,26 @@ def build_index(records: list[EntityRecord]) -> MatchIndex:
     index.phonetic_fanout = {
         key: len(canonicals) for key, canonicals in index.phonetic_map.items()
     }
+
+    # -----------------------------------------------------------------------
+    # Phase 2b: Build component_map — component-lower → distinct canonical set
+    # -----------------------------------------------------------------------
+    # Each whitespace-delimited component of every canonical name and every
+    # alias maps to the set of distinct canonical entities that hold it as a
+    # complete component (Req 5.1, 5.2). Using a set collapses repeated
+    # occurrences of a component across one entity's aliases to a single member
+    # so the set size is the distinct-entity count Component_Match compares
+    # against Req 5.4. Built here, once per refresh, so request handling only
+    # reads ``component_map[key]`` (Req 15.4).
+    for record in records:
+        canonical = record.canonical
+        surface_forms = [canonical, *record.aliases]
+        for surface in surface_forms:
+            for component in surface.split():
+                key = component.lower()
+                if not key:
+                    continue
+                index.component_map.setdefault(key, set()).add(canonical)
 
     # -----------------------------------------------------------------------
     # Phase 3: Build surname_map and initial_surname_map (person records only)

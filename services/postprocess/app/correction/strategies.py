@@ -66,6 +66,7 @@ from dataclasses import dataclass
 from rapidfuzz.distance import Levenshtein
 
 from app.correction.blocklist import is_blocked
+from app.correction.lexicon import EnglishLexicon
 from app.correction.phonetics import phonetic_key
 from app.correction.scoring import (
     EXACT_CONFIDENCE,
@@ -74,6 +75,8 @@ from app.correction.scoring import (
     INITIALS_SINGLE_CONFIDENCE,
     PHONETIC_CONFIDENCE,
     SUBSTRING_CONFIDENCE,
+    absolute_distance_ceiling,
+    accept_fuzzy,
     fuzzy_confidence,
     fuzzy_evidence_score,
     get_max_dist,
@@ -154,15 +157,33 @@ class EvidenceParams:
     sub-gates (Req 3.5, 3.6).
 
     When ``enabled`` is ``False`` the strategy functions take their legacy
-    path exactly — flat ``PHONETIC_CONFIDENCE`` / ``fuzzy_confidence`` and no
-    phonetic sub-gates — so the flag-off output is Baseline-equivalent
+    path exactly — flat ``PHONETIC_CONFIDENCE`` / ``fuzzy_confidence``, the
+    legacy ``get_max_dist`` distance limits, the legacy ``narrow()`` fallback,
+    and no phonetic sub-gates — so the flag-off output is Baseline-equivalent
     (Req 12.9). A ``None`` :class:`EvidenceParams` on a strategy call is
     likewise the legacy path.
+
+    Bounded fuzzy matching (Req 4)
+    ------------------------------
+    When ``enabled`` is ``True``, ``match_fuzzy`` replaces ``get_max_dist``
+    with :func:`~app.correction.scoring.absolute_distance_ceiling` +
+    :func:`~app.correction.scoring.accept_fuzzy`, scores at most
+    ``max_candidates_per_span`` candidates in ascending BK-tree distance order,
+    and uses the corrected ``narrow()`` (empty length-bucket ∩ BK-tree
+    intersection yields no candidates, Req 4.5). The bounded-distance behaviour
+    and the ``narrow()`` fix both change fuzzy output relative to Baseline, so
+    they ride the same ``evidence_confidence_enabled`` flag as the fuzzy
+    Evidence_Score (see task 2.6) to keep the flag-off path Baseline-equivalent.
     """
 
     enabled: bool = False
     min_phonetic_key_length: int = 4
     min_phonetic_similarity: float = 0.60
+    # Bounded fuzzy matching (Req 4). Resolved from GateConfig on the engine
+    # side; the defaults mirror Settings so an ``enabled`` params object with no
+    # overrides is still a valid all-defaults configuration.
+    max_relative_distance: float = 0.25
+    max_candidates_per_span: int = 200
 
 
 # ---------------------------------------------------------------------------
@@ -414,6 +435,12 @@ def match_fuzzy(
     if is_blocked(text_lower, snapshot):
         return None
 
+    use_evidence = evidence is not None and evidence.enabled
+
+    if use_evidence:
+        return _match_fuzzy_bounded(text_lower, index, evidence)
+
+    # --- Legacy path (Baseline, Req 12.9): get_max_dist + legacy narrow() ---
     max_dist = get_max_dist(len(text_lower))
 
     candidates = narrow(text_lower, index, max_dist)
@@ -448,33 +475,184 @@ def match_fuzzy(
     if canonical is None:
         return None
 
-    if evidence is not None and evidence.enabled:
-        # Evidence path: score from Relative_Distance (Req 3.8, 3.13). Span
-        # length is its lowercased character count, matching Req 4.2's length
-        # measure; guarded against a zero-length Span.
-        span_len = len(text_lower)
-        relative_distance = best_distance / span_len if span_len else 1.0
-        confidence = fuzzy_evidence_score(relative_distance)
-    else:
-        confidence = fuzzy_confidence(best_distance)
+    return _make_result(canonical, fuzzy_confidence(best_distance), "fuzzy", index)
+
+
+def _match_fuzzy_bounded(
+    text_lower: str,
+    index: MatchIndex,
+    evidence: EvidenceParams,
+) -> MatchResult | None:
+    """Bounded fuzzy matching used when ``evidence_confidence_enabled`` (Req 4).
+
+    Replaces the legacy ``get_max_dist`` distance limits with the
+    Absolute_Distance_Ceiling + Max_Relative_Distance acceptance rule
+    (Req 4.1-4.3), scores at most ``Max_Candidates_Per_Span`` candidates in
+    ascending BK-tree distance order with ties broken by alias ordinal
+    (Req 4.6, 4.7, 4.9), evaluates no candidate when the BK-tree index is
+    unavailable (Req 4.8), and uses the corrected :func:`narrow` intersection
+    (Req 4.5). The accepted match is scored by :func:`fuzzy_evidence_score`
+    from its Relative_Distance (Req 3.8, 3.13).
+    """
+    # BK-tree unavailable → evaluate no fuzzy candidate (Req 4.8).
+    if index.bk_tree is None:
+        return None
+
+    span_len = len(text_lower)
+    ceiling = absolute_distance_ceiling(span_len)
+    # A ceiling of 0 admits no non-identity candidate, so short Spans that
+    # cleared Min_Candidate_Length but fall at/under 3 chars never fuzzy-match.
+    if ceiling <= 0:
+        return None
+
+    candidates = narrow(text_lower, index, ceiling, strict_intersection=True)
+    if not candidates:
+        return None
+
+    # Order candidates by ascending BK-tree distance, ties by alias ordinal
+    # (Req 4.7), then score at most Max_Candidates_Per_Span of them (Req 4.6,
+    # 4.9). Compute the distance once per candidate for both the ordering and
+    # the acceptance test.
+    scored: list[tuple[int, int, str]] = []
+    for candidate in candidates:
+        dist = Levenshtein.distance(text_lower, candidate)
+        ordinal = index.alias_ordinal.get(candidate, float("inf"))
+        scored.append((dist, ordinal, candidate))
+    scored.sort(key=lambda item: (item[0], item[1], item[2]))
+
+    limit = max(0, evidence.max_candidates_per_span)
+    considered = scored[:limit]
+
+    best_candidate: str | None = None
+    best_distance: int = 0
+    for dist, _ordinal, candidate in considered:
+        if dist == 0:
+            # Identity — not a fuzzy correction; skip.
+            continue
+        if not accept_fuzzy(dist, span_len, evidence.max_relative_distance):
+            continue
+        # ``considered`` is already sorted by (distance, ordinal), so the first
+        # accepted candidate is the best selection (Req 4.7).
+        best_candidate = candidate
+        best_distance = dist
+        break
+
+    if best_candidate is None:
+        return None
+
+    canonical = index.canonical_map.get(best_candidate)
+    if canonical is None:
+        return None
+
+    relative_distance = best_distance / span_len if span_len else 1.0
+    confidence = fuzzy_evidence_score(relative_distance)
     return _make_result(canonical, confidence, "fuzzy", index)
 
 
 # ---------------------------------------------------------------------------
-# Strategy 6: Substring match
+# Strategy 6: Component match (replaces legacy infix substring — Req 5)
+# ---------------------------------------------------------------------------
+#
+# ``match_component`` is the Req 5 replacement for the arbitrary-infix
+# ``match_substring`` below. Because it changes the set of accepted matches,
+# it is gated: the engine calls ``match_component`` only when the GateContext
+# is non-inert (at least one precision-gating flag on) and falls back to the
+# legacy ``match_substring`` when the context is inert, so an all-flags-off
+# configuration reproduces Baseline output byte-for-byte (Req 12.9). This
+# mirrors how the evidence-scaled phonetic/fuzzy paths ride
+# ``evidence_confidence_enabled`` (tasks 2.6, 2.8). Both report the same
+# ``substring`` Match_Strategy value (Req 5.9), so no new enum value is added.
+
+
+def match_component(
+    text_lower: str,
+    index: MatchIndex,
+    snapshot: DatasetSnapshot | None = None,
+    *,
+    min_len: int = MIN_SUBSTRING_LENGTH,
+    lexicon: EnglishLexicon | None = None,
+    lexicon_active: bool = False,
+) -> MatchResult | None:
+    """Component_Match: a single-token Span equal to a whole component (Req 5).
+
+    Accepts only when the Span equals, case-insensitively, a complete
+    whitespace-delimited component of exactly one distinct canonical entity
+    (Req 5.1, 5.2, 5.4). Rejects when the Span is only an infix of a name or
+    alias (Req 5.2 — a mere infix is never a ``component_map`` key), when the
+    Span covers more than one token or is shorter than *min_len* characters
+    (Req 5.3), when the component is held by two or more distinct canonical
+    entities (Req 5.4), and — when the Lexicon_Gate is active — when the Span
+    is present in the English_Lexicon (Req 5.5).
+
+    An accepted match carries a confidence of exactly ``SUBSTRING_CONFIDENCE``
+    (0.80) independent of Span length, component length, and alias count
+    (Req 5.8), and reports the existing ``substring`` Match_Strategy value
+    (Req 5.9). A rejected Span yields ``None`` so the caller preserves it
+    unchanged (Req 5.7).
+
+    Reads only ``index.component_map[text_lower]``, so the number of examined
+    entries is independent of the total alias count (Req 15.4).
+
+    Parameters
+    ----------
+    min_len:
+        Component_Match_Min_Length — the minimum Span character length (Req 5.3).
+    lexicon:
+        The process-global English_Lexicon handle, or ``None``.
+    lexicon_active:
+        ``True`` when the Lexicon_Gate is active for this request. When active
+        and the Span is a lexicon member, the match is rejected (Req 5.5).
+    """
+    # Single-token Span of at least Component_Match_Min_Length (Req 5.3). A Span
+    # containing whitespace covers more than one token and is rejected.
+    if len(text_lower) < min_len:
+        return None
+    if not text_lower or any(ch.isspace() for ch in text_lower):
+        return None
+
+    # Block_List guard — Component_Match is an Approximate_Strategy, so a
+    # blocked token is rejected for it (consistent with phonetic/fuzzy).
+    if snapshot is not None and is_blocked(text_lower, snapshot):
+        return None
+
+    # Lexicon_Gate (Req 5.5): when active, an ordinary English word is not a
+    # Component_Match candidate. Membership lowercases and strips edge
+    # punctuation inside ``contains``.
+    if lexicon_active and lexicon is not None and lexicon.loaded and lexicon.contains(
+        text_lower
+    ):
+        return None
+
+    # Read only this component's entry (Req 15.4). The set holds the distinct
+    # canonical entities that carry the component (Req 5.1); its size is the
+    # distinct-entity count Req 5.4 compares against.
+    holders = index.component_map.get(text_lower)
+    if not holders or len(holders) != 1:
+        # No holder, or an ambiguous component held by two or more distinct
+        # canonical entities (Req 5.4) — reject.
+        return None
+
+    canonical = next(iter(holders))
+    return _make_result(canonical, SUBSTRING_CONFIDENCE, "substring", index)
+
+
+# ---------------------------------------------------------------------------
+# Legacy Strategy 6: infix substring match (Baseline path only — Req 12.9)
 # ---------------------------------------------------------------------------
 
 
 def match_substring(text_lower: str, index: MatchIndex, snapshot: DatasetSnapshot | None = None) -> MatchResult | None:
-    """Check if text is a substring of any canonical_map key.
+    """Legacy arbitrary-infix substring match — Baseline path only (Req 12.9).
 
-    Only try when input length >= MIN_SUBSTRING_LENGTH (6).
-    Returns confidence 0.80 on match.
+    Retained solely so that with every precision-gating flag off the engine
+    reproduces Baseline output exactly. The engine calls this only for an
+    inert GateContext; a non-inert context uses :func:`match_component`
+    (Req 5) instead.
 
-    Checks the Block_List before returning a match — common English words
-    that happen to be substrings of entity names are rejected.
-
-    If multiple matches, pick the one with lowest alias_ordinal.
+    Checks if text is a substring of any ``canonical_map`` key. Only tries when
+    input length >= MIN_SUBSTRING_LENGTH (6). Returns confidence 0.80 on match.
+    Checks the Block_List first. If multiple matches, picks the one with lowest
+    alias_ordinal.
     """
     if len(text_lower) < MIN_SUBSTRING_LENGTH:
         return None
@@ -505,13 +683,29 @@ def match_substring(text_lower: str, index: MatchIndex, snapshot: DatasetSnapsho
 # ---------------------------------------------------------------------------
 
 
-def narrow(text_lower: str, index: MatchIndex, max_dist: int) -> list[str]:
+def narrow(
+    text_lower: str,
+    index: MatchIndex,
+    max_dist: int,
+    *,
+    strict_intersection: bool = False,
+) -> list[str]:
     """Get candidates from bk_tree ∩ length_buckets.
 
     - Get candidates from bk_tree.find(text_lower, max_dist)
     - Get candidates from length_buckets for lengths within ±max_dist
     - Return intersection (candidates appearing in both) for narrowing
     - If bk_tree is None, fall back to length_buckets only
+
+    Parameters
+    ----------
+    strict_intersection : bool
+        When ``False`` (the legacy Baseline path, Req 12.9), an empty
+        length-bucket ∩ BK-tree intersection falls back to the un-intersected
+        BK-tree candidates (then length buckets). When ``True`` (the bounded
+        fuzzy path behind ``evidence_confidence_enabled``), an empty
+        intersection yields **no** candidates rather than any un-intersected
+        set, per Req 4.5.
     """
     input_len = len(text_lower)
 
@@ -538,8 +732,14 @@ def narrow(text_lower: str, index: MatchIndex, max_dist: int) -> list[str]:
     if intersection:
         return list(intersection)
 
-    # If intersection is empty, fall back to bk_tree results
-    # (can happen when length_buckets don't cover the right range)
+    if strict_intersection:
+        # Req 4.5: an empty intersection means no fuzzy candidates — never
+        # substitute the un-intersected BK-tree or length-bucket set.
+        return []
+
+    # Legacy Baseline fallback (Req 12.9): if the intersection is empty, fall
+    # back to bk_tree results (can happen when length_buckets don't cover the
+    # right range), then to length buckets.
     return list(bk_candidates) if bk_candidates else list(bucket_candidates)
 
 

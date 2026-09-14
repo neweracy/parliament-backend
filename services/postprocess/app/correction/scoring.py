@@ -162,6 +162,56 @@ def fuzzy_evidence_score(relative_distance: float) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Bounded fuzzy matching (Req 4.1-4.3) — used when evidence_confidence_enabled
+# ---------------------------------------------------------------------------
+#
+# These replace the legacy ``get_max_dist`` distance limits for fuzzy matching
+# when the evidence/gating mechanism is on. Because they tighten the accepted
+# edit distance (and add a relative-distance rule the Baseline lacks), they are
+# gated behind ``evidence_confidence_enabled`` at the call site so the flag-off
+# path reproduces Baseline byte-for-byte (Req 12.9). See ``match_fuzzy``.
+
+
+def absolute_distance_ceiling(span_len: int) -> int:
+    """Maximum Levenshtein distance accepted for a fuzzy match (Req 4.2).
+
+    The ceiling grows in steps with Span length, where *span_len* is the
+    character count of the lowercased Span text including internal separator
+    characters:
+
+      - 0 for Span lengths of 3 characters and below,
+      - 1 for Span lengths 4 through 6 characters,
+      - 2 for Span lengths 7 through 11 characters,
+      - 3 for Span lengths of 12 characters and above.
+    """
+    if span_len <= 3:
+        return 0
+    if span_len <= 6:
+        return 1
+    if span_len <= 11:
+        return 2
+    return 3
+
+
+def accept_fuzzy(distance: int, span_len: int, max_rel: float) -> bool:
+    """Return True when a fuzzy candidate is within the distance bounds (Req 4.3).
+
+    Accepts only when both hold:
+      * ``distance`` is at most the :func:`absolute_distance_ceiling` for
+        ``span_len`` (Req 4.1, 4.2), and
+      * the Relative_Distance ``distance / span_len`` — computed without
+        rounding — is at most ``max_rel`` (Req 4.3).
+
+    A zero-length Span never accepts a positive distance.
+    """
+    if span_len <= 0:
+        return distance <= 0
+    if distance > absolute_distance_ceiling(span_len):
+        return False
+    return distance / span_len <= max_rel
+
+
+# ---------------------------------------------------------------------------
 # Strategy precedence ranks — lower value wins in tie-breaks
 # ---------------------------------------------------------------------------
 
