@@ -60,6 +60,7 @@ def _run_rule_stages(
     request: CorrectionRequest,
     snapshot: DatasetSnapshot,
     settings: Settings | None = None,
+    lexicon: object | None = None,
 ) -> tuple[TextCorrectionResult, WordCorrectionResult, str, list[dict], int]:
     """Execute the Correction_Engine and Year_Corrector synchronously.
 
@@ -85,14 +86,29 @@ def _run_rule_stages(
     # inert and the engine path is unchanged (Req 12.9); when settings is
     # absent (unit tests calling the rule stages directly) an inert context is
     # used, preserving the Baseline path.
+    # The English_Lexicon handle (task 2.3, loaded once per process on
+    # app.state) is threaded onto the context here so the Lexicon_Gate (task
+    # 2.4) can consult it (Req 2.5-2.8). A ``None`` lexicon, or one that failed
+    # to load, leaves the gate inactive (Req 2.13). When settings is absent
+    # (unit tests calling the rule stages directly) an inert context is used,
+    # preserving the Baseline path.
     gate_context = (
-        GateContext.from_settings(settings)
+        GateContext.from_settings(settings, lexicon=lexicon)
         if settings is not None
         else GateContext.inert()
     )
 
+    # correct_words operates on the word list
+    # Serialize words to dicts preserving extra fields (by_alias for camelCase)
+    word_dicts = [
+        w.model_dump(by_alias=True, exclude_none=True) for w in request.words
+    ]
+
     # --- Stage 1: Correction_Engine ---
-    # correct_text operates on the transcript string
+    # correct_text operates on the transcript string. The Words list is passed
+    # so the Confidence_Gate can derive Span_Confidence by aligning Span tokens
+    # to Words at matching sequence positions (Req 1.7); an empty list leaves
+    # every transcript Span_Confidence Unknown (Req 1.10).
     text_result = correct_text(
         request.transcript,
         index,
@@ -101,13 +117,8 @@ def _run_rule_stages(
         fuzzy_score_cutoff=fuzzy_score_cutoff,
         min_candidate_length=min_candidate_length,
         gate_context=gate_context,
+        words=word_dicts,
     )
-
-    # correct_words operates on the word list
-    # Serialize words to dicts preserving extra fields (by_alias for camelCase)
-    word_dicts = [
-        w.model_dump(by_alias=True, exclude_none=True) for w in request.words
-    ]
 
     word_result = correct_words(
         word_dicts,
@@ -188,6 +199,7 @@ async def run_pipeline(
     settings: Settings | None = None,
     history_writer: CorrectionHistoryWriter | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    lexicon: object | None = None,
 ) -> CorrectionResponse:
     """Execute the full correction pipeline and return a CorrectionResponse.
 
@@ -216,6 +228,11 @@ async def run_pipeline(
         An async session factory for database access (pg_trgm retrieval).
         None when no database is available (tests); retrieval falls back
         to the Dataset_Cache canonical_map.
+    lexicon : object | None
+        The process-global English_Lexicon handle (``app.state.english_lexicon``,
+        loaded once at startup per task 2.3). Threaded onto the GateContext so
+        the Lexicon_Gate can consult it (Req 2.5-2.8). ``None`` (or a lexicon
+        that failed to load) leaves the gate inactive (Req 2.13).
 
     Returns
     -------
@@ -248,7 +265,9 @@ async def run_pipeline(
     rule_start = time.perf_counter()
 
     text_result, word_result, final_text, final_words, year_count = (
-        await asyncio.to_thread(_run_rule_stages, request, snapshot, settings)
+        await asyncio.to_thread(
+            _run_rule_stages, request, snapshot, settings, lexicon
+        )
     )
 
     rule_end = time.perf_counter()
