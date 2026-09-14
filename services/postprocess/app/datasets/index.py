@@ -90,6 +90,12 @@ class MatchIndex:
     # Scoped to canonicals + supplementary-location aliases ONLY
     phonetic_map: dict[str, list[str]] = field(default_factory=dict)
 
+    # phonetic key → Key_Fanout (distinct canonical entities sharing the key).
+    # Built once per Dataset_Cache refresh from phonetic_map (Req 3, 15.4, 15.5);
+    # never computed during request handling. A high fanout means the key is
+    # weak evidence, which the phonetic Evidence_Score penalises.
+    phonetic_fanout: dict[str, int] = field(default_factory=dict)
+
     # surname (lowercase) → list of canonical names (person records only)
     surname_map: dict[str, list[str]] = field(default_factory=dict)
 
@@ -221,6 +227,15 @@ def build_index(records: list[EntityRecord]) -> MatchIndex:
                     index.phonetic_map[key] = []
                 if record.canonical not in index.phonetic_map[key]:
                     index.phonetic_map[key].append(record.canonical)
+
+    # Key_Fanout per Phonetic_Key: the number of distinct canonical entities
+    # sharing the key (Req 3). ``phonetic_map`` already dedupes canonicals per
+    # key, so the list length is the distinct count. Built here, once per
+    # refresh, so request handling only reads the precomputed value
+    # (Req 15.4, 15.5).
+    index.phonetic_fanout = {
+        key: len(canonicals) for key, canonicals in index.phonetic_map.items()
+    }
 
     # -----------------------------------------------------------------------
     # Phase 3: Build surname_map and initial_surname_map (person records only)

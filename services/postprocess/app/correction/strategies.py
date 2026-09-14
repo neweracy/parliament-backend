@@ -75,7 +75,9 @@ from app.correction.scoring import (
     PHONETIC_CONFIDENCE,
     SUBSTRING_CONFIDENCE,
     fuzzy_confidence,
+    fuzzy_evidence_score,
     get_max_dist,
+    phonetic_evidence_score,
 )
 from app.datasets.cache import DatasetSnapshot
 from app.datasets.index import MatchIndex
@@ -139,6 +141,28 @@ class MatchResult:
     strategy: str  # MatchStrategy value
     entity_kind: str
     entity_type: str
+
+
+@dataclass(frozen=True)
+class EvidenceParams:
+    """Resolved inputs for evidence-scaled Approximate_Strategy scoring (Req 3).
+
+    Threaded from the engine (which reads them off the :class:`GateContext`)
+    into ``match_phonetic`` and ``match_fuzzy`` so those strategy functions
+    compute an Evidence_Score instead of a flat per-strategy constant, and
+    apply the phonetic Min_Phonetic_Key_Length / Min_Phonetic_Similarity
+    sub-gates (Req 3.5, 3.6).
+
+    When ``enabled`` is ``False`` the strategy functions take their legacy
+    path exactly — flat ``PHONETIC_CONFIDENCE`` / ``fuzzy_confidence`` and no
+    phonetic sub-gates — so the flag-off output is Baseline-equivalent
+    (Req 12.9). A ``None`` :class:`EvidenceParams` on a strategy call is
+    likewise the legacy path.
+    """
+
+    enabled: bool = False
+    min_phonetic_key_length: int = 4
+    min_phonetic_similarity: float = 0.60
 
 
 # ---------------------------------------------------------------------------
@@ -251,14 +275,33 @@ def match_initials(text_lower: str, index: MatchIndex) -> MatchResult | None:
 # ---------------------------------------------------------------------------
 
 
-def match_phonetic(text_lower: str, index: MatchIndex, snapshot: DatasetSnapshot | None = None) -> MatchResult | None:
+def match_phonetic(
+    text_lower: str,
+    index: MatchIndex,
+    snapshot: DatasetSnapshot | None = None,
+    *,
+    evidence: EvidenceParams | None = None,
+) -> MatchResult | None:
     """Compute phonetic_key, look up in phonetic_map.
 
     If multiple canonicals match, pick the one with lowest alias_ordinal.
-    Returns confidence 0.90 on match.
 
     Checks the Block_List before returning a match — common English words
     that happen to share a phonetic key with an entity name are rejected.
+
+    Confidence (Req 3.1-3.5, 3.7, 3.12)
+    -----------------------------------
+    * Legacy path (``evidence`` is ``None`` or ``evidence.enabled`` is
+      ``False``): returns the flat ``PHONETIC_CONFIDENCE`` (0.90) with no
+      phonetic sub-gates, matching Baseline (Req 12.9).
+    * Evidence path (``evidence.enabled``): rejects the Span outright when its
+      Phonetic_Key is shorter than ``min_phonetic_key_length`` (Req 3.5);
+      restricts candidates to those whose Normalized_Similarity to the Span is
+      at least ``min_phonetic_similarity`` (Req 3.6); and assigns the selected
+      candidate a :func:`phonetic_evidence_score` from the similarity, the
+      Phonetic_Key length, and the Key_Fanout of that key (Req 3.1-3.4, 3.7,
+      3.12). When no candidate clears the similarity floor, returns ``None`` so
+      the chain continues with the next strategy.
     """
     # Block_List guard — prevents false phonetic matches on common words
     if snapshot is not None and is_blocked(text_lower, snapshot):
@@ -268,21 +311,55 @@ def match_phonetic(text_lower: str, index: MatchIndex, snapshot: DatasetSnapshot
     if not key:
         return None
 
+    use_evidence = evidence is not None and evidence.enabled
+
+    # Min_Phonetic_Key_Length sub-gate (Req 3.5): a Span whose Phonetic_Key is
+    # too short carries too little phonetic evidence to match on.
+    if use_evidence and len(key) < evidence.min_phonetic_key_length:
+        return None
+
     canonicals = index.phonetic_map.get(key)
     if not canonicals:
         return None
 
-    # Pick the canonical with the lowest alias_ordinal for determinism
-    if len(canonicals) == 1:
-        canonical = canonicals[0]
-    else:
-        # Tie-break: lowest alias_ordinal
-        canonical = min(
-            canonicals,
-            key=lambda c: index.alias_ordinal.get(c.lower(), float("inf")),
-        )
+    if not use_evidence:
+        # --- Legacy path: flat confidence, lowest-ordinal tie-break ---
+        if len(canonicals) == 1:
+            canonical = canonicals[0]
+        else:
+            canonical = min(
+                canonicals,
+                key=lambda c: index.alias_ordinal.get(c.lower(), float("inf")),
+            )
+        return _make_result(canonical, PHONETIC_CONFIDENCE, "phonetic", index)
 
-    return _make_result(canonical, PHONETIC_CONFIDENCE, "phonetic", index)
+    # --- Evidence path (Req 3.1-3.4, 3.6, 3.7, 3.12) ---
+    # Min_Phonetic_Similarity sub-gate: keep only candidates whose canonical
+    # form is similar enough to the Span (Req 3.6). Normalized_Similarity is
+    # the rapidfuzz normalized Levenshtein similarity on the lowercased forms.
+    surviving: list[tuple[str, float]] = []
+    for canonical in canonicals:
+        similarity = Levenshtein.normalized_similarity(text_lower, canonical.lower())
+        if similarity >= evidence.min_phonetic_similarity:
+            surviving.append((canonical, similarity))
+
+    if not surviving:
+        return None
+
+    fanout = index.phonetic_fanout.get(key, len(canonicals))
+    key_len = len(key)
+
+    # Select the best candidate by Evidence_Score, tie-broken deterministically
+    # by lowest alias_ordinal then canonical name so selection is stable.
+    def _candidate_key(item: tuple[str, float]) -> tuple:
+        canonical, similarity = item
+        score = phonetic_evidence_score(similarity, key_len, fanout)
+        ordinal = index.alias_ordinal.get(canonical.lower(), float("inf"))
+        return (-round(score, 6), ordinal, canonical)
+
+    best_canonical, best_similarity = min(surviving, key=_candidate_key)
+    score = phonetic_evidence_score(best_similarity, key_len, fanout)
+    return _make_result(best_canonical, score, "phonetic", index)
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +374,7 @@ def match_fuzzy(
     *,
     fuzzy_score_cutoff: float = 0.70,
     min_candidate_length: int = 4,
+    evidence: EvidenceParams | None = None,
 ) -> MatchResult | None:
     """Length-adaptive fuzzy matching using BK-tree and length_buckets.
 
@@ -305,7 +383,18 @@ def match_fuzzy(
     - Use narrow() to get candidates
     - Compute Levenshtein distance for each candidate
     - Tie-break on (distance, alias_ordinal)
-    - Return fuzzy_confidence(best_distance) if within max_dist
+    - Score the best distance
+
+    Confidence (Req 3.8, 3.13)
+    --------------------------
+    * Legacy path (``evidence`` is ``None`` or ``evidence.enabled`` is
+      ``False``): returns ``fuzzy_confidence(best_distance)``, matching
+      Baseline (Req 12.9).
+    * Evidence path (``evidence.enabled``): returns a
+      :func:`fuzzy_evidence_score` computed from the Relative_Distance
+      (best distance divided by the Span character length), which is
+      non-increasing in Relative_Distance and bounded to [0.55, 0.92]
+      (Req 3.8, 3.13).
 
     Parameters
     ----------
@@ -314,6 +403,9 @@ def match_fuzzy(
         since matching is distance-based via BK-tree).
     min_candidate_length : int
         Minimum input length to attempt fuzzy matching.
+    evidence : EvidenceParams | None
+        Evidence-scoring inputs (Req 3). ``None`` or disabled selects the
+        legacy flat-confidence path.
     """
     if len(text_lower) < min_candidate_length:
         return None
@@ -356,7 +448,15 @@ def match_fuzzy(
     if canonical is None:
         return None
 
-    confidence = fuzzy_confidence(best_distance)
+    if evidence is not None and evidence.enabled:
+        # Evidence path: score from Relative_Distance (Req 3.8, 3.13). Span
+        # length is its lowercased character count, matching Req 4.2's length
+        # measure; guarded against a zero-length Span.
+        span_len = len(text_lower)
+        relative_distance = best_distance / span_len if span_len else 1.0
+        confidence = fuzzy_evidence_score(relative_distance)
+    else:
+        confidence = fuzzy_confidence(best_distance)
     return _make_result(canonical, confidence, "fuzzy", index)
 
 
