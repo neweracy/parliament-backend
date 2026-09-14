@@ -22,7 +22,7 @@ from app.correction.confidence import (
     confidence_gate_blocks_approximate,
     span_confidence,
 )
-from app.correction.gates import GateContext
+from app.correction.gates import GateContext, GateTally
 from app.correction.lexicon import lexicon_gate_blocks_approximate
 from app.correction.scoring import JOINED_CONFIDENCE, STRATEGY_RANK, TITLE_PERSON_CONFIDENCE
 from app.correction.strategies import (
@@ -52,6 +52,7 @@ def correct_single(
     min_candidate_length: int = MIN_CANDIDATE_LENGTH,
     gate_context: GateContext | None = None,
     span_conf: float | None = None,
+    tally: GateTally | None = None,
 ) -> MatchResult | None:
     """Run the short-circuiting strategy chain for a single text span.
 
@@ -118,6 +119,16 @@ def correct_single(
         Unknown. Consulted for the Confidence_Gate only when the gate context
         is non-inert. Callers (``correct_text``, ``correct_words``, and the
         title-person helpers) derive it from the Words aligned to the Span.
+    tally : GateTally | None
+        Optional per-request observability collector (task 6.1, Req 13). When
+        supplied and the gate context is non-inert, this function records which
+        gate rejected the Span from approximate matching — attributed to the
+        first gate in evaluation order (asr_confidence before lexicon before
+        the phonetic/fuzzy/component sub-gates, Req 13.9) — and records the Span
+        as having had an Approximate_Strategy evaluated when the approximate
+        chain runs (Req 13.4). Purely observational: it never changes the match
+        outcome, is ``None`` on the Baseline path, and its bookkeeping never
+        raises (Req 13.11).
 
     Returns
     -------
@@ -147,6 +158,11 @@ def correct_single(
             span_conf, gate_context.profile.high_confidence_threshold
         )
     )
+    # Observability (Req 13.1, 13.5, 13.9): attribute a Confidence_Gate
+    # rejection to the ``asr_confidence`` gate — the first gate in evaluation
+    # order. Purely a tally write; does not change the outcome.
+    if block_approximate and tally is not None:
+        tally.record_rejection("asr_confidence", text, span_conf)
 
     # Lexicon_Gate (Req 2.5-2.8, 2.10, 2.13): reject the Approximate_Strategy
     # members for a Span of ordinary English words. Active only when the
@@ -182,6 +198,12 @@ def correct_single(
             override_threshold=gate_context.profile.lexicon_override_threshold,
             reject_unknown=gate_context.profile.lexicon_gate_reject_unknown,
         )
+        # Observability (Req 13.1, 13.5, 13.9): attribute a Lexicon_Gate
+        # rejection to the ``lexicon`` gate. This branch only runs when the
+        # Confidence_Gate did not already block, so ``lexicon`` is correctly
+        # the first gate to reject this Span here (Req 13.9). Tally-only.
+        if block_approximate and tally is not None:
+            tally.record_rejection("lexicon", text, span_conf)
 
     # Stopword guard — checked before any strategy (Requirement 4.7)
     if is_stopword(text_lower, snapshot):
@@ -216,6 +238,13 @@ def correct_single(
     #     blocks them (Req 1.2, 1.11) ---
     if block_approximate:
         return None
+
+    # Observability (Req 13.4): the Span has passed every gate that would keep
+    # it out of approximate matching, so at least one Approximate_Strategy is
+    # about to be evaluated for it. Record it once for the
+    # approx-spans-evaluated metric. Tally-only; does not change the outcome.
+    if tally is not None:
+        tally.record_approx_evaluated(text)
 
     # Evidence-scaled scoring (Req 3). When ``evidence_confidence_enabled`` is
     # on (and the context non-inert), the phonetic and fuzzy strategies compute
@@ -431,6 +460,7 @@ def _match_title_person(
     min_candidate_length: int = MIN_CANDIDATE_LENGTH,
     gate_context: GateContext | None = None,
     words: list[dict] | None = None,
+    tally: GateTally | None = None,
 ) -> tuple[MatchResult, int] | None:
     """Try to match person name tokens following a title token.
 
@@ -478,6 +508,7 @@ def _match_title_person(
             min_candidate_length=min_candidate_length,
             gate_context=gate_context,
             span_conf=span_conf,
+            tally=tally,
         )
         if match and match.entity_kind == "person" and match.confidence >= threshold:
             return (match, win_size)
@@ -562,6 +593,7 @@ def correct_text(
     min_candidate_length: int = MIN_CANDIDATE_LENGTH,
     gate_context: GateContext | None = None,
     words: list[dict] | None = None,
+    tally: GateTally | None = None,
 ) -> TextCorrectionResult:
     """Correct all entity references in a transcript text.
 
@@ -644,6 +676,7 @@ def correct_text(
                 min_candidate_length=min_candidate_length,
                 gate_context=gate_context,
                 words=words,
+                tally=tally,
             )
             if title_result:
                 match, tokens_consumed = title_result
@@ -738,6 +771,7 @@ def correct_text(
                 min_candidate_length=min_candidate_length,
                 gate_context=gate_context,
                 span_conf=span_conf,
+                tally=tally,
             )
 
             # Strategy B: joined match (for n > 1 when correct_single fails)
@@ -860,6 +894,7 @@ def _match_title_person_words(
     fuzzy_score_cutoff: float = 0.70,
     min_candidate_length: int = MIN_CANDIDATE_LENGTH,
     gate_context: GateContext | None = None,
+    tally: GateTally | None = None,
 ) -> tuple[MatchResult, int] | None:
     """Try to match person name tokens following a title in word dicts.
 
@@ -896,6 +931,7 @@ def _match_title_person_words(
             min_candidate_length=min_candidate_length,
             gate_context=gate_context,
             span_conf=span_conf,
+            tally=tally,
         )
         if match and match.entity_kind == "person" and match.confidence >= threshold:
             return (match, win_size)
@@ -953,6 +989,7 @@ def correct_words(
     fuzzy_score_cutoff: float = 0.70,
     min_candidate_length: int = MIN_CANDIDATE_LENGTH,
     gate_context: GateContext | None = None,
+    tally: GateTally | None = None,
 ) -> WordCorrectionResult:
     """Correct all entity references in a transcript word list.
 
@@ -1025,6 +1062,7 @@ def correct_words(
                 fuzzy_score_cutoff=fuzzy_score_cutoff,
                 min_candidate_length=min_candidate_length,
                 gate_context=gate_context,
+                tally=tally,
             )
             if title_result:
                 match, name_count = title_result
@@ -1136,6 +1174,7 @@ def correct_words(
                 min_candidate_length=min_candidate_length,
                 gate_context=gate_context,
                 span_conf=span_conf,
+                tally=tally,
             )
 
             # For n > 1: also try joined (fused) match

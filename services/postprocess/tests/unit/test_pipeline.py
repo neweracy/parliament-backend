@@ -18,6 +18,7 @@ import pytest
 from app.datasets.cache import DatasetCache, DatasetSnapshot
 from app.datasets.index import MatchIndex
 from app.models.request import CorrectionOptions, CorrectionRequest, Word
+from app.models.response import Metadata
 from app.pipeline import _build_entity_summary, _run_rule_stages, run_pipeline
 
 
@@ -327,6 +328,72 @@ class TestMetadataCounterOmission:
 
         response_dict = response.model_dump(by_alias=True, exclude_none=True)
         assert response_dict["metadata"]["correlationId"] == "abc-123-def"
+
+
+# ---------------------------------------------------------------------------
+# 6. Gate-rejection total metadata counter (task 6.1, Req 13.6, 14.4, 14.11)
+# ---------------------------------------------------------------------------
+
+
+class TestGateRejectionMetadata:
+    """The single gate-rejection total is reported when > 0 and omitted at 0.
+
+    Req 13.6: report the total as a single counter across every gate value when
+    the count is greater than zero. Req 14.4: omit the counter when zero. Req
+    14.11: the field is additive under the ``gateRejections`` camelCase alias.
+    """
+
+    def test_metadata_field_serializes_under_alias_when_positive(self):
+        """A positive total serializes under the gateRejections alias."""
+        meta = Metadata(gate_rejections=3)
+        dumped = meta.model_dump(by_alias=True, exclude_none=True)
+        assert dumped["gateRejections"] == 3
+
+    def test_metadata_field_omitted_when_none(self):
+        """None (the default, used for a zero total) is omitted from output."""
+        meta = Metadata(gate_rejections=None)
+        dumped = meta.model_dump(by_alias=True, exclude_none=True)
+        assert "gateRejections" not in dumped
+        # No snake_case leakage either.
+        assert "gate_rejections" not in dumped
+
+    @pytest.mark.asyncio
+    async def test_pipeline_reports_total_when_rejections_occur(self):
+        """When gate observability reports a positive total the metadata carries it."""
+        request = CorrectionRequest(
+            transcript="hello world",
+            words=[Word(word="hello"), Word(word="world")],
+            correlation_id="corr-gate",
+        )
+        snapshot = _make_snapshot()
+        cache = _make_cache(snapshot=snapshot)
+
+        # Force a positive gate-rejection total without changing correction output.
+        with patch("app.pipeline._emit_gate_observability", return_value=4):
+            response = await run_pipeline(request, cache)
+
+        assert response.metadata.gate_rejections == 4
+        response_dict = response.model_dump(by_alias=True, exclude_none=True)
+        assert response_dict["metadata"]["gateRejections"] == 4
+
+    @pytest.mark.asyncio
+    async def test_pipeline_omits_total_when_zero_rejections(self):
+        """Baseline path (zero rejections) omits the field entirely (Req 14.4)."""
+        request = CorrectionRequest(
+            transcript="nothing to correct here",
+            words=[],
+            correlation_id="corr-baseline",
+        )
+        snapshot = _make_snapshot()
+        cache = _make_cache(snapshot=snapshot)
+
+        # Default flag-off path yields a total of zero; assert it is omitted.
+        response = await run_pipeline(request, cache)
+
+        assert response.metadata.gate_rejections is None
+        response_dict = response.model_dump(by_alias=True, exclude_none=True)
+        assert "gateRejections" not in response_dict["metadata"]
+        assert "gate_rejections" not in response_dict["metadata"]
 
 
 # ---------------------------------------------------------------------------

@@ -35,6 +35,8 @@ the :class:`GateContext`; this task only establishes the type and the wiring.
 
 from __future__ import annotations
 
+import structlog
+
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -43,6 +45,133 @@ from app.correction.provider_profiles import ProviderGateProfile, default_profil
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from app.config import Settings
+
+logger = structlog.get_logger("gates")
+
+
+# ---------------------------------------------------------------------------
+# Gate-decision observability (Req 13) — GateDecision / GateTally
+# ---------------------------------------------------------------------------
+
+# The thirteen enumerated gate values (Req 13.2). Every gate-rejection metric
+# datum and every debug log event carries exactly one of these as its ``gate``
+# dimension/field; ``emit_gate_rejections`` accepts only these keys. The order
+# here is the evaluation order used for first-gate attribution of a
+# multiply-rejected Span (Req 13.9): a Span is counted once, attributed to the
+# first gate in this order that rejected it. ``asr_confidence`` (the
+# Confidence_Gate) precedes ``lexicon``, which precedes ``block_list``, which
+# precedes the phonetic/fuzzy/component sub-gates, then the Phase 2 gates
+# (``context``, ``sitting_scope``, ``llm_veto``) which are not yet wired.
+GATE_VALUES: tuple[str, ...] = (
+    "asr_confidence",
+    "lexicon",
+    "block_list",
+    "phonetic_key",
+    "phonetic_similarity",
+    "key_fanout",
+    "absolute_distance",
+    "relative_distance",
+    "candidate_bound",
+    "component_ambiguity",
+    "context",
+    "sitting_scope",
+    "llm_veto",
+)
+
+# Rank of each gate in evaluation order, for first-gate attribution (Req 13.9).
+_GATE_RANK: dict[str, int] = {gate: rank for rank, gate in enumerate(GATE_VALUES)}
+
+
+@dataclass(frozen=True)
+class GateDecision:
+    """One gate rejection attributed to a single Span (Req 13.5).
+
+    Kept entirely internal to the engine/pipeline — it never enters the
+    Correction_Response contract (design.md section, "MatchResult / gate
+    result"). It carries the attributed ``gate`` value, the Span text, and the
+    Span_Confidence (``None`` for Unknown) so the pipeline can emit the
+    debug-level per-Span rejection log (Req 13.5) and aggregate the per-gate
+    counts for the metric (Req 13.1).
+    """
+
+    gate: str
+    span_text: str
+    span_confidence: float | None
+
+
+class GateTally:
+    """Mutable per-request collector of gate decisions (Req 13.1, 13.4, 13.9).
+
+    One instance is created per request at the pipeline boundary and threaded
+    into the engine functions, which record a rejection (via
+    :meth:`record_rejection`) whenever a gate excludes a Span from approximate
+    matching, and mark a Span as having had an approximate strategy evaluated
+    (via :meth:`record_approx_evaluated`).
+
+    Multiply-rejected Spans are counted once, attributed to the first gate in
+    evaluation order (Req 13.9). Because a Span may be evaluated more than once
+    across overlapping n-gram windows, a rejection is de-duplicated by its
+    ``span_text`` so the same window rejection is not double counted; when the
+    same Span text is rejected by two different gates the earlier gate in
+    evaluation order wins.
+
+    All bookkeeping is plain in-memory state — nothing here raises for the
+    caller, matching the "emission failure never surfaces" requirement (Req
+    13.11), which the pipeline enforces around the actual emit calls.
+    """
+
+    __slots__ = ("_rejections", "_approx_spans", "decisions")
+
+    def __init__(self) -> None:
+        # Attributed gate per rejected Span text (first gate in eval order).
+        self._rejections: dict[str, str] = {}
+        # Distinct Span texts for which an approximate strategy was evaluated.
+        self._approx_spans: set[str] = set()
+        # Ordered list of the attributed decisions, one per rejected Span, in
+        # first-observation order — used to emit the debug logs (Req 13.5).
+        self.decisions: list[GateDecision] = []
+
+    def record_rejection(
+        self, gate: str, span_text: str, span_conf: float | None
+    ) -> None:
+        """Record that *gate* rejected *span_text* (first-gate-wins, Req 13.9).
+
+        Only the thirteen enumerated gate values are accepted; an unknown gate
+        name is ignored so a caller mistake never corrupts the tally. A Span
+        already attributed to an earlier gate in evaluation order keeps that
+        attribution; a later observation with an earlier gate replaces it.
+        """
+        if gate not in _GATE_RANK:
+            return
+        existing = self._rejections.get(span_text)
+        if existing is not None and _GATE_RANK[existing] <= _GATE_RANK[gate]:
+            return
+        self._rejections[span_text] = gate
+        # Rebuild the decision for this span so ``decisions`` reflects the
+        # winning attribution. Drop any prior decision for the same span text.
+        self.decisions = [d for d in self.decisions if d.span_text != span_text]
+        self.decisions.append(
+            GateDecision(gate=gate, span_text=span_text, span_confidence=span_conf)
+        )
+
+    def record_approx_evaluated(self, span_text: str) -> None:
+        """Record an Approximate_Strategy was evaluated for a Span (Req 13.4)."""
+        self._approx_spans.add(span_text)
+
+    def counts(self) -> dict[str, int]:
+        """Per-gate rejection counts, one entry per gate with count > 0 (Req 13.1)."""
+        counts: dict[str, int] = {}
+        for gate in self._rejections.values():
+            counts[gate] = counts.get(gate, 0) + 1
+        return counts
+
+    def total_rejections(self) -> int:
+        """Total gate rejections across every gate value (Req 13.6)."""
+        return len(self._rejections)
+
+    def approx_spans_evaluated(self) -> int:
+        """Count of Spans for which an Approximate_Strategy was evaluated (Req 13.4)."""
+        return len(self._approx_spans)
 
 
 # ---------------------------------------------------------------------------

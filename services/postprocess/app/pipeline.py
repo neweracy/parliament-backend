@@ -29,7 +29,7 @@ from app.correction.engine import (
     correct_text,
     correct_words,
 )
-from app.correction.gates import GateContext
+from app.correction.gates import GateContext, GateTally
 from app.datasets.cache import DatasetCache, DatasetSnapshot
 from app.history.writer import CorrectionHistoryWriter, HistoryRecord
 from app.llm.bedrock import BedrockClient
@@ -43,7 +43,10 @@ from app.models.response import (
     Metadata,
 )
 from app.obs.metrics import (
+    emit_approx_spans_evaluated,
     emit_corrections_applied,
+    emit_gate_rejection_log,
+    emit_gate_rejections,
     emit_handler_latency,
     emit_llm_latency,
     emit_rule_latency,
@@ -61,11 +64,20 @@ def _run_rule_stages(
     snapshot: DatasetSnapshot,
     settings: Settings | None = None,
     lexicon: object | None = None,
-) -> tuple[TextCorrectionResult, WordCorrectionResult, str, list[dict], int]:
+) -> tuple[TextCorrectionResult, WordCorrectionResult, str, list[dict], int, GateTally]:
     """Execute the Correction_Engine and Year_Corrector synchronously.
 
     Returns:
-        (text_result, word_result, final_text, final_words, year_count)
+        (text_result, word_result, final_text, final_words, year_count, tally)
+
+    The :class:`~app.correction.gates.GateTally` collects the per-request gate
+    decisions (task 6.1, Req 13): which gate rejected each Span from approximate
+    matching (Req 13.1, 13.9) and how many Spans had an Approximate_Strategy
+    evaluated (Req 13.4). It is created here and threaded into both engine
+    functions so a Span rejected in either the transcript path or the word path
+    is counted once. The tally is purely observational — it never changes the
+    correction output — and on the Baseline path (inert context) no gate fires,
+    so it stays empty.
     """
     index = snapshot.index
 
@@ -114,6 +126,13 @@ def _run_rule_stages(
     else:
         gate_context = GateContext.inert()
 
+    # Per-request gate-decision collector (task 6.1, Req 13). Threaded into both
+    # engine functions so a Span rejected in either path is attributed once, to
+    # the first gate in evaluation order (Req 13.9), and Spans that reached
+    # approximate evaluation are counted (Req 13.4). On the Baseline path the
+    # context is inert, no gate fires, and the tally stays empty.
+    tally = GateTally()
+
     # correct_words operates on the word list
     # Serialize words to dicts preserving extra fields (by_alias for camelCase)
     word_dicts = [
@@ -134,6 +153,7 @@ def _run_rule_stages(
         min_candidate_length=min_candidate_length,
         gate_context=gate_context,
         words=word_dicts,
+        tally=tally,
     )
 
     word_result = correct_words(
@@ -145,6 +165,7 @@ def _run_rule_stages(
         fuzzy_score_cutoff=fuzzy_score_cutoff,
         min_candidate_length=min_candidate_length,
         gate_context=gate_context,
+        tally=tally,
     )
 
     # --- Stage 2: Year_Corrector ---
@@ -156,7 +177,41 @@ def _run_rule_stages(
 
     year_count = max(text_year_count, word_year_count)
 
-    return (text_result, word_result, corrected_text, corrected_words, year_count)
+    return (text_result, word_result, corrected_text, corrected_words, year_count, tally)
+
+
+# ---------------------------------------------------------------------------
+# Gate-decision observability (task 6.1, Req 13)
+# ---------------------------------------------------------------------------
+
+
+def _emit_gate_observability(tally: GateTally) -> int:
+    """Emit all gate-decision metrics and logs for the request; return the total.
+
+    Emits, in order:
+
+    * ``postprocess.gate_rejections`` — one datum per gate value with a count
+      greater than zero (Req 13.1), bounded to the thirteen enumerated gate
+      values with only the ``gate`` dimension (Req 13.2, 13.3);
+    * ``postprocess.approx_spans_evaluated`` — the count of Spans that had an
+      Approximate_Strategy evaluated, emitted on every request including zero
+      (Req 13.4);
+    * one ``gate.rejection`` debug log per attributed Span, carrying Span text,
+      gate, and Span_Confidence (Req 13.5), suppressed at non-debug levels
+      (Req 13.10).
+
+    Each emit swallows its own failures (``_emit`` and ``emit_gate_rejection_log``
+    never raise), so gate observability never surfaces to the caller (Req
+    13.11). Returns the single total gate-rejection count across every gate
+    value for the metadata counter (Req 13.6).
+    """
+    emit_gate_rejections(tally.counts())
+    emit_approx_spans_evaluated(tally.approx_spans_evaluated())
+    for decision in tally.decisions:
+        emit_gate_rejection_log(
+            decision.gate, decision.span_text, decision.span_confidence
+        )
+    return tally.total_rejections()
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +335,7 @@ async def run_pipeline(
     # --- Run rule stages in a thread ---
     rule_start = time.perf_counter()
 
-    text_result, word_result, final_text, final_words, year_count = (
+    text_result, word_result, final_text, final_words, year_count, tally = (
         await asyncio.to_thread(
             _run_rule_stages, request, snapshot, settings, lexicon
         )
@@ -291,6 +346,14 @@ async def run_pipeline(
 
     # Emit rule latency metric (Req 10.8, 13.4)
     emit_rule_latency(rule_latency_ms)
+
+    # --- Gate-decision observability (task 6.1, Req 13) ---
+    # Emit the per-gate rejection counts (Req 13.1, 13.2, 13.3), the
+    # approx-spans-evaluated count on every request including zero (Req 13.4),
+    # and one debug-level per-Span rejection log carrying Span text, gate, and
+    # Span_Confidence (Req 13.5, 13.10). Every emit swallows its own failures,
+    # so gate observability never surfaces to the caller (Req 13.11).
+    gate_total = _emit_gate_observability(tally)
 
     # --- Stage 3: LLM_Refiner gate ---
     llm_start = time.perf_counter()
@@ -372,6 +435,10 @@ async def run_pipeline(
         llm_latency_ms=llm_latency_ms,
         dataset_version=snapshot.version,
         correlation_id=request.correlation_id,
+        # Single total gate-rejection count across every gate value, omitted
+        # when 0 so the Baseline contract snapshot is unchanged (Req 13.6,
+        # 14.4/14.11 additive/zero-omitted).
+        gate_rejections=gate_total if gate_total > 0 else None,
     )
 
     # --- Build corrections list ---
