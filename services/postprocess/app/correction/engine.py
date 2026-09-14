@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass
 
 from app.correction.blocklist import is_stopword, is_title, is_word_stopword
+from app.correction.gates import GateContext
 from app.correction.scoring import JOINED_CONFIDENCE, STRATEGY_RANK, TITLE_PERSON_CONFIDENCE
 from app.correction.strategies import (
     MIN_CANDIDATE_LENGTH,
@@ -41,6 +42,7 @@ def correct_single(
     *,
     fuzzy_score_cutoff: float = 0.70,
     min_candidate_length: int = MIN_CANDIDATE_LENGTH,
+    gate_context: GateContext | None = None,
 ) -> MatchResult | None:
     """Run the short-circuiting strategy chain for a single text span.
 
@@ -68,12 +70,25 @@ def correct_single(
         Minimum score cutoff passed to ``match_fuzzy`` (default 0.70).
     min_candidate_length : int
         Minimum input length for full strategy chain (default 4).
+    gate_context : GateContext | None
+        The per-request gate inputs (task 1.4). ``None`` is normalised to an
+        inert context, which is the Baseline path: no gate applies and the
+        strategy chain runs exactly as before. Later tasks (2.x, 4.x) read the
+        resolved thresholds and request-scoped inputs from this context to
+        gate the Approximate_Strategy members; this task only threads it
+        through so those tasks widen no signature.
 
     Returns
     -------
     MatchResult | None
         The best match if any strategy succeeds, otherwise None.
     """
+    # Normalise an absent context to an inert one so callers and later gate
+    # tasks share one shape. An inert context leaves this function's path
+    # unchanged (Req 12.9).
+    if gate_context is None:
+        gate_context = GateContext.inert()
+
     text_lower = text.lower()
 
     # Stopword guard — checked before any strategy (Requirement 4.7)
@@ -255,6 +270,7 @@ def _match_title_person(
     *,
     fuzzy_score_cutoff: float = 0.70,
     min_candidate_length: int = MIN_CANDIDATE_LENGTH,
+    gate_context: GateContext | None = None,
 ) -> tuple[MatchResult, int] | None:
     """Try to match person name tokens following a title token.
 
@@ -290,6 +306,7 @@ def _match_title_person(
             snapshot,
             fuzzy_score_cutoff=fuzzy_score_cutoff,
             min_candidate_length=min_candidate_length,
+            gate_context=gate_context,
         )
         if match and match.entity_kind == "person" and match.confidence >= threshold:
             return (match, win_size)
@@ -338,6 +355,7 @@ def correct_text(
     min_confidence: float = 0.75,
     fuzzy_score_cutoff: float = 0.70,
     min_candidate_length: int = MIN_CANDIDATE_LENGTH,
+    gate_context: GateContext | None = None,
 ) -> TextCorrectionResult:
     """Correct all entity references in a transcript text.
 
@@ -366,12 +384,22 @@ def correct_text(
         Minimum score cutoff passed to ``match_fuzzy`` (default 0.70).
     min_candidate_length : int
         Minimum input length for full strategy chain (default 4).
+    gate_context : GateContext | None
+        The per-request gate inputs (task 1.4), forwarded to ``correct_single``
+        and the title-person helper. ``None`` is normalised to an inert
+        context so the transcript-text path is unchanged from Baseline
+        (Req 12.9). Task 2.1 will derive Span_Confidence here from the Words
+        aligned to each Span (Req 1.7); this task only threads the context.
 
     Returns
     -------
     TextCorrectionResult
         The corrected text, list of corrections applied, and entities found.
     """
+    # Normalise an absent context to an inert one (Baseline path, Req 12.9).
+    if gate_context is None:
+        gate_context = GateContext.inert()
+
     if not text or not text.strip():
         return TextCorrectionResult(text=text, corrections=[], entities_found=[])
 
@@ -403,6 +431,7 @@ def correct_text(
                 min_confidence,
                 fuzzy_score_cutoff=fuzzy_score_cutoff,
                 min_candidate_length=min_candidate_length,
+                gate_context=gate_context,
             )
             if title_result:
                 match, tokens_consumed = title_result
@@ -490,6 +519,7 @@ def correct_text(
                 snapshot,
                 fuzzy_score_cutoff=fuzzy_score_cutoff,
                 min_candidate_length=min_candidate_length,
+                gate_context=gate_context,
             )
 
             # Strategy B: joined match (for n > 1 when correct_single fails)
@@ -611,6 +641,7 @@ def _match_title_person_words(
     *,
     fuzzy_score_cutoff: float = 0.70,
     min_candidate_length: int = MIN_CANDIDATE_LENGTH,
+    gate_context: GateContext | None = None,
 ) -> tuple[MatchResult, int] | None:
     """Try to match person name tokens following a title in word dicts.
 
@@ -641,6 +672,7 @@ def _match_title_person_words(
             snapshot,
             fuzzy_score_cutoff=fuzzy_score_cutoff,
             min_candidate_length=min_candidate_length,
+            gate_context=gate_context,
         )
         if match and match.entity_kind == "person" and match.confidence >= threshold:
             return (match, win_size)
@@ -692,6 +724,7 @@ def correct_words(
     min_confidence: float = 0.75,
     fuzzy_score_cutoff: float = 0.70,
     min_candidate_length: int = MIN_CANDIDATE_LENGTH,
+    gate_context: GateContext | None = None,
 ) -> WordCorrectionResult:
     """Correct all entity references in a transcript word list.
 
@@ -724,6 +757,12 @@ def correct_words(
         Minimum score cutoff passed to ``match_fuzzy`` (default 0.70).
     min_candidate_length : int
         Minimum input length for full strategy chain (default 4).
+    gate_context : GateContext | None
+        The per-request gate inputs (task 1.4), forwarded to ``correct_single``
+        and the title-person helper. ``None`` is normalised to an inert
+        context so the word-level path is unchanged from Baseline (Req 12.9).
+        Task 2.1 will derive Span_Confidence here directly from the covered
+        Word dicts (Req 1.3-1.5); this task only threads the context.
 
     Returns
     -------
@@ -731,6 +770,10 @@ def correct_words(
         The corrected words list (may be shorter due to joining),
         the corrections list, and entities_found.
     """
+    # Normalise an absent context to an inert one (Baseline path, Req 12.9).
+    if gate_context is None:
+        gate_context = GateContext.inert()
+
     if not words:
         return WordCorrectionResult(words=[], corrections=[], entities_found=[])
 
@@ -753,6 +796,7 @@ def correct_words(
                 min_confidence,
                 fuzzy_score_cutoff=fuzzy_score_cutoff,
                 min_candidate_length=min_candidate_length,
+                gate_context=gate_context,
             )
             if title_result:
                 match, name_count = title_result
@@ -858,6 +902,7 @@ def correct_words(
                 snapshot,
                 fuzzy_score_cutoff=fuzzy_score_cutoff,
                 min_candidate_length=min_candidate_length,
+                gate_context=gate_context,
             )
 
             # For n > 1: also try joined (fused) match

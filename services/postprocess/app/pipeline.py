@@ -29,6 +29,7 @@ from app.correction.engine import (
     correct_text,
     correct_words,
 )
+from app.correction.gates import GateContext
 from app.datasets.cache import DatasetCache, DatasetSnapshot
 from app.history.writer import CorrectionHistoryWriter, HistoryRecord
 from app.llm.bedrock import BedrockClient
@@ -77,6 +78,19 @@ def _run_rule_stages(
         settings.min_candidate_length if settings else 4
     )
 
+    # Construct the GateContext once at this pipeline boundary (task 1.4).
+    # It resolves the gating config from settings and carries the per-request
+    # gate inputs later tasks populate (Span_Confidence hook, English_Lexicon
+    # handle, sitting-scope member set). With every new flag off the context is
+    # inert and the engine path is unchanged (Req 12.9); when settings is
+    # absent (unit tests calling the rule stages directly) an inert context is
+    # used, preserving the Baseline path.
+    gate_context = (
+        GateContext.from_settings(settings)
+        if settings is not None
+        else GateContext.inert()
+    )
+
     # --- Stage 1: Correction_Engine ---
     # correct_text operates on the transcript string
     text_result = correct_text(
@@ -86,6 +100,7 @@ def _run_rule_stages(
         min_confidence=min_confidence,
         fuzzy_score_cutoff=fuzzy_score_cutoff,
         min_candidate_length=min_candidate_length,
+        gate_context=gate_context,
     )
 
     # correct_words operates on the word list
@@ -102,6 +117,7 @@ def _run_rule_stages(
         min_confidence=min_confidence,
         fuzzy_score_cutoff=fuzzy_score_cutoff,
         min_candidate_length=min_candidate_length,
+        gate_context=gate_context,
     )
 
     # --- Stage 2: Year_Corrector ---
