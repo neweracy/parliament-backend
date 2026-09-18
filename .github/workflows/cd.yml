@@ -105,25 +105,48 @@ jobs:
         with:
           name: release-${{ needs.build.outputs.image_tag }}
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Open SSH to runner IP (just-in-time)
+        id: sg
+        run: |
+          RUNNER_IP="$(curl -s https://checkip.amazonaws.com | tr -d '[:space:]')"
+          echo "runner_ip=${RUNNER_IP}" >> "$GITHUB_OUTPUT"
+          aws ec2 authorize-security-group-ingress \
+            --group-id "${{ vars.DEPLOY_SG_ID }}" \
+            --ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=${RUNNER_IP}/32,Description=gha-ci-deploy}]" \
+            --region "${{ vars.AWS_REGION }}" 2>/dev/null || echo "ingress rule may already exist"
+
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          # StrictHostKeyChecking=no avoids keyscan failures under `bash -e`.
+          cat > ~/.ssh/config <<EOF
+          Host deploy-target
+            HostName ${{ secrets.EC2_HOST }}
+            User ${{ secrets.EC2_USER }}
+            IdentityFile ~/.ssh/id_ed25519
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          EOF
 
       - name: Copy release to host
         run: |
-          HOST="${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}"
-          ssh -i ~/.ssh/id_ed25519 "$HOST" "mkdir -p ${REMOTE_DIR}/releases/${IMAGE_TAG}"
-          scp -i ~/.ssh/id_ed25519 gateway.tar postprocess.tar \
+          ssh deploy-target "mkdir -p ${REMOTE_DIR}/releases/${IMAGE_TAG}"
+          scp gateway.tar postprocess.tar \
             docker-compose.prod.yml docker-compose.ship.yml Caddyfile.prod \
-            "$HOST:${REMOTE_DIR}/releases/${IMAGE_TAG}/"
+            "deploy-target:${REMOTE_DIR}/releases/${IMAGE_TAG}/"
 
       - name: Deploy with health gate + auto-rollback
         run: |
-          HOST="${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}"
-          ssh -i ~/.ssh/id_ed25519 "$HOST" IMAGE_TAG="${IMAGE_TAG}" REMOTE_DIR="${REMOTE_DIR}" bash -s <<'REMOTE'
+          ssh deploy-target IMAGE_TAG="${IMAGE_TAG}" REMOTE_DIR="${REMOTE_DIR}" bash -s <<'REMOTE'
           set -euo pipefail
           cd "${REMOTE_DIR}"
 
@@ -169,3 +192,11 @@ jobs:
             sleep 5
           done
           echo "::error::public health check failed"; exit 1
+
+      - name: Close SSH access (always, even on failure)
+        if: always() && steps.sg.outputs.runner_ip != ''
+        run: |
+          aws ec2 revoke-security-group-ingress \
+            --group-id "${{ vars.DEPLOY_SG_ID }}" \
+            --ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=${{ steps.sg.outputs.runner_ip }}/32}]" \
+            --region "${{ vars.AWS_REGION }}" 2>/dev/null || echo "ingress rule already removed"
