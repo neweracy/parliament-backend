@@ -151,7 +151,7 @@ jobs:
 
       - name: Deploy with health gate + auto-rollback
         run: |
-          ssh deploy-target IMAGE_TAG="${IMAGE_TAG}" REMOTE_DIR="${REMOTE_DIR}" bash -s <<'REMOTE'
+          ssh deploy-target "IMAGE_TAG='${IMAGE_TAG}' REMOTE_DIR='${REMOTE_DIR}' PUBLIC_HOST='${{ vars.PUBLIC_HOST }}' bash -s" <<'REMOTE'
           set -euo pipefail
           cd "${REMOTE_DIR}"
 
@@ -170,9 +170,12 @@ jobs:
 
           docker compose -f docker-compose.prod.yml -f docker-compose.ship.yml up -d
 
+          # Health via the published edge (port 80 -> caddy -> gateway). Port
+          # 8080 is internal to the docker network and NOT published to the
+          # host, so checking :8080 always failed and forced a false rollback.
           ok=0
-          for i in $(seq 1 24); do
-            if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then ok=1; break; fi
+          for i in $(seq 1 30); do
+            if curl -fsS -H "Host: ${PUBLIC_HOST:-localhost}" http://localhost/health >/dev/null 2>&1; then ok=1; break; fi
             sleep 5
           done
 
