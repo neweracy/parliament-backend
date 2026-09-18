@@ -79,6 +79,11 @@ jobs:
         run: |
           docker save parliament-gateway:${{ steps.meta.outputs.tag }}     -o gateway.tar
           docker save parliament-postprocess:${{ steps.meta.outputs.tag }} -o postprocess.tar
+          # Flatten config next to the tarballs so the artifact has no path
+          # prefix (keeps scp/cp on the deploy side using bare filenames).
+          cp deploy-aws/docker-compose.prod.yml ./docker-compose.prod.yml
+          cp deploy-aws/docker-compose.ship.yml ./docker-compose.ship.yml
+          cp deploy-aws/Caddyfile.prod ./Caddyfile.prod
 
       - uses: actions/upload-artifact@v4
         with:
@@ -87,9 +92,9 @@ jobs:
           path: |
             gateway.tar
             postprocess.tar
-            deploy-aws/docker-compose.prod.yml
-            deploy-aws/docker-compose.ship.yml
-            deploy-aws/Caddyfile.prod
+            docker-compose.prod.yml
+            docker-compose.ship.yml
+            Caddyfile.prod
 
   deploy:
     name: Deploy to EC2
