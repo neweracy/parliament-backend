@@ -641,7 +641,9 @@ def match_component(
 # ---------------------------------------------------------------------------
 
 
-def match_substring(text_lower: str, index: MatchIndex, snapshot: DatasetSnapshot | None = None) -> MatchResult | None:
+def match_substring(
+    text_lower: str, index: MatchIndex, snapshot: DatasetSnapshot | None = None
+) -> MatchResult | None:
     """Legacy arbitrary-infix substring match — Baseline path only (Req 12.9).
 
     Retained solely so that with every precision-gating flag off the engine

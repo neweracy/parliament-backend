@@ -35,11 +35,11 @@ the :class:`GateContext`; this task only establishes the type and the wiring.
 
 from __future__ import annotations
 
-import structlog
-
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+import structlog
 
 from app.correction.provider_profiles import ProviderGateProfile, default_profile
 
