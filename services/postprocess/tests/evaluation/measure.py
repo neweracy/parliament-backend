@@ -37,15 +37,28 @@ Everything is offline and deterministic: no network, no AWS, no LLM — the
 harness measures only the rule-stage engine (Req 10.8). The LLM_Refiner is never
 invoked here; this module calls the engine directly rather than the async
 pipeline.
+
+Per-provider reporting (task 2.12.5)
+------------------------------------
+Because the gate-rejection metric dimensions stay closed (task 2.12.4 keeps
+``provider`` out of the metric per Req 13.3), provider-level precision/recall
+visibility comes through the harness REPORT. :func:`measure_by_provider` measures
+the SAME corpus under each of ``deepgram``, ``khaya``, and ``hybrid`` — each with
+its own gate profile (``provider_profiles_enabled=True``) and its own realistic
+per-word-confidence condition (``deepgram`` keeps confidence; ``khaya``/``hybrid``
+strip it so Span_Confidence is Unknown) — so the ``khaya``/``hybrid`` calibration
+(task 2.12.3) is validated separately from ``deepgram``. This is report-only; no
+metric dimension is added.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from app.config import Settings, clamp_ranges, provider_profiles
 from app.correction.engine import TextCorrection, correct_text
 from app.correction.gates import GateContext
+from app.correction.provider_profiles import SUPPORTED_PROVIDERS
 from app.datasets.cache import DatasetSnapshot
 from tests.evaluation.corpus import CorpusSpan, EvaluationCorpus, load_evaluation_corpus
 from tests.evaluation.dataset import build_fixture_snapshot, load_fixture_lexicon
@@ -358,4 +371,214 @@ def measure_precision_recall() -> MeasurementReport:
     )
     return MeasurementReport(
         baseline=baseline, gated=gated, blocklist_tokens=blocklist_tokens
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-provider reporting (task 2.12.5)
+# ---------------------------------------------------------------------------
+#
+# The gate-rejection metric dimensions stay CLOSED (task 2.12.4 keeps ``provider``
+# OUT of the metric per Req 13.3), so provider-level precision/recall visibility
+# has to come through the HARNESS REPORT, not through a new metric dimension.
+# This section measures the SAME corpus under each provider's gate profile and
+# reports precision/recall per provider, so the ``khaya``/``hybrid`` calibration
+# (task 2.12.3) can be validated separately from ``deepgram``.
+#
+# Two things differ between providers, and the harness reproduces BOTH so each
+# provider is measured under its own realistic condition:
+#
+# 1. **Gate profile.** With ``provider_profiles_enabled=True`` (task 2.12.2), each
+#    provider resolves a distinct :class:`ProviderGateProfile`: ``khaya``/``hybrid``
+#    set ``lexicon_gate_reject_unknown=False`` (task 2.12.3), while ``deepgram``
+#    keeps the Req 2.6 reject policy. With the flag OFF every provider would
+#    resolve the ``deepgram`` profile, so all three would be identical — hence the
+#    per-provider contexts are built from a Settings that enables the flag.
+#
+# 2. **Confidence condition.** Khaya returns text only (no per-word confidence),
+#    so on a ``khaya``/``hybrid`` transcript Span_Confidence is Unknown for every
+#    Span (Req 1.5, 1.10). To validate the Unknown-confidence calibration end to
+#    end, the harness measures each provider under that provider's realistic
+#    condition: ``deepgram`` keeps the corpus Words as-is (confidence present);
+#    ``khaya``/``hybrid`` evaluate the SAME corpus Spans with per-word confidence
+#    STRIPPED, so Span_Confidence is Unknown.
+
+
+def provider_gate_context(provider: str) -> GateContext:
+    """Build the gated context for *provider* with per-provider profiles ON.
+
+    Enables the three Phase-1 gate flags exactly like :func:`gated_gate_context`,
+    but additionally turns on ``provider_profiles_enabled`` so that
+    ``provider_profiles(settings)`` resolves a DISTINCT profile per provider
+    (task 2.12.2): otherwise ``khaya``/``hybrid`` would collapse to the
+    ``deepgram`` profile and the per-provider report would be meaningless. The
+    provider's profile — including its ``lexicon_gate_reject_unknown`` policy
+    (task 2.12.3) — rides on the returned :class:`GateContext`.
+
+    For ``provider="deepgram"`` the resolved profile reproduces the task 1.1
+    defaults, so a ``deepgram`` measurement under this context matches the
+    existing :func:`gated_gate_context` measurement (same profile, same gates).
+    """
+    settings = clamp_ranges(
+        Settings(
+            lexicon_gate_enabled=True,
+            evidence_confidence_enabled=True,
+            context_gate_enabled=True,
+            sitting_scope_enabled=False,
+            llm_veto_enabled=False,
+            provider_profiles_enabled=True,
+        )
+    )
+    profile = provider_profiles(settings).get(provider)
+    return GateContext.from_settings(
+        settings,
+        lexicon=load_fixture_lexicon(),
+        provider=provider,
+        profile=profile,
+    )
+
+
+def _strip_word_confidence(words: tuple[dict, ...]) -> tuple[dict, ...]:
+    """Return copies of *words* with any ``confidence`` field removed.
+
+    Reflects the Khaya/hybrid real-world condition: the provider returns text
+    only, so no per-word confidence is present and Span_Confidence is Unknown
+    for every Span (Req 1.5). Every other field (``word``, ``start``, ``end``,
+    ``punctuated_word``) is preserved so the Span still aligns to the enclosing
+    text and the character-offset lookup is unchanged.
+    """
+    stripped: list[dict] = []
+    for w in words:
+        copy = {k: v for k, v in w.items() if k != "confidence"}
+        stripped.append(copy)
+    return tuple(stripped)
+
+
+def prepare_corpus_span_for_provider(span: CorpusSpan, provider: str) -> CorpusSpan:
+    """Adapt *span* to *provider*'s realistic per-word-confidence condition.
+
+    * ``deepgram`` — the Words are kept as-is (confidence present), matching a
+      provider that supplies per-word confidence.
+    * ``khaya`` / ``hybrid`` — the Words have their ``confidence`` stripped so
+      Span_Confidence is Unknown (Req 1.5, 1.10), matching a text-only provider.
+
+    Returns a copy tagged with the provider; the original ``enclosing_text``,
+    ``span_start``, ``label`` and token text are untouched, so the same Span is
+    measured under each provider's condition — only the confidence signal (and
+    the ``provider`` tag) changes.
+    """
+    if provider == "deepgram":
+        return replace(span, provider=provider)
+    return replace(
+        span, words=_strip_word_confidence(span.words), provider=provider
+    )
+
+
+@dataclass(frozen=True)
+class ProviderReport:
+    """Per-provider precision/recall report (task 2.12.5, Req 10.6, 10.7).
+
+    Maps each supported provider to the :class:`ConfigMetrics` measured for it
+    under that provider's gate profile and confidence condition. This is a
+    REPORT-ONLY structure: it adds no metric dimension (Req 13.3 unchanged) — it
+    exists so the operator can see provider-level precision/recall that the
+    closed gate-rejection metric cannot carry.
+    """
+
+    by_provider: dict[str, ConfigMetrics]
+    blocklist_tokens: frozenset[str]
+
+    def summary_lines(self) -> list[str]:
+        """One human-readable line per provider for failure diagnostics."""
+        lines: list[str] = []
+        for provider in SUPPORTED_PROVIDERS:
+            m = self.by_provider[provider]
+            lines.append(
+                f"[{m.config}] precision={m.precision:.4f} recall={m.recall:.4f} "
+                f"neg_unchanged={m.negative_unchanged}/{m.negative_total} "
+                f"({m.negative_unchanged_rate:.4f}) "
+                f"TP={m.true_positives} FP={m.false_positives} "
+                f"FN={m.false_negatives}"
+            )
+        return lines
+
+
+def _measure_provider(
+    provider: str,
+    corpus: EvaluationCorpus,
+    snapshot: DatasetSnapshot,
+    blocklist_tokens: frozenset[str],
+) -> ConfigMetrics:
+    """Run every corpus Span through *provider*'s context and aggregate metrics.
+
+    Each Span is first adapted to the provider's confidence condition
+    (:func:`prepare_corpus_span_for_provider`) before it is evaluated under the
+    provider's gated context (:func:`provider_gate_context`). Reuses the same
+    ``ConfigMetrics`` aggregation the Baseline-vs-gated path uses, so the
+    per-gate/per-strategy counting is identical — only the config name, gate
+    profile, and confidence condition differ per provider.
+    """
+    gate_context = provider_gate_context(provider)
+    metrics = ConfigMetrics(config=provider)
+    metrics.negative_total = len(corpus.negative_set)
+    metrics.positive_total = len(corpus.positive_set)
+
+    for span in corpus.negative_set:
+        prepared = prepare_corpus_span_for_provider(span, provider)
+        outcome = evaluate_span(prepared, gate_context, snapshot)
+        if outcome.corrected:
+            metrics.false_positives += 1
+            metrics._bump_strategy(outcome.strategy)
+            changed = ChangedNegative(
+                original=span.text,
+                replacement=outcome.replacement or "",
+                config=provider,
+                strategy=outcome.strategy or "?",
+            )
+            metrics.changed_negatives.append(changed)
+            if span.text.lower() in blocklist_tokens:
+                metrics.changed_blocklist_tokens.append(changed)
+        else:
+            metrics.negative_unchanged += 1
+
+    for span in corpus.positive_set:
+        prepared = prepare_corpus_span_for_provider(span, provider)
+        outcome = evaluate_span(prepared, gate_context, snapshot)
+        if outcome.is_true_positive:
+            metrics.true_positives += 1
+            metrics._bump_strategy(outcome.strategy)
+        else:
+            if outcome.is_false_positive:
+                metrics.false_positives += 1
+                metrics._bump_strategy(outcome.strategy)
+            metrics.false_negatives += 1
+
+    return metrics
+
+
+def measure_by_provider() -> ProviderReport:
+    """Measure precision/recall for each ASR provider (task 2.12.5, Req 10.6).
+
+    Measures the SAME Evaluation_Corpus under each of ``deepgram``, ``khaya``,
+    and ``hybrid`` — each with its own gate profile
+    (``provider_profiles_enabled=True``) and its own realistic per-word
+    confidence condition (``deepgram`` keeps confidence; ``khaya``/``hybrid``
+    strip it so Span_Confidence is Unknown). Runs the real
+    :func:`~app.correction.engine.correct_text` in this one process against the
+    fixture Dataset_Cache snapshot (empty Block_List, Req 11.2). Everything is
+    offline and deterministic: no network, no AWS, no LLM (Req 10.8).
+
+    Returns a :class:`ProviderReport` carrying one :class:`ConfigMetrics` per
+    provider. This is report-only — no metric dimension is added (Req 13.3).
+    """
+    corpus = load_evaluation_corpus()
+    snapshot = build_fixture_snapshot()
+    blocklist_tokens = _blocklist_token_set()
+
+    by_provider = {
+        provider: _measure_provider(provider, corpus, snapshot, blocklist_tokens)
+        for provider in SUPPORTED_PROVIDERS
+    }
+    return ProviderReport(
+        by_provider=by_provider, blocklist_tokens=blocklist_tokens
     )
