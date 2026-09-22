@@ -272,16 +272,25 @@ def emit_approx_spans_evaluated(count: int) -> None:
     _emit("postprocess.approx_spans_evaluated", count, "Count")
 
 
-def emit_gate_rejection_log(gate: str, span_text: str, span_confidence: float | None) -> None:
+def emit_gate_rejection_log(
+    gate: str,
+    span_text: str,
+    span_confidence: float | None,
+    provider: str | None = None,
+) -> None:
     """Emit ONE debug-level per-Span gate-rejection log event (Req 13.5, 13.10).
 
     Logged at ``debug`` level only, carrying the rejected Span text, the
     attributed ``gate`` value, and the Span_Confidence rendered as ``"unknown"``
-    when no covered Word carried a confidence (Req 13.5). Because the event is
-    emitted through ``logger.debug``, it is suppressed entirely at any level
-    above debug, so Span text never appears in a non-debug log (Req 13.10). Any
-    logging failure is swallowed so emission never surfaces to the caller
-    (Req 13.11).
+    when no covered Word carried a confidence (Req 13.5). The resolved
+    ``provider`` (a bounded enum-like value — deepgram/khaya/hybrid, not PII) is
+    added as a log field when supplied, giving operators provider visibility in
+    the debug logs without widening the closed ``gate`` metric dimension set
+    (Req 13.3); it appears ONLY here, never on the gate-rejection metric. Because
+    the event is emitted through ``logger.debug``, it is suppressed entirely at
+    any level above debug, so Span text never appears in a non-debug log
+    (Req 13.10). Any logging failure is swallowed so emission never surfaces to
+    the caller (Req 13.11).
     """
     try:
         logger.debug(
@@ -291,6 +300,7 @@ def emit_gate_rejection_log(gate: str, span_text: str, span_confidence: float | 
             span_confidence=(
                 "unknown" if span_confidence is None else span_confidence
             ),
+            provider=provider,
         )
     except Exception:  # noqa: BLE001 - emission failure must never surface (Req 13.11)
         return

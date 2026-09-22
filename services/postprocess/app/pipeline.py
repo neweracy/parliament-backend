@@ -185,7 +185,7 @@ def _run_rule_stages(
 # ---------------------------------------------------------------------------
 
 
-def _emit_gate_observability(tally: GateTally) -> int:
+def _emit_gate_observability(tally: GateTally, provider: str | None = None) -> int:
     """Emit all gate-decision metrics and logs for the request; return the total.
 
     Emits, in order:
@@ -197,8 +197,15 @@ def _emit_gate_observability(tally: GateTally) -> int:
       Approximate_Strategy evaluated, emitted on every request including zero
       (Req 13.4);
     * one ``gate.rejection`` debug log per attributed Span, carrying Span text,
-      gate, and Span_Confidence (Req 13.5), suppressed at non-debug levels
-      (Req 13.10).
+      gate, Span_Confidence (Req 13.5), and the resolved ``provider`` (task
+      2.12.4) so operators get provider visibility in the debug logs, suppressed
+      at non-debug levels (Req 13.10).
+
+    The ``provider`` (``CorrectionOptions.provider`` — deepgram/khaya/hybrid, a
+    bounded non-PII value) rides ONLY on the debug log events, never on any
+    metric: the gate-rejection metric keeps its closed dimension set of just
+    ``gate`` (plus the ``service`` dimension every metric carries), so the
+    metric dimensions are unchanged (Req 13.3).
 
     Each emit swallows its own failures (``_emit`` and ``emit_gate_rejection_log``
     never raise), so gate observability never surfaces to the caller (Req
@@ -209,7 +216,7 @@ def _emit_gate_observability(tally: GateTally) -> int:
     emit_approx_spans_evaluated(tally.approx_spans_evaluated())
     for decision in tally.decisions:
         emit_gate_rejection_log(
-            decision.gate, decision.span_text, decision.span_confidence
+            decision.gate, decision.span_text, decision.span_confidence, provider
         )
     return tally.total_rejections()
 
@@ -350,10 +357,12 @@ async def run_pipeline(
     # --- Gate-decision observability (task 6.1, Req 13) ---
     # Emit the per-gate rejection counts (Req 13.1, 13.2, 13.3), the
     # approx-spans-evaluated count on every request including zero (Req 13.4),
-    # and one debug-level per-Span rejection log carrying Span text, gate, and
-    # Span_Confidence (Req 13.5, 13.10). Every emit swallows its own failures,
-    # so gate observability never surfaces to the caller (Req 13.11).
-    gate_total = _emit_gate_observability(tally)
+    # and one debug-level per-Span rejection log carrying Span text, gate,
+    # Span_Confidence, and the request's provider (task 2.12.4) so operators get
+    # provider visibility in the debug logs without widening the closed gate
+    # metric dimension set (Req 13.3, 13.5, 13.10). Every emit swallows its own
+    # failures, so gate observability never surfaces to the caller (Req 13.11).
+    gate_total = _emit_gate_observability(tally, request.options.provider)
 
     # --- Stage 3: LLM_Refiner gate ---
     llm_start = time.perf_counter()

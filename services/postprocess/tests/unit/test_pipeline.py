@@ -495,3 +495,84 @@ class TestPipelineProviderProfileThreading:
         ctx = _capture_gate_context(request, settings)
         assert ctx.provider == "deepgram"
         assert ctx.profile.lexicon_gate_reject_unknown is True
+
+
+# ---------------------------------------------------------------------------
+# Provider on gate-rejection debug logs, NOT on the metric (task 2.12.4;
+# Req 13.3, 13.5)
+# ---------------------------------------------------------------------------
+
+from app.correction.gates import GateTally  # noqa: E402
+from app.pipeline import _emit_gate_observability  # noqa: E402
+
+
+class TestGateRejectionDebugLogProvider:
+    """The resolved provider rides on the debug gate-rejection log events only,
+    never widening the closed gate-rejection metric dimension set (task 2.12.4).
+    """
+
+    def test_provider_appears_on_debug_log_event(self):
+        """_emit_gate_observability forwards provider onto each debug log event."""
+        tally = GateTally()
+        tally.record_rejection("asr_confidence", "Kwame", 0.42)
+
+        with patch("app.pipeline.emit_gate_rejection_log") as log_mock:
+            total = _emit_gate_observability(tally, "khaya")
+
+        assert total == 1
+        log_mock.assert_called_once_with("asr_confidence", "Kwame", 0.42, "khaya")
+
+    def test_metric_call_unchanged_no_provider_dimension(self):
+        """The gate-rejection metric keeps its closed dims (gate only) — no provider."""
+        tally = GateTally()
+        tally.record_rejection("lexicon", "Accra", None)
+
+        with (
+            patch("app.pipeline.emit_gate_rejections") as rejections_mock,
+            patch("app.pipeline.emit_gate_rejection_log"),
+        ):
+            _emit_gate_observability(tally, "hybrid")
+
+        # emit_gate_rejections is called with only the per-gate counts mapping —
+        # provider is never passed into the metric emission (Req 13.3).
+        rejections_mock.assert_called_once_with({"lexicon": 1})
+        _, kwargs = rejections_mock.call_args
+        assert "provider" not in kwargs
+
+    @pytest.mark.asyncio
+    async def test_run_pipeline_threads_request_provider_into_observability(self):
+        """run_pipeline passes request.options.provider into the observability helper."""
+        request = CorrectionRequest(
+            transcript="hello world",
+            words=[Word(word="hello"), Word(word="world")],
+            options=CorrectionOptions(provider="khaya"),
+            correlation_id="corr-provider",
+        )
+        snapshot = _make_snapshot()
+        cache = _make_cache(snapshot=snapshot)
+
+        with patch(
+            "app.pipeline._emit_gate_observability", return_value=0
+        ) as obs_mock:
+            await run_pipeline(request, cache)
+
+        assert obs_mock.call_count == 1
+        args, _ = obs_mock.call_args
+        # Second positional arg is the resolved provider from the request options.
+        assert args[1] == "khaya"
+
+    def test_debug_log_actually_carries_provider_field(self):
+        """The emitted debug event includes the provider field (structlog capture)."""
+        from structlog.testing import capture_logs
+
+        from app.obs.metrics import emit_gate_rejection_log
+
+        with capture_logs() as logs:
+            emit_gate_rejection_log("asr_confidence", "Kwame", 0.42, "khaya")
+
+        rejection_events = [e for e in logs if e.get("event") == "gate.rejection"]
+        assert len(rejection_events) == 1
+        event = rejection_events[0]
+        assert event["provider"] == "khaya"
+        assert event["gate"] == "asr_confidence"
+        assert event["span"] == "Kwame"
