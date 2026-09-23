@@ -26,6 +26,7 @@ from app.correction.confidence import (
     confidence_gate_blocks_approximate,
     span_confidence,
 )
+from app.correction.context import context_gate_rejects_person
 from app.correction.gates import GateContext, GateTally
 from app.correction.lexicon import lexicon_gate_blocks_approximate
 from app.correction.scoring import JOINED_CONFIDENCE, STRATEGY_RANK, TITLE_PERSON_CONFIDENCE
@@ -34,6 +35,7 @@ from app.correction.strategies import (
     EvidenceParams,
     MatchResult,
     get_party_display,
+    is_deterministic,
     match_component,
     match_exact,
     match_fused,
@@ -57,6 +59,8 @@ def correct_single(
     gate_context: GateContext | None = None,
     span_conf: float | None = None,
     tally: GateTally | None = None,
+    words: list[dict] | None = None,
+    span_start_index: int | None = None,
 ) -> MatchResult | None:
     """Run the short-circuiting strategy chain for a single text span.
 
@@ -133,6 +137,31 @@ def correct_single(
         chain runs (Req 13.4). Purely observational: it never changes the match
         outcome, is ``None`` on the Baseline path, and its bookkeeping never
         raises (Req 13.11).
+    words : list[dict] | None
+        The request's Words list, used by the Context_Gate (Req 7) to locate
+        the Span within the transcript when deciding whether a Context_Signal
+        supports an Approximate person match. ``None`` (the transcript-text
+        path with no Words, or a caller that supplies none) is treated as an
+        empty Words list, which — with no speaker attribution and an Unknown
+        Capitalization_Prior — yields no signal, so an unsupported Approximate
+        person match is rejected when the Context_Gate is active.
+    span_start_index : int | None
+        The index of this Span's first Word within *words* (Req 7.1a, 7.4, 7.5).
+        Callers pass the token/word index at which the Span begins. ``None``
+        defaults to 0. Unused when the Context_Gate is inactive.
+
+    Confidence_Gate, Lexicon_Gate, and Context_Gate (Req 1, 2, 7)
+    -------------------------------------------------------------
+    The Context_Gate (Req 7) is applied to an Approximate_Strategy match on a
+    **person** entity after the strategy produces it: when the context is
+    non-inert and ``context_gate_enabled`` is set and no Context_Signal is
+    present for the Span, the match is rejected and ``None`` returned, so the
+    caller preserves the Span and no further Approximate_Strategy is evaluated
+    (Req 7.2, 7.8, 7.9). Deterministic matches and non-person matches are never
+    context-gated (Req 7.3, 7.7). A Title_Prefix immediately preceding the Span
+    is itself a Context_Signal (Req 7.1a), so a title-prefixed person match
+    passes the gate keeping its normal confidence (Req 7.6, 7.10). With every
+    flag off the gate is inert and the output stays Baseline (Req 12.9).
 
     Returns
     -------
@@ -260,7 +289,10 @@ def correct_single(
 
     result = match_phonetic(text_lower, index, snapshot, evidence=evidence)
     if result is not None:
-        return result
+        return _apply_context_gate(
+            result, text, span_len, gate_context, words, span_start_index, snapshot,
+            index, tally,
+        )
 
     result = match_fuzzy(
         text_lower,
@@ -271,7 +303,10 @@ def correct_single(
         evidence=evidence,
     )
     if result is not None:
-        return result
+        return _apply_context_gate(
+            result, text, span_len, gate_context, words, span_start_index, snapshot,
+            index, tally,
+        )
 
     # Component_Match (Req 5) replaces the legacy arbitrary-infix substring
     # strategy, ranked last after ``fuzzy`` (Req 5.10). Because it changes the
@@ -300,8 +335,67 @@ def correct_single(
             lexicon_active=lexicon_active,
         )
     if result is not None:
-        return result
+        return _apply_context_gate(
+            result, text, span_len, gate_context, words, span_start_index, snapshot,
+            index, tally,
+        )
 
+    return None
+
+
+def _apply_context_gate(
+    result: MatchResult,
+    text: str,
+    span_len: int,
+    gate_context: GateContext,
+    words: list[dict] | None,
+    span_start_index: int | None,
+    snapshot: DatasetSnapshot,
+    index: MatchIndex,
+    tally: GateTally | None,
+) -> MatchResult | None:
+    """Apply the Context_Gate to an Approximate_Strategy match (Req 7).
+
+    Returns *result* unchanged when the gate accepts it, or ``None`` when the
+    gate rejects it — in which case the caller preserves the Span unchanged and
+    (because ``correct_single`` returns ``None``) evaluates no further
+    Approximate_Strategy for that Span (Req 7.8, 7.9).
+
+    The gate is applied only when the context is non-inert **and**
+    ``context_gate_enabled`` is set — the same activation pattern as the
+    Confidence_Gate and Lexicon_Gate — so with every flag off (or this flag
+    off) the match rides through unchanged and the output stays Baseline
+    (Req 12.9). It rejects only an Approximate_Strategy match on a **person**
+    entity with no Context_Signal (Req 7.2); Deterministic matches (Req 7.3)
+    and non-person matches (Req 7.7) are never gated. A title-prefixed person
+    match carries Context_Signal (a), so it passes the gate keeping its normal
+    confidence (Req 7.6, 7.10).
+
+    Because ``correct_single`` reaches this helper only on the approximate
+    strategies, ``result.strategy`` here is always approximate; the
+    ``is_deterministic`` guard is passed for completeness and to keep the pure
+    gate function's contract explicit.
+    """
+    if gate_context.is_inert or not gate_context.config.context_gate_enabled:
+        return result
+    rejects = context_gate_rejects_person(
+        result,
+        span_start_index if span_start_index is not None else 0,
+        span_len,
+        words if words is not None else [],
+        snapshot,
+        index,
+        gate_context.config.context_window_words,
+        is_deterministic=is_deterministic(result.strategy),
+    )
+    if not rejects:
+        return result
+    # Observability (Req 13.2): a Context_Gate rejection is recorded under the
+    # ``context`` gate value. Span_Confidence is not recomputed here — the tally
+    # carries the Span text and gate; the confidence field is best-effort None
+    # (the Context_Gate decision does not depend on it).
+    if tally is not None:
+        tally.record_rejection("context", text, None)
     return None
 
 
@@ -513,6 +607,8 @@ def _match_title_person(
             gate_context=gate_context,
             span_conf=span_conf,
             tally=tally,
+            words=words,
+            span_start_index=name_start,
         )
         if match and match.entity_kind == "person" and match.confidence >= threshold:
             return (match, win_size)
@@ -776,6 +872,8 @@ def correct_text(
                 gate_context=gate_context,
                 span_conf=span_conf,
                 tally=tally,
+                words=words,
+                span_start_index=i,
             )
 
             # Strategy B: joined match (for n > 1 when correct_single fails)
@@ -936,6 +1034,8 @@ def _match_title_person_words(
             gate_context=gate_context,
             span_conf=span_conf,
             tally=tally,
+            words=word_dicts,
+            span_start_index=title_index + 1,
         )
         if match and match.entity_kind == "person" and match.confidence >= threshold:
             return (match, win_size)
@@ -1232,6 +1332,8 @@ def correct_words(
                 gate_context=gate_context,
                 span_conf=span_conf,
                 tally=tally,
+                words=words,
+                span_start_index=i,
             )
 
             # For n > 1: also try joined (fused) match
