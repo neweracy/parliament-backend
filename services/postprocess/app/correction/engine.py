@@ -61,6 +61,7 @@ def correct_single(
     tally: GateTally | None = None,
     words: list[dict] | None = None,
     span_start_index: int | None = None,
+    acceptance_threshold: float | None = None,
 ) -> MatchResult | None:
     """Run the short-circuiting strategy chain for a single text span.
 
@@ -289,9 +290,9 @@ def correct_single(
 
     result = match_phonetic(text_lower, index, snapshot, evidence=evidence)
     if result is not None:
-        return _apply_context_gate(
+        return _finalize_approximate(
             result, text, span_len, gate_context, words, span_start_index, snapshot,
-            index, tally,
+            index, tally, acceptance_threshold,
         )
 
     result = match_fuzzy(
@@ -303,9 +304,9 @@ def correct_single(
         evidence=evidence,
     )
     if result is not None:
-        return _apply_context_gate(
+        return _finalize_approximate(
             result, text, span_len, gate_context, words, span_start_index, snapshot,
-            index, tally,
+            index, tally, acceptance_threshold,
         )
 
     # Component_Match (Req 5) replaces the legacy arbitrary-infix substring
@@ -335,12 +336,116 @@ def correct_single(
             lexicon_active=lexicon_active,
         )
     if result is not None:
-        return _apply_context_gate(
+        return _finalize_approximate(
             result, text, span_len, gate_context, words, span_start_index, snapshot,
-            index, tally,
+            index, tally, acceptance_threshold,
         )
 
     return None
+
+
+def _finalize_approximate(
+    result: MatchResult,
+    text: str,
+    span_len: int,
+    gate_context: GateContext,
+    words: list[dict] | None,
+    span_start_index: int | None,
+    snapshot: DatasetSnapshot,
+    index: MatchIndex,
+    tally: GateTally | None,
+    acceptance_threshold: float | None,
+) -> MatchResult | None:
+    """Apply the Context_Gate then the Sitting_Scope penalty to an approximate match.
+
+    Runs the two Phase 2 gates that act on an Approximate_Strategy match in
+    evaluation order: the Context_Gate first (Req 7), then the Sitting_Scope
+    Evidence_Score penalty (Req 8). The Context_Gate may reject the match
+    outright (``None``); only a surviving match reaches the Sitting_Scope step.
+    Returning ``None`` from either gate causes the caller to preserve the Span
+    and evaluate no further Approximate_Strategy for it (Req 7.8, 7.9, 8.9).
+    """
+    gated = _apply_context_gate(
+        result, text, span_len, gate_context, words, span_start_index, snapshot,
+        index, tally,
+    )
+    if gated is None:
+        return None
+    return _apply_sitting_scope(gated, text, gate_context, tally, acceptance_threshold)
+
+
+def _apply_sitting_scope(
+    result: MatchResult,
+    text: str,
+    gate_context: GateContext,
+    tally: GateTally | None,
+    acceptance_threshold: float | None,
+) -> MatchResult | None:
+    """Apply the Sitting_Scope Out_Of_Scope_Penalty to an approximate match (Req 8).
+
+    Subtracts ``Out_Of_Scope_Penalty`` from the Evidence_Score of an
+    Approximate_Strategy match on a **person** candidate whose canonical entity
+    is absent from the resolved Sitting_Scope, clamping the adjusted score at a
+    lower bound of 0.0 (Req 8.3), and returns a new :class:`MatchResult` carrying
+    the adjusted confidence. Deterministic matches and non-person candidates are
+    left unadjusted (Req 8.6); because ``correct_single`` reaches this helper
+    only on the approximate strategies, ``result.strategy`` is already
+    approximate, but the ``is_deterministic`` guard keeps the contract explicit.
+
+    Activation (Req 8.2, 8.5, 12.9)
+    -------------------------------
+    The penalty is applied only when the context is non-inert **and**
+    ``sitting_scope_enabled`` is set **and** a non-empty Sitting_Scope member
+    set is present on the context. With every flag off, the flag off, or no
+    scope available (whitespace-only id, empty/errored/timed-out lookup — all
+    resolved to ``sitting_scope=None`` by the pipeline, Req 8.5), the match
+    rides through unadjusted and the output stays Baseline (Req 12.9).
+
+    Rejection (Req 8.9)
+    -------------------
+    When *acceptance_threshold* is supplied and a person candidate whose
+    Evidence_Score met that threshold falls below it after the penalty, the
+    candidate is rejected (``None`` returned) and the rejection is recorded under
+    the ``sitting_scope`` gate value on the *tally*. A candidate already below
+    the threshold, or with no threshold supplied, keeps the adjusted score for
+    the caller's own threshold comparison.
+    """
+    if gate_context.is_inert or not gate_context.config.sitting_scope_enabled:
+        return result
+    scope = gate_context.sitting_scope
+    if not scope:
+        # No scope member set available (Req 8.2, 8.5): no adjustment.
+        return result
+    if result.entity_kind != "person" or is_deterministic(result.strategy):
+        # Restrict the penalty to Approximate_Strategy person candidates (Req 8.6).
+        return result
+    if result.canonical in scope:
+        # In-scope person candidate — no penalty (Req 8.3).
+        return result
+
+    penalty = gate_context.config.out_of_scope_penalty
+    adjusted = max(0.0, result.confidence - penalty)
+
+    # Rejection (Req 8.9): a candidate that met the acceptance threshold but
+    # falls below it after the penalty is rejected under the ``sitting_scope``
+    # gate. Uses the original (pre-penalty) confidence to decide whether it had
+    # met the threshold.
+    if (
+        acceptance_threshold is not None
+        and result.confidence >= acceptance_threshold
+        and adjusted < acceptance_threshold
+    ):
+        if tally is not None:
+            tally.record_rejection("sitting_scope", text, None)
+        return None
+
+    return MatchResult(
+        canonical=result.canonical,
+        confidence=adjusted,
+        strategy=result.strategy,
+        entity_kind=result.entity_kind,
+        entity_type=result.entity_type,
+    )
 
 
 def _apply_context_gate(
@@ -425,19 +530,29 @@ def _resolve_evidence_params(gate_context: GateContext) -> EvidenceParams:
     )
 
 
-def correction_sort_key(result: MatchResult, span_len: int) -> tuple:
+def correction_sort_key(
+    result: MatchResult,
+    span_len: int,
+    sitting_scope: frozenset[str] | None = None,
+) -> tuple:
     """Deterministic sort key for selecting among competing corrections.
 
     Lower value = better match. Applied when multiple candidates exist
     for overlapping spans.
 
-    sort_key = (-round(confidence, 6), -span_len, STRATEGY_RANK[strategy], canonical)
+    sort_key = (-round(confidence, 6), member_rank, -span_len,
+                STRATEGY_RANK[strategy], canonical)
 
     Tie-break order (most significant first):
       1. Higher confidence wins (negated so lower tuple value = better).
-      2. Longer span wins (negated).
-      3. Lower strategy rank wins (exact < fused < joined < ... < substring).
-      4. Lexicographic canonical name for full determinism.
+      2. Sitting_Scope member wins over a non-member at equal confidence
+         (Req 8.4) — a member sorts ahead of a non-member *before* the existing
+         span-length / strategy-rank / canonical order. Applied only when a
+         non-empty *sitting_scope* is supplied; otherwise this component is a
+         constant and the ordering is unchanged (Baseline, Req 12.9).
+      3. Longer span wins (negated).
+      4. Lower strategy rank wins (exact < fused < joined < ... < substring).
+      5. Lexicographic canonical name for full determinism.
 
     Parameters
     ----------
@@ -445,14 +560,23 @@ def correction_sort_key(result: MatchResult, span_len: int) -> tuple:
         The match result to compute the sort key for.
     span_len : int
         The number of tokens the matched span covers.
+    sitting_scope : frozenset[str] | None
+        The resolved Sitting_Scope member set (Req 8.4). When supplied and
+        non-empty, a candidate whose canonical is a member sorts ahead of a
+        non-member at equal confidence, before the existing tie-break. ``None``
+        or empty leaves the ordering unchanged.
 
     Returns
     -------
     tuple
         A tuple suitable for ``min()`` or ``sorted()`` comparisons.
     """
+    # 0 for a member (sorts first), 1 otherwise. A constant 1 when no scope is
+    # supplied, so the tie-break order is identical to Baseline (Req 12.9).
+    member_rank = 0 if sitting_scope and result.canonical in sitting_scope else 1
     return (
         -round(result.confidence, 6),
+        member_rank,
         -span_len,
         STRATEGY_RANK.get(result.strategy, 99),
         result.canonical,
@@ -609,6 +733,7 @@ def _match_title_person(
             tally=tally,
             words=words,
             span_start_index=name_start,
+            acceptance_threshold=threshold,
         )
         if match and match.entity_kind == "person" and match.confidence >= threshold:
             return (match, win_size)
@@ -874,6 +999,7 @@ def correct_text(
                 tally=tally,
                 words=words,
                 span_start_index=i,
+                acceptance_threshold=min_confidence,
             )
 
             # Strategy B: joined match (for n > 1 when correct_single fails)
@@ -1036,6 +1162,7 @@ def _match_title_person_words(
             tally=tally,
             words=word_dicts,
             span_start_index=title_index + 1,
+            acceptance_threshold=threshold,
         )
         if match and match.entity_kind == "person" and match.confidence >= threshold:
             return (match, win_size)
@@ -1334,6 +1461,7 @@ def correct_words(
                 tally=tally,
                 words=words,
                 span_start_index=i,
+                acceptance_threshold=word_accept_threshold,
             )
 
             # For n > 1: also try joined (fused) match

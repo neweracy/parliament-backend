@@ -20,6 +20,7 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings, provider_profiles
@@ -31,6 +32,10 @@ from app.correction.engine import (
 )
 from app.correction.gates import GateContext, GateTally
 from app.datasets.cache import DatasetCache, DatasetSnapshot
+from app.datasets.sittings import (
+    DEFAULT_SITTING_SCOPE_TIMEOUT_S,
+    resolve_sitting_scope,
+)
 from app.history.writer import CorrectionHistoryWriter, HistoryRecord
 from app.llm.bedrock import BedrockClient
 from app.llm.refiner import refine_chunks
@@ -53,6 +58,76 @@ from app.obs.metrics import (
 )
 from app.years.corrector import correct_years, correct_years_in_text
 
+logger = structlog.get_logger("pipeline")
+
+
+# ---------------------------------------------------------------------------
+# Sitting_Scope resolution (task 4.5, Req 8)
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_sitting_scope(
+    request: CorrectionRequest,
+    settings: Settings | None,
+    session_factory: async_sessionmaker[AsyncSession] | None,
+) -> frozenset[str] | None:
+    """Resolve the Sitting_Scope member set once for the request (Req 8.5-8.7, 8.10).
+
+    Returns the resolved ``frozenset`` of member canonical names when the
+    Sitting_Scope flag is enabled, the request carries a usable sitting id, a
+    database session is available, and the lookup returns a non-empty set within
+    the 2-second bound. Returns ``None`` in every other case — the flag is off,
+    the request omits the sitting id, the id is whitespace-only, no session
+    factory is available, or the lookup is unavailable (no match, empty set,
+    error, or timeout) — so the Rule_Stage applies no Evidence_Score adjustment
+    (Req 8.2, 8.5). At most one ``sitting_scope.unavailable`` debug event is
+    logged for the request when a lookup was attempted but yielded no usable
+    scope (Req 8.5).
+
+    Resolution happens here, in the async pipeline, exactly once and before the
+    Rule_Stage worker thread is dispatched (Req 8.7); the resolved set is passed
+    into the Rule_Stage in memory, so the Rule_Stage issues no DB read of its
+    own (Req 8.8). Any lookup error or timeout is contained here so the pipeline
+    completes and returns corrections without Sitting_Scope adjustment (Req 8.10).
+    """
+    # Flag off, or called without settings (unit tests) → no scope, no lookup
+    # (Req 8.2). Baseline path (Req 12.9).
+    if settings is None or not settings.sitting_scope_enabled:
+        return None
+
+    # Request omits the sitting id, or the id is whitespace-only → no adjustment,
+    # no lookup, no log event (Req 8.2).
+    sitting_id = request.sitting_id
+    if sitting_id is None or not sitting_id.strip():
+        return None
+
+    # No database session available (tests, or DB down) → treat as unavailable
+    # (Req 8.5): log one debug event and proceed with no adjustment.
+    if session_factory is None:
+        logger.debug("sitting_scope.unavailable", reason="no_session")
+        return None
+
+    scope: frozenset[str] = frozenset()
+    try:
+        session: AsyncSession = session_factory()
+        try:
+            scope = await resolve_sitting_scope(
+                session,
+                sitting_id.strip(),
+                timeout_s=DEFAULT_SITTING_SCOPE_TIMEOUT_S,
+            )
+        finally:
+            await session.close()
+    except Exception:  # noqa: BLE001 - lookup errors are unavailable (Req 8.10)
+        scope = frozenset()
+
+    # Unavailable (no match / empty / error / timeout) → no adjustment, at most
+    # one debug event (Req 8.5). A non-empty scope is returned for the engine.
+    if not scope:
+        logger.debug("sitting_scope.unavailable", reason="empty")
+        return None
+    return scope
+
 
 # ---------------------------------------------------------------------------
 # Rule stages — synchronous, run in a thread
@@ -64,6 +139,7 @@ def _run_rule_stages(
     snapshot: DatasetSnapshot,
     settings: Settings | None = None,
     lexicon: object | None = None,
+    sitting_scope: frozenset[str] | None = None,
 ) -> tuple[TextCorrectionResult, WordCorrectionResult, str, list[dict], int, GateTally]:
     """Execute the Correction_Engine and Year_Corrector synchronously.
 
@@ -117,11 +193,18 @@ def _run_rule_stages(
     # startup so the values are parsed and range-clamped.
     if settings is not None:
         profile = provider_profiles(settings).get(request.options.provider)
+        # The Sitting_Scope member set (task 4.5, Req 8) is resolved once in
+        # ``run_pipeline`` before this thread is dispatched (Req 8.7) and passed
+        # in memory here, so the Rule_Stage issues no DB read of its own
+        # (Req 8.8). ``None`` when the flag is off, the request omits/whitespaces
+        # the id, or the lookup was unavailable (Req 8.2, 8.5), which leaves the
+        # Sitting_Scope preference inert (Baseline, Req 12.9).
         gate_context = GateContext.from_settings(
             settings,
             lexicon=lexicon,
             provider=request.options.provider,
             profile=profile,
+            sitting_scope=sitting_scope,
         )
     else:
         gate_context = GateContext.inert()
@@ -339,12 +422,23 @@ async def run_pipeline(
             corrections=[],
         )
 
+    # --- Resolve the Sitting_Scope once, before dispatching the Rule_Stage ---
+    # (Req 8.7). The member set is resolved here in the async pipeline, with a
+    # 2-second timeout and defensive error handling (Req 8.5, 8.10), and passed
+    # into the worker thread in memory so the Rule_Stage issues no DB read of
+    # its own (Req 8.8). ``None`` when the flag is off, the request omits or
+    # whitespaces the sitting id, or the lookup is unavailable — all of which
+    # leave the Sitting_Scope preference inert (Req 8.2, 8.5, 12.9).
+    sitting_scope = await _resolve_sitting_scope(
+        request, settings, session_factory
+    )
+
     # --- Run rule stages in a thread ---
     rule_start = time.perf_counter()
 
     text_result, word_result, final_text, final_words, year_count, tally = (
         await asyncio.to_thread(
-            _run_rule_stages, request, snapshot, settings, lexicon
+            _run_rule_stages, request, snapshot, settings, lexicon, sitting_scope
         )
     )
 

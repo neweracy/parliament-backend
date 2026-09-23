@@ -268,7 +268,10 @@ class TestCorrectionSortKey:
             entity_kind="location", entity_type="city",
         )
         key = correction_sort_key(r, 2)
-        assert key == (-round(0.88, 6), -2, 6, "Accra")
+        # Tuple carries the Sitting_Scope member_rank at index 1 (Req 8.4);
+        # with no scope supplied it is the constant 1, leaving the Baseline
+        # ordering unchanged (Req 12.9).
+        assert key == (-round(0.88, 6), 1, -2, 6, "Accra")
 
     def test_unknown_strategy_gets_rank_99(self):
         r = MatchResult(
@@ -276,7 +279,8 @@ class TestCorrectionSortKey:
             entity_kind="location", entity_type="city",
         )
         key = correction_sort_key(r, 1)
-        assert key[2] == 99
+        # STRATEGY_RANK now sits at index 3 (member_rank inserted at index 1).
+        assert key[3] == 99
 
 
 # ---------------------------------------------------------------------------
