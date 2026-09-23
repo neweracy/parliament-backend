@@ -31,6 +31,7 @@ from app.correction.engine import (
     correct_words,
 )
 from app.correction.gates import GateContext, GateTally
+from app.correction.source_ids import assign_source_word_ids
 from app.datasets.cache import DatasetCache, DatasetSnapshot
 from app.datasets.sittings import (
     DEFAULT_SITTING_SCOPE_TIMEOUT_S,
@@ -429,6 +430,18 @@ async def run_pipeline(
             ),
             corrections=[],
         )
+
+    # --- Assign stable Source_Word_Ids over the raw ASR word list ---
+    # (transcript-evidence-navigation task 1.1, Req 1.2, 1.3, 2.7). This runs
+    # immediately after ASR output is available and BEFORE any correction stage,
+    # deriving one ``source_word_id`` (``w0``, ``w1``, ...) per raw Source_Word
+    # from its zero-based ASR-order index. The ids ride alongside the pipeline
+    # for the evidence builder (task 2.2) to address each correction back to the
+    # Source_Words it changed; they are positional only, so they never read or
+    # rewrite the ASR ``start``/``end`` of any word (Immutable_Source_Timing)
+    # and never touch gating — the GateContext threading below is unchanged.
+    source_word_ids = assign_source_word_ids(request.words)
+    logger.debug("source_ids.assigned", count=len(source_word_ids))
 
     # --- Resolve the Sitting_Scope once, before dispatching the Rule_Stage ---
     # (Req 8.7). The member set is resolved here in the async pipeline, with a
