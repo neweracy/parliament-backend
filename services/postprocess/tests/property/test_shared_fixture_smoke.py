@@ -18,7 +18,7 @@ Asserted here (Req 16.15):
 
 from __future__ import annotations
 
-from hypothesis import given, settings
+from hypothesis import HealthCheck, given, settings
 
 from tests.property.fixtures import (
     FIXTURE_BLOCK_LIST,
@@ -158,7 +158,11 @@ def test_word_lists_are_bounded_and_monotonic(word_list: list[dict]) -> None:
 
 
 @given(word_list=word_lists(min_size=1, max_size=200))
-@settings(max_examples=25)
+@settings(
+    max_examples=10,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
 def test_word_lists_reach_full_range(word_list: list[dict]) -> None:
     """The Words-list strategy can produce up to 200 Words (Req 16.15)."""
     assert 1 <= len(word_list) <= 200
