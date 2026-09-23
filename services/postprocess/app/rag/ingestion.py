@@ -26,6 +26,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
+from app.correction.evidence_builder import build_correction_evidence
+from app.correction.evidence_writer import persist_correction_evidence
+from app.correction.source_ids import assign_source_word_ids
+from app.models.entities import CorrectionRecord, EntityKind, EntityType, MatchStrategy
 
 logger = structlog.get_logger("rag.ingestion")
 
@@ -38,6 +42,57 @@ _PAUSE_THRESHOLD_S = 2.0
 _EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"
 # Titan Text Embeddings V2 produces 1024-dimensional vectors
 _EMBEDDING_DIMENSION = 1024
+
+
+def _correction_record_from_dict(raw: dict) -> CorrectionRecord | None:
+    """Map a persisted correction dict to a :class:`CorrectionRecord` (task 4.1).
+
+    Reuses the defensive enum-coercion the pipeline applies when building the
+    corrections list (``pipeline._build_corrections``): an unrecognized
+    ``strategy``/``entity_kind``/``entity_type`` falls back to a safe default
+    rather than raising, so one malformed persisted correction never aborts the
+    whole version's evidence persistence. Accepts both snake_case and camelCase
+    keys so the record round-trips whether it was persisted from the Python
+    response (snake) or the Gateway boundary (camel).
+
+    Returns ``None`` when the dict lacks the ``original``/``corrected`` text a
+    Correction_Entry requires — such a row carries no reviewable change.
+    """
+    original = raw.get("original")
+    corrected = raw.get("corrected")
+    if not isinstance(original, str) or not isinstance(corrected, str):
+        return None
+
+    strategy_raw = str(raw.get("strategy") or "")
+    kind_raw = str(raw.get("entity_kind") or raw.get("entityKind") or "")
+    type_raw = str(raw.get("entity_type") or raw.get("entityType") or "")
+    confidence_raw = raw.get("confidence")
+    try:
+        confidence = float(confidence_raw) if confidence_raw is not None else 0.0
+    except (TypeError, ValueError):
+        confidence = 0.0
+    confidence = min(1.0, max(0.0, confidence))
+
+    return CorrectionRecord(
+        original=original,
+        corrected=corrected,
+        strategy=(
+            MatchStrategy(strategy_raw)
+            if strategy_raw in MatchStrategy.__members__
+            else MatchStrategy.exact
+        ),
+        confidence=confidence,
+        entity_kind=(
+            EntityKind(kind_raw)
+            if kind_raw in EntityKind.__members__
+            else EntityKind.location
+        ),
+        entity_type=(
+            EntityType(type_raw)
+            if type_raw in EntityType.__members__
+            else EntityType.supplementary
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -168,6 +223,14 @@ class TranscriptIngestionWorker:
 
         # Store chunks in DB
         await self._store_chunks(transcript_id, chunks, embeddings)
+
+        # Persist Correction_Evidence keyed to (transcript_id, version)
+        # (transcript-evidence-navigation task 4.1, Req 1.6, 8.5). Python is the
+        # sole writer of the correction table; this runs on the ingestion flow
+        # already triggered with the transcript_id (design Decision 2). Isolated
+        # from chunk indexing: a failure here logs and returns without affecting
+        # the chunks just stored or the transcript row.
+        await self._persist_correction_evidence(transcript_id, transcript_data)
 
         logger.info(
             "rag.ingestion.complete",
@@ -544,7 +607,8 @@ class TranscriptIngestionWorker:
             async with self._session_factory() as session:
                 result = await session.execute(
                     text(
-                        "SELECT corrected_text, word_timings, entities "
+                        "SELECT corrected_text, word_timings, entities, "
+                        "version, raw_text, metadata "
                         "FROM transcript WHERE id = :id"
                     ),
                     {"id": transcript_id},
@@ -556,18 +620,26 @@ class TranscriptIngestionWorker:
                 corrected_text = row[0]
                 word_timings = row[1] if row[1] else []
                 entities = row[2] if row[2] else []
+                version = row[3] if row[3] is not None else 1
+                raw_text = row[4] if row[4] else ""
+                metadata = row[5] if row[5] else {}
 
-                # word_timings and entities are JSONB columns; they may
+                # word_timings, entities and metadata are JSONB columns; they may
                 # already be parsed or may be strings depending on driver
                 if isinstance(word_timings, str):
                     word_timings = json.loads(word_timings)
                 if isinstance(entities, str):
                     entities = json.loads(entities)
+                if isinstance(metadata, str):
+                    metadata = json.loads(metadata)
 
                 return {
                     "corrected_text": corrected_text,
                     "word_timings": word_timings,
                     "entities": entities,
+                    "version": version,
+                    "raw_text": raw_text,
+                    "metadata": metadata,
                 }
         except Exception:
             logger.error(
@@ -663,6 +735,137 @@ class TranscriptIngestionWorker:
                 transcript_id=transcript_id,
                 exc_info=True,
             )
+
+    async def _persist_correction_evidence(
+        self,
+        transcript_id: int,
+        transcript_data: dict,
+    ) -> None:
+        """Build and persist Correction_Evidence for this version (task 4.1).
+
+        Runs on the Python ingestion flow triggered with *transcript_id*
+        (design Decision 2). Python is the sole writer of ``correction_evidence``
+        (Req 1.6, 8.5); the write is keyed to ``(transcript_id, version)``.
+
+        Batch-grouping approach and its limitation
+        -------------------------------------------
+        The evidence builder (task 2.2) needs the raw ASR words, their stable
+        Source_Word_Ids, and the pipeline's correction records grouped by origin
+        (rule / year / llm / vetoed). At ingestion time the only durable inputs
+        are the persisted ``transcript`` columns: ``raw_text`` (raw ASR text),
+        ``word_timings`` (the corrected words), ``metadata``, and ``version``.
+
+        The engine's per-change ``corrections`` array (each carrying
+        ``original``/``corrected``/``stage``/``outcome``/``confidence``/entity
+        classification) is only durable here when the pipeline/Gateway contract
+        persisted it under ``metadata['corrections']``. When that payload is
+        present, records are grouped by their ``stage``/``outcome`` fields into
+        the builder's batches. When it is ABSENT — the corrections array was not
+        carried onto the transcript row — this method persists NO rows rather
+        than fabricating changes from the corrected-word flags (which do not
+        preserve original text). A version with no persisted evidence is Baseline
+        "no evidence" (Req 10.5), which is the correct, truthful state for the
+        official record — never a guessed range or invented before/after text.
+
+        The raw ASR word list needed for exact source addressing is likewise
+        only durable when carried under ``metadata['raw_words']``; absent it, the
+        builder aligns against an empty word list and every entry reports
+        ``mapping_confidence = lost`` (Req 2.10) rather than an inferred range.
+        """
+        metadata = transcript_data.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            return
+
+        raw_corrections = metadata.get("corrections")
+        if not raw_corrections or not isinstance(raw_corrections, list):
+            # No durable corrections payload — Baseline "no evidence" (Req 10.5).
+            # Do NOT fabricate changes from corrected-word flags.
+            logger.debug(
+                "rag.ingestion.no_correction_evidence",
+                transcript_id=transcript_id,
+            )
+            return
+
+        # The raw ASR words carry exact source addressing. They are durable only
+        # when the contract persisted them; absent, the builder emits lost
+        # mappings (Req 2.10) rather than guessing.
+        raw_words = metadata.get("raw_words") or transcript_data.get("word_timings") or []
+        if not isinstance(raw_words, list):
+            raw_words = []
+        source_word_ids = assign_source_word_ids(raw_words)
+
+        applied, year, llm, vetoed = self._group_correction_records(raw_corrections)
+
+        dataset_version = metadata.get("dataset_version") or metadata.get("datasetVersion")
+        correlation_id = metadata.get("correlation_id") or metadata.get("correlationId")
+        model_id = metadata.get("model_id") or metadata.get("modelId")
+
+        evidence = build_correction_evidence(
+            transcript_id,
+            int(transcript_data.get("version") or 1),
+            raw_words,
+            source_word_ids,
+            applied_records=applied,
+            year_records=year,
+            llm_records=llm,
+            vetoed_records=vetoed,
+            correlation_id=str(correlation_id) if correlation_id else None,
+            dataset_version=str(dataset_version) if dataset_version else None,
+            model_id=str(model_id) if model_id else None,
+        )
+
+        written = await persist_correction_evidence(self._session_factory, evidence)
+        logger.debug(
+            "rag.ingestion.correction_evidence_persisted",
+            transcript_id=transcript_id,
+            rows=written,
+        )
+
+    @staticmethod
+    def _group_correction_records(
+        raw_corrections: list,
+    ) -> tuple[
+        list[CorrectionRecord],
+        list[CorrectionRecord],
+        list[CorrectionRecord],
+        list[CorrectionRecord],
+    ]:
+        """Group persisted correction dicts into (applied, year, llm, vetoed).
+
+        Splits each correction by its ``stage``/``correctionStage`` and
+        ``outcome``/``correctionOutcome`` fields into the four builder batches.
+        A ``vetoed`` outcome goes to *vetoed* regardless of stage; otherwise the
+        record is routed by stage — ``year`` to *year*, ``llm`` to *llm*, and
+        everything else (including a missing/unknown stage) to *applied* as the
+        best available grouping (documented limitation): the persisted contract
+        may not cleanly split rule/year/llm origins, and inventing an origin is
+        never acceptable for the official record.
+        """
+        applied: list[CorrectionRecord] = []
+        year: list[CorrectionRecord] = []
+        llm: list[CorrectionRecord] = []
+        vetoed: list[CorrectionRecord] = []
+
+        for raw in raw_corrections:
+            if not isinstance(raw, dict):
+                continue
+            record = _correction_record_from_dict(raw)
+            if record is None:
+                continue
+            stage = str(raw.get("stage") or raw.get("correctionStage") or "").lower()
+            outcome = str(
+                raw.get("outcome") or raw.get("correctionOutcome") or ""
+            ).lower()
+            if outcome == "vetoed":
+                vetoed.append(record)
+            elif stage == "year":
+                year.append(record)
+            elif stage == "llm":
+                llm.append(record)
+            else:
+                applied.append(record)
+
+        return applied, year, llm, vetoed
 
     async def _worker_loop(self) -> None:
         """Background loop consuming transcript IDs and processing them."""
