@@ -295,15 +295,41 @@ class Settings(BaseSettings):
             "PROVIDER_HYBRID_MAX_RELATIVE_DISTANCE": 0.25,
         }
 
+        # Correction precision gating feature flags (Req 12.2, 12.4, 12.5).
+        # An empty value is treated the same as absent (Req 12.3/12.4/12.5):
+        # pydantic-settings' built-in bool parser rejects "" outright, so an
+        # empty string must be dropped here before validation runs, leaving
+        # the field's default to apply.
+        bool_fields: tuple[str, ...] = (
+            "LEXICON_GATE_ENABLED",
+            "EVIDENCE_CONFIDENCE_ENABLED",
+            "CONTEXT_GATE_ENABLED",
+            "SITTING_SCOPE_ENABLED",
+            "LLM_VETO_ENABLED",
+            "PROVIDER_PROFILES_ENABLED",
+            "LLM_ENABLED",
+            "HISTORY_ENABLED",
+        )
+        for field_name in bool_fields:
+            key = field_name.lower()
+            raw = values.get(key, values.get(field_name))
+            if isinstance(raw, str) and raw.strip() == "":
+                values.pop(key, None)
+                values.pop(field_name, None)
+
         for field_name, default in numeric_int_fields.items():
             key = field_name.lower()
-            raw = values.get(key) or values.get(field_name)
+            # NOTE: use a sentinel-based lookup (not `or`) so an explicit
+            # empty string "" is not mistaken for an absent key — "" is falsy
+            # and would otherwise fall through to `values.get(field_name)`
+            # and then straight to pydantic's own (crashing) parser.
+            raw = values.get(key, values.get(field_name))
             if raw is not None and not isinstance(raw, int):
                 values[key] = _safe_int(raw, default, field_name)
 
         for field_name, default in numeric_float_fields.items():
             key = field_name.lower()
-            raw = values.get(key) or values.get(field_name)
+            raw = values.get(key, values.get(field_name))
             if raw is not None and not isinstance(raw, (int, float)):
                 values[key] = _safe_float(raw, default, field_name)
 
