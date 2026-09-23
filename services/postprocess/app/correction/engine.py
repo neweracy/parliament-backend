@@ -1093,6 +1093,38 @@ _WORD_MIN_TOKEN_LENGTH = 3
 
 
 @dataclass
+class VetoSpan:
+    """Pre-correction word state for one rule word-correction, for LLM Veto restore.
+
+    Captured by ``correct_words`` only when the LLM Veto flag is enabled
+    (``gate_context.config.llm_veto_enabled``), so the flag-off path allocates
+    nothing extra and stays byte-for-byte Baseline (Req 12.9). Each record
+    carries everything the pipeline needs to undo one rule correction (Req 9.4):
+
+    * ``original`` — the original Span text (the joined pre-correction words),
+      matching the ``original`` of the corresponding word-correction tuple.
+    * ``corrected`` — the corrected Span text (the canonical name written into
+      the output Word), used to locate the corrected Word in the final Words
+      list and to resolve a veto decision to exactly one correction (Req 9.11).
+    * ``original_words`` — the exact pre-correction Word dicts (deep-copied,
+      each carrying the ``start``/``end`` it held before the correction), so a
+      restore reinstates the original Word count and timings (Req 9.4).
+    * ``entity_kind`` — the matched entity kind, so a vetoed person correction
+      is restored rather than retained under the person guard (Req 9.13).
+    * ``output_index`` — the index of the corrected Word within this
+      ``WordCorrectionResult.words`` list at the moment the correction was
+      applied. The pipeline re-locates the Word by text after the Year_Corrector
+      runs, so this is a hint, not a hard index.
+    """
+
+    original: str
+    corrected: str
+    original_words: list[dict]
+    entity_kind: str
+    output_index: int
+
+
+@dataclass
 class WordCorrectionResult:
     """Result of correct_words.
 
@@ -1105,11 +1137,22 @@ class WordCorrectionResult:
     entities_found : list[tuple[str, str, str]]
         Each tuple is (canonical, kind, type) for recognized entities
         including identity matches.
+    veto_spans : list[VetoSpan]
+        Pre-correction Word state per applied word-correction, populated only
+        when the LLM Veto flag is enabled (Req 9.4). Empty on the Baseline path
+        so the flag-off behaviour is unchanged (Req 12.9). Parallel to
+        ``corrections`` in order but keyed by original/corrected text, not by
+        index, so the pipeline resolves each veto by text (Req 9.11).
     """
 
     words: list[dict]
     corrections: list[tuple[str, str, str, float, str, str]]
     entities_found: list[tuple[str, str, str]]
+    veto_spans: list[VetoSpan] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.veto_spans is None:
+            self.veto_spans = []
 
 
 def _match_title_person_words(
@@ -1326,6 +1369,10 @@ def correct_words(
     output: list[dict] = []
     corrections: list[tuple[str, str, str, float, str, str]] = []
     entities_found: list[tuple[str, str, str]] = []
+    # Pre-correction Word slices per applied correction, captured only when the
+    # LLM Veto flag is on (Req 9.4). Empty otherwise → Baseline (Req 12.9).
+    veto_spans: list[VetoSpan] = []
+    capture_veto = gate_context.config.llm_veto_enabled
 
     i = 0
     while i < len(words):
@@ -1405,6 +1452,16 @@ def correct_words(
                         entity_kind,
                         entity_type,
                     ))
+                    if capture_veto:
+                        veto_spans.append(
+                            VetoSpan(
+                                original=original_phrase,
+                                corrected=corrected_name,
+                                original_words=[dict(nw) for nw in name_words],
+                                entity_kind=entity_kind,
+                                output_index=len(output) - 1,
+                            )
+                        )
 
                 i += 1 + name_count
                 continue
@@ -1542,6 +1599,7 @@ def correct_words(
                     merged, match.canonical, window, gate_context
                 )
                 output.append(merged)
+                veto_original_words = [dict(ww) for ww in window]
             else:
                 # Update single word in place
                 corrected_w = dict(w)
@@ -1553,6 +1611,7 @@ def correct_words(
                     corrected_w, match.canonical, w, gate_context
                 )
                 output.append(corrected_w)
+                veto_original_words = [dict(w)]
 
             original_phrase = phrase
             corrections.append((
@@ -1563,6 +1622,16 @@ def correct_words(
                 entity_kind,
                 entity_type,
             ))
+            if capture_veto:
+                veto_spans.append(
+                    VetoSpan(
+                        original=original_phrase,
+                        corrected=match.canonical,
+                        original_words=veto_original_words,
+                        entity_kind=entity_kind,
+                        output_index=len(output) - 1,
+                    )
+                )
             entities_found.append(
                 (match.canonical, entity_kind, entity_type)
             )
@@ -1580,4 +1649,5 @@ def correct_words(
         words=output,
         corrections=corrections,
         entities_found=entities_found,
+        veto_spans=veto_spans,
     )

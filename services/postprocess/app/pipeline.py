@@ -38,7 +38,15 @@ from app.datasets.sittings import (
 )
 from app.history.writer import CorrectionHistoryWriter, HistoryRecord
 from app.llm.bedrock import BedrockClient
-from app.llm.refiner import refine_chunks
+from app.llm.refiner import chunk_words, refine_chunks
+from app.llm.veto import (
+    ResolvedVeto,
+    RuleCorrection,
+    VetoOutcome,
+    apply_vetoes,
+    assign_corrections_to_chunks,
+    resolve_vetoes,
+)
 from app.models.entities import CorrectionRecord, EntityKind, EntityType, MatchStrategy
 from app.models.request import CorrectionRequest
 from app.models.response import (
@@ -458,11 +466,24 @@ async def run_pipeline(
     # failures, so gate observability never surfaces to the caller (Req 13.11).
     gate_total = _emit_gate_observability(tally, request.options.provider)
 
-    # --- Stage 3: LLM_Refiner gate ---
+    # --- Build corrections list (before Stage 3 so the LLM Veto can prune it) ---
+    # Text corrections first, then word corrections — the order the Baseline
+    # emits (Req 14.2). The word-correction entries are index-aligned to
+    # ``word_result.veto_spans`` (both come from ``correct_words`` in emission
+    # order), so a vetoed word correction maps to exactly one entry (Req 9.3).
+    corrections, text_correction_count = _build_corrections(text_result, word_result)
+
+    # --- Stage 3: LLM_Refiner gate (+ LLM Veto, Req 9) ---
     llm_start = time.perf_counter()
 
     llm_status: str
     bedrock_corrections = 0
+    veto_outcome: VetoOutcome | None = None
+
+    # Whether the LLM Veto is active for this request (Req 9.1): the flag is on
+    # and refinement will actually run. When off, ``veto_corrections_by_chunk``
+    # stays ``None`` so the refiner prompt and behaviour are Baseline (Req 12.9).
+    veto_enabled = bool(settings is not None and settings.llm_veto_enabled)
 
     # Decision order (contractual):
     # 1. llm_refine false → skipped
@@ -481,18 +502,38 @@ async def run_pipeline(
         llm_status = "unconfigured"
     else:
         try:
+            # Build the per-chunk rule corrections supplied to the refiner
+            # (Req 9.1) using the same chunking the refiner applies, so the
+            # veto results come back aligned to these chunks. Only built when
+            # the veto is active; ``None`` otherwise keeps the Baseline path.
+            rule_corrections: list[RuleCorrection] = []
+            veto_corrections_by_chunk: list[list[tuple[str, str]]] | None = None
+            if veto_enabled:
+                rule_corrections = _build_rule_corrections(
+                    corrections, word_result, text_correction_count
+                )
+                chunk_texts = [
+                    c.text for c in chunk_words(final_words, settings.llm_chunk_size)
+                ]
+                per_chunk = assign_corrections_to_chunks(rule_corrections, chunk_texts)
+                veto_corrections_by_chunk = [
+                    [(rc.original, rc.corrected) for rc in chunk_list]
+                    for chunk_list in per_chunk
+                ]
+
             # Acquire a database session for pg_trgm retrieval if available
             session: AsyncSession | None = None
             try:
                 if session_factory is not None:
                     session = session_factory()
 
-                _, internal_status, count = await refine_chunks(
+                _, internal_status, count, veto_results = await refine_chunks(
                     final_words,
                     snapshot,
                     bedrock_client,
                     session,
                     settings,
+                    veto_corrections_by_chunk=veto_corrections_by_chunk,
                 )
             finally:
                 if session is not None:
@@ -505,6 +546,26 @@ async def run_pipeline(
                 # partial, failed → degraded
                 llm_status = "degraded"
             bedrock_corrections = count
+
+            # --- Apply the LLM Veto restorations (Req 9.2-9.4, 9.10, 9.11) ---
+            if veto_enabled and veto_results:
+                per_chunk = assign_corrections_to_chunks(
+                    rule_corrections,
+                    [c.text for c in chunk_words(final_words, settings.llm_chunk_size)],
+                )
+                resolved: list[ResolvedVeto] = []
+                for vr in veto_results:
+                    if vr.chunk_index < len(per_chunk):
+                        resolved.extend(
+                            resolve_vetoes(vr.decisions, per_chunk[vr.chunk_index])
+                        )
+                if resolved:
+                    veto_outcome = apply_vetoes(
+                        final_text, final_words, corrections, resolved
+                    )
+                    final_text = veto_outcome.final_text
+                    final_words = veto_outcome.final_words
+                    corrections = veto_outcome.corrections
         except Exception:
             llm_status = "degraded"
 
@@ -513,6 +574,8 @@ async def run_pipeline(
 
     # Emit LLM latency metric (Req 10.8, 13.4)
     emit_llm_latency(llm_latency_ms, llm_status)
+
+    veto_count = veto_outcome.veto_count if veto_outcome is not None else 0
 
     # --- Build Entity_Summary ---
     entity_summary = _build_entity_summary(
@@ -526,7 +589,10 @@ async def run_pipeline(
     ]
 
     # --- Assemble metadata (omit zero-valued counters) ---
-    location_corrections_count = len(text_result.corrections) + len(word_result.corrections)
+    # After the LLM Veto prunes restored Spans, the location-correction count is
+    # the number of surviving correction entries so it stays consistent with the
+    # returned corrections list.
+    location_corrections_count = len(corrections)
 
     metadata = Metadata(
         location_corrections=location_corrections_count if location_corrections_count > 0 else None,
@@ -542,36 +608,11 @@ async def run_pipeline(
         # when 0 so the Baseline contract snapshot is unchanged (Req 13.6,
         # 14.4/14.11 additive/zero-omitted).
         gate_rejections=gate_total if gate_total > 0 else None,
+        # Count of LLM_Refiner vetoes — corrections entries removed for restored
+        # Spans (Req 9.7). Omitted when 0 so a non-veto request is byte-identical
+        # to the Baseline response (Req 14.4).
+        vetoes=veto_count if veto_count > 0 else None,
     )
-
-    # --- Build corrections list ---
-    corrections: list[CorrectionRecord] = []
-
-    # From text corrections
-    for tc in text_result.corrections:
-        corrections.append(
-            CorrectionRecord(
-                original=tc.original,
-                corrected=tc.replacement,
-                strategy=MatchStrategy(tc.strategy) if tc.strategy in MatchStrategy.__members__ else MatchStrategy.exact,
-                confidence=tc.confidence,
-                entity_kind=EntityKind(tc.entity_kind) if tc.entity_kind in EntityKind.__members__ else EntityKind.location,
-                entity_type=EntityType(tc.entity_type) if tc.entity_type in EntityType.__members__ else EntityType.supplementary,
-            )
-        )
-
-    # From word corrections
-    for original, corrected, strategy, confidence, kind, etype in word_result.corrections:
-        corrections.append(
-            CorrectionRecord(
-                original=original,
-                corrected=corrected,
-                strategy=MatchStrategy(strategy) if strategy in MatchStrategy.__members__ else MatchStrategy.exact,
-                confidence=confidence,
-                entity_kind=EntityKind(kind) if kind in EntityKind.__members__ else EntityKind.location,
-                entity_type=EntityType(etype) if etype in EntityType.__members__ else EntityType.supplementary,
-            )
-        )
 
     # --- Total latency (recorded but not exposed in metadata yet) ---
     _total_latency_ms = int((time.perf_counter() - total_start) * 1000)
@@ -587,7 +628,12 @@ async def run_pipeline(
         emit_corrections_applied(strategy_name, count)
 
     # --- Enqueue corrections into history writer (Req 13.9, 17.3) ---
-    if history_writer is not None and corrections:
+    # Surviving (applied) corrections carry outcome='applied' (the default);
+    # each restored Span enqueues one record with outcome='vetoed' (Req 9.5).
+    # A dropped/failed history enqueue never affects the restored Span or the
+    # returned veto count — enqueue is fire-and-forget and the response is
+    # already assembled from ``corrections``/``final_words`` (Req 9.12).
+    if history_writer is not None:
         text_hash = hashlib.sha256(
             request.transcript.encode("utf-8")
         ).hexdigest()[:16]
@@ -595,8 +641,19 @@ async def run_pipeline(
         now = datetime.now(timezone.utc)
         dataset_version = snapshot.version if snapshot else ""
 
+        # Enqueue is defensive: a raising enqueue (or a full/failing bounded
+        # queue) must never affect the response the pipeline already assembled,
+        # in particular the restored Span and veto count (Req 9.12). The
+        # production writer's ``enqueue`` swallows overflow, but guarding here
+        # makes the isolation explicit and robust to any writer.
+        def _enqueue(record: HistoryRecord) -> None:
+            try:
+                history_writer.enqueue(record)
+            except Exception:  # noqa: BLE001 - history is fire-and-forget (Req 9.12)
+                logger.debug("history.enqueue_failed")
+
         for cr in corrections:
-            history_writer.enqueue(
+            _enqueue(
                 HistoryRecord(
                     correlation_id=correlation_id,
                     text_hash=text_hash,
@@ -608,8 +665,28 @@ async def run_pipeline(
                     entity_type=cr.entity_type.value,
                     model_version=dataset_version,
                     created_at=now,
+                    outcome="applied",
                 )
             )
+
+        if veto_outcome is not None:
+            for rv in veto_outcome.restored:
+                rc = rv.correction
+                _enqueue(
+                    HistoryRecord(
+                        correlation_id=correlation_id,
+                        text_hash=text_hash,
+                        original=rc.original,
+                        corrected=rc.corrected,
+                        strategy="",
+                        confidence=0.0,
+                        entity_kind=rc.entity_kind,
+                        entity_type="",
+                        model_version=dataset_version,
+                        created_at=now,
+                        outcome="vetoed",
+                    )
+                )
 
     return CorrectionResponse(
         transcript=final_text,
@@ -618,3 +695,107 @@ async def run_pipeline(
         metadata=metadata,
         corrections=corrections,
     )
+
+
+# ---------------------------------------------------------------------------
+# Corrections-list assembly and LLM Veto helpers (task 4.8, Req 9)
+# ---------------------------------------------------------------------------
+
+
+def _build_corrections(
+    text_result: TextCorrectionResult,
+    word_result: WordCorrectionResult,
+) -> tuple[list[CorrectionRecord], int]:
+    """Assemble the response corrections list (text first, then word).
+
+    Returns ``(corrections, text_correction_count)``. The count is the number
+    of leading text corrections, so the LLM Veto helper can map a
+    ``word_result.veto_spans`` entry (index *k*) to the corrections entry at
+    ``text_correction_count + k`` (Req 9.3).
+    """
+    corrections: list[CorrectionRecord] = []
+
+    for tc in text_result.corrections:
+        corrections.append(
+            CorrectionRecord(
+                original=tc.original,
+                corrected=tc.replacement,
+                strategy=MatchStrategy(tc.strategy)
+                if tc.strategy in MatchStrategy.__members__
+                else MatchStrategy.exact,
+                confidence=tc.confidence,
+                entity_kind=EntityKind(tc.entity_kind)
+                if tc.entity_kind in EntityKind.__members__
+                else EntityKind.location,
+                entity_type=EntityType(tc.entity_type)
+                if tc.entity_type in EntityType.__members__
+                else EntityType.supplementary,
+            )
+        )
+
+    text_correction_count = len(corrections)
+
+    for original, corrected, strategy, confidence, kind, etype in word_result.corrections:
+        corrections.append(
+            CorrectionRecord(
+                original=original,
+                corrected=corrected,
+                strategy=MatchStrategy(strategy)
+                if strategy in MatchStrategy.__members__
+                else MatchStrategy.exact,
+                confidence=confidence,
+                entity_kind=EntityKind(kind)
+                if kind in EntityKind.__members__
+                else EntityKind.location,
+                entity_type=EntityType(etype)
+                if etype in EntityType.__members__
+                else EntityType.supplementary,
+            )
+        )
+
+    return corrections, text_correction_count
+
+
+def _build_rule_corrections(
+    corrections: list[CorrectionRecord],
+    word_result: WordCorrectionResult,
+    text_correction_count: int,
+) -> list[RuleCorrection]:
+    """Build the vetoable rule corrections from the word-correction span state (Req 9.1).
+
+    Only word-level corrections carry a pre-correction Word slice (captured in
+    ``word_result.veto_spans`` when the LLM Veto flag is on, Req 9.4), so only
+    they can be restored in the Words list. Each veto span is index-aligned to
+    the word-correction entry at ``text_correction_count + k`` in *corrections*,
+    which is the entry :func:`app.llm.veto.apply_vetoes` removes on a veto
+    (Req 9.3). Text-only corrections are not offered to the veto here because
+    the Words-list restoration (Req 9.4) has no counterpart for them; the empty
+    Words path returns text corrections only (Req 14.8) and is out of veto scope.
+    """
+    rule_corrections: list[RuleCorrection] = []
+    for k, span in enumerate(word_result.veto_spans):
+        record_index = text_correction_count + k
+        if record_index >= len(corrections):
+            continue
+        # A Span can be recorded twice — once as a transcript-text correction
+        # (indices 0..text_correction_count-1) and once as this word correction.
+        # Collect any leading text-correction entry with the same original and
+        # corrected text so a veto removes both, keeping the corrections list
+        # consistent with the restored transcript and Words (Req 9.3, 9.10).
+        mirror = tuple(
+            idx
+            for idx in range(text_correction_count)
+            if corrections[idx].original == span.original
+            and corrections[idx].corrected == span.corrected
+        )
+        rule_corrections.append(
+            RuleCorrection(
+                record_index=record_index,
+                original=span.original,
+                corrected=span.corrected,
+                entity_kind=span.entity_kind,
+                veto_span=span,
+                mirror_record_indices=mirror,
+            )
+        )
+    return rule_corrections

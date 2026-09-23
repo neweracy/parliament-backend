@@ -126,23 +126,77 @@ def _format_entity_records(entity_records: list[EntityRecord]) -> str:
     return "<REFERENCE_DATA>\n" + "\n\n".join(sections) + "\n</REFERENCE_DATA>"
 
 
-def build_system_prompt(entity_records: list[EntityRecord]) -> str:
+# ---------------------------------------------------------------------------
+# LLM Veto extension (Req 9) — only appended WHERE the LLM Veto flag is on
+# ---------------------------------------------------------------------------
+
+# Marker line that opens the veto section in the model output. The refiner
+# parses lines after this marker as veto decisions (Req 9.1, 9.8).
+VETO_OUTPUT_MARKER = "[Vetoes]:"
+
+_VETO_RULES = """\
+RULE-BASED CORRECTIONS TO REVIEW:
+A separate rule-based system already changed some words in this segment. Each
+correction below is listed as `original -> corrected`. Judge, from the segment
+context, whether each correction is WRONG — that is, whether the corrected text
+does not belong at that position and the original text should be restored.
+
+After the corrected segment text, output a line that begins exactly with
+"{marker}" followed by a semicolon-separated list of the corrections you judge
+WRONG, each written exactly as `original -> corrected` copied from the list
+below. If every listed correction is correct, output "{marker} none". Do NOT
+list a correction you did not see in the list below, and do NOT invent new
+entries. This veto list is in addition to rule 13's corrected text, not a
+replacement for it."""
+
+
+def _format_veto_block(corrections: list[tuple[str, str]]) -> str:
+    """Render the per-chunk rule corrections into a REVIEW block (Req 9.1).
+
+    Each entry is the original Span text and the corrected text of one
+    Correction_Engine correction whose Span falls within the chunk. Returns an
+    empty string when there are no corrections to review, so the veto rules are
+    only meaningful when at least one correction is supplied.
+    """
+    if not corrections:
+        return ""
+    lines = [f"- {original} -> {corrected}" for original, corrected in corrections]
+    rules = _VETO_RULES.format(marker=VETO_OUTPUT_MARKER)
+    return f"{rules}\n" + "\n".join(lines)
+
+
+def build_system_prompt(
+    entity_records: list[EntityRecord],
+    veto_corrections: list[tuple[str, str]] | None = None,
+) -> str:
     """Construct the full system prompt with entity reference section.
 
     Args:
         entity_records: The retrieved Entity_Records relevant to the chunk.
             Should already be capped at LLM_MAX_PROMPT_RECORDS.
+        veto_corrections: When supplied (LLM Veto flag on, Req 9.1), the list of
+            ``(original, corrected)`` rule corrections whose Span falls in this
+            chunk. The prompt gains a review block and veto-output instructions
+            so the model can mark any as WRONG (Req 9.1, 9.2). When ``None`` or
+            empty — the flag off, or no corrections cover the chunk — the prompt
+            is byte-for-byte the Baseline prompt (Req 12.9), so the veto path
+            adds nothing to a request that does not use it.
 
     Returns:
         The complete system prompt string for a Bedrock invocation.
     """
     reference_block = _format_entity_records(entity_records)
 
-    return f"""{_SYSTEM_PREAMBLE}
+    base = f"""{_SYSTEM_PREAMBLE}
 
 {reference_block}
 
 {_CORRECTION_RULES}"""
+
+    veto_block = _format_veto_block(veto_corrections or [])
+    if not veto_block:
+        return base
+    return f"{base}\n\n{veto_block}"
 
 
 def build_user_content(text: str, segment_number: int) -> str:
@@ -156,6 +210,51 @@ def build_user_content(text: str, segment_number: int) -> str:
         The formatted user message string.
     """
     return f"[Segment {segment_number}]: {text}"
+
+
+def parse_veto_decisions(raw_response: str) -> list[tuple[str, str]] | None:
+    """Parse the veto section of an LLM response into ``(original, corrected)`` pairs.
+
+    The model appends, after the corrected segment text, a line beginning with
+    :data:`VETO_OUTPUT_MARKER` listing the corrections it judged WRONG, each as
+    ``original -> corrected`` and separated by semicolons (Req 9.1). Returns:
+
+    * the list of parsed ``(original, corrected)`` pairs (possibly empty) when a
+      veto marker line is present and parses cleanly — an empty list means the
+      model vetoed nothing (the explicit "none" case);
+    * ``None`` when no veto marker line is present, signalling an unparseable
+      veto response for the chunk so the caller retains that chunk's rule
+      corrections unchanged (Req 9.8).
+
+    Only the veto marker line is consulted; the corrected segment text is parsed
+    separately by the caller's existing alignment path (Req 9.9).
+    """
+    marker_line: str | None = None
+    for line in raw_response.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(VETO_OUTPUT_MARKER):
+            marker_line = stripped[len(VETO_OUTPUT_MARKER):].strip()
+            break
+
+    if marker_line is None:
+        # No veto section at all → unparseable for veto purposes (Req 9.8).
+        return None
+
+    if not marker_line or marker_line.lower() == "none":
+        return []
+
+    pairs: list[tuple[str, str]] = []
+    for entry in marker_line.split(";"):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if "->" not in entry:
+            # A malformed entry does not sink the whole chunk; skip it and let
+            # resolution (Req 9.11) discard anything that does not resolve.
+            continue
+        original, corrected = entry.split("->", 1)
+        pairs.append((original.strip(), corrected.strip()))
+    return pairs
 
 
 def estimate_prompt_tokens(system_prompt: str, user_content: str) -> int:
