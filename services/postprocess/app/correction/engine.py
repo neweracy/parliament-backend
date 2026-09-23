@@ -17,6 +17,10 @@ import re
 from dataclasses import dataclass
 
 from app.correction.blocklist import is_stopword, is_title, is_word_stopword
+from app.correction.capitalization import (
+    merged_punctuated_word,
+    replaced_punctuated_word,
+)
 from app.correction.confidence import (
     align_span_to_words,
     confidence_gate_blocks_approximate,
@@ -979,6 +983,56 @@ def _match_title_person_words(
     return None
 
 
+def _apply_merged_punctuated_word(
+    merged: dict,
+    corrected_text: str,
+    source_words: list[dict],
+    gate_context: GateContext,
+) -> None:
+    """Set (or omit) the merged Word's ``punctuated_word`` in place (Req 6.7, 6.9).
+
+    Gated behind a non-inert :class:`~app.correction.gates.GateContext` so the
+    flag-off path is byte-for-byte Baseline (Req 12.9): with every flag off the
+    ``merged`` dict keeps the ``punctuated_word`` it inherited from the first
+    source Word via ``dict(first_w)``, exactly as today. When any flag is on the
+    field is rewritten to the corrected text plus the last merged Word's
+    terminal ``.?!`` (Req 6.7), or removed when no merged Word carried a
+    ``punctuated_word`` string (Req 6.9).
+    """
+    if gate_context.is_inert:
+        return
+    new_value = merged_punctuated_word(corrected_text, source_words)
+    if new_value is None:
+        merged.pop("punctuated_word", None)
+    else:
+        merged["punctuated_word"] = new_value
+
+
+def _apply_replaced_punctuated_word(
+    corrected_w: dict,
+    corrected_text: str,
+    source_word: dict,
+    gate_context: GateContext,
+) -> None:
+    """Set (or omit) a replaced Word's ``punctuated_word`` in place (Req 6.8, 6.9).
+
+    Gated behind a non-inert :class:`~app.correction.gates.GateContext` so the
+    flag-off path is byte-for-byte Baseline (Req 12.9): with every flag off the
+    ``corrected_w`` dict keeps the ``punctuated_word`` it copied from the source
+    Word via ``dict(w)``, exactly as today. When any flag is on the field is
+    rewritten to the corrected text plus the source Word's prior terminal
+    ``.?!`` (Req 6.8), or removed when the source Word carried no
+    ``punctuated_word`` string (Req 6.9).
+    """
+    if gate_context.is_inert:
+        return
+    new_value = replaced_punctuated_word(corrected_text, source_word)
+    if new_value is None:
+        corrected_w.pop("punctuated_word", None)
+    else:
+        corrected_w["punctuated_word"] = new_value
+
+
 def correct_words(
     words: list[dict],
     index: MatchIndex,
@@ -1111,6 +1165,9 @@ def correct_words(
                     merged["locationCorrected"] = True
                     merged["entityKind"] = entity_kind
                     merged["entityType"] = entity_type
+                    _apply_merged_punctuated_word(
+                        merged, corrected_name, name_words, gate_context
+                    )
                     output.append(merged)
 
                     corrections.append((
@@ -1251,6 +1308,9 @@ def correct_words(
                 merged["locationCorrected"] = True
                 merged["entityKind"] = entity_kind
                 merged["entityType"] = entity_type
+                _apply_merged_punctuated_word(
+                    merged, match.canonical, window, gate_context
+                )
                 output.append(merged)
             else:
                 # Update single word in place
@@ -1259,6 +1319,9 @@ def correct_words(
                 corrected_w["locationCorrected"] = True
                 corrected_w["entityKind"] = entity_kind
                 corrected_w["entityType"] = entity_type
+                _apply_replaced_punctuated_word(
+                    corrected_w, match.canonical, w, gate_context
+                )
                 output.append(corrected_w)
 
             original_phrase = phrase
