@@ -332,3 +332,85 @@ class TestApplyPartyDisplay:
         )
         displayed = apply_party_display(result, "unknown party", index)
         assert displayed.canonical == "Unknown Party"
+
+
+# ---------------------------------------------------------------------------
+# Block_List manual-override retention (Req 11.4, 11.8)
+# ---------------------------------------------------------------------------
+
+
+def _build_manual_override_env() -> tuple[MatchIndex, DatasetSnapshot]:
+    """Build an env where a blocked token is a clear approximate near-match.
+
+    ``kumasee`` is one edit from the ``kumasi`` canonical/alias but is not itself
+    an alias, so without the Block_List it would fuzzy-match ``Kumasi``. Blocking
+    it must suppress that approximate correction (Req 11.4). ``kumasi`` itself is
+    also blocked to prove a Deterministic (exact) match still applies for a
+    blocked token (Req 11.8).
+    """
+    records = [
+        EntityRecord(
+            canonical="Kumasi",
+            entity_kind=EntityKind.location,
+            entity_type=EntityType.city,
+            aliases=["koumasi", "kumase"],
+            source="supplementary",
+            source_rank=0,
+        ),
+    ]
+    index = build_index(records)
+    snapshot = DatasetSnapshot(
+        version="2026-01-01T00:00:00Z",
+        records=tuple(records),
+        record_count=len(records),
+        loaded_at=datetime.now(timezone.utc),
+        index=index,
+        # "kumasee" (approximate near-match) and "kumasi" (exact) both blocked.
+        block_list=frozenset(["kumasee", "kumasi"]),
+        stopwords=frozenset(["the", "a", "an", "is", "of"]),
+        word_stopwords=frozenset(["of", "for", "and", "the"]),
+        title_prefixes=frozenset(["honorable", "honourable", "minister"]),
+    )
+    return index, snapshot
+
+
+class TestBlockListManualOverride:
+    """The retained Block_List is a manual-override escape hatch (Req 11.4, 11.8).
+
+    Confirms the block-list lookup is still consulted by the engine so an operator
+    can hard-block a token by adding a row. A blocked token is rejected for every
+    Approximate_Strategy regardless of the supplied per-word confidence, while
+    the Deterministic strategies still evaluate for it.
+    """
+
+    def test_blocked_token_not_approximately_corrected(self):
+        # Req 11.4: "kumasee" fuzzy-matches "Kumasi" but is in the Block_List,
+        # so the approximate correction is suppressed.
+        index, snapshot = _build_manual_override_env()
+        result = correct_single("kumasee", 1, index, snapshot)
+        assert result is None
+
+    def test_blocked_token_case_insensitive(self):
+        # Req 11.4: the block check lowercases the token, so a mixed-case Span of
+        # a blocked token is still blocked.
+        index, snapshot = _build_manual_override_env()
+        assert correct_single("Kumasee", 1, index, snapshot) is None
+        assert correct_single("KUMASEE", 1, index, snapshot) is None
+
+    def test_blocked_token_still_blocked_with_low_confidence(self):
+        # Req 11.4: the guard sits inside each Approximate_Strategy ahead of any
+        # gating, so a blocked token is rejected regardless of Span_Confidence.
+        # A low confidence would otherwise permit approximate evaluation.
+        index, snapshot = _build_manual_override_env()
+        result = correct_single("kumasee", 1, index, snapshot, span_conf=0.10)
+        assert result is None
+
+    def test_deterministic_match_still_applies_for_blocked_token(self):
+        # Req 11.8: blocking a token suppresses only approximate rewriting; the
+        # Deterministic strategies still evaluate. "kumasi" is blocked but an
+        # exact key hit still applies.
+        index, snapshot = _build_manual_override_env()
+        result = correct_single("kumasi", 1, index, snapshot)
+        assert result is not None
+        assert result.canonical == "Kumasi"
+        assert result.strategy == "exact"
