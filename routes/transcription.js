@@ -413,6 +413,8 @@ async function runTranscription(jobId, recordId, sittingId, audioPath, db, cache
  * @param {string} result.correctedText - Post-processed text
  * @param {Array} result.entities - Recognized entities
  * @param {Array} result.wordTimings - Word-level timing data
+ * @param {Array} [result.corrections] - Per-change correction records
+ * @param {Array} [result.rawWords] - Raw ASR words (pre-correction)
  * @param {string} [result.correlationId] - Correlation ID for tracing
  * @param {string} [result.provider] - ASR provider name
  * @param {number|null} [result.durationS] - Audio duration in seconds
@@ -439,10 +441,24 @@ async function completeTranscription(jobId, recordId, result, db, cache) {
   );
   const nextVersion = versionResult.rows[0].next_version;
 
-  // Insert transcript row
+  // Insert transcript row.
+  //
+  // `metadata` is a column on the transcript row itself, so writing the
+  // per-change `corrections` array and the raw ASR words into it keeps this a
+  // write of only the transcript row — no correction table, no new write path.
+  // The Postprocess_Service (the sole writer of `correction_evidence`) reads
+  // `metadata.corrections` / `metadata.raw_words` back off this row during
+  // ingestion to build correction evidence. Without carrying them here the
+  // corrections array is dropped and evidence can never flow end to end
+  // (transcript-evidence-navigation Req 8.5/8.6).
+  const metadata = {
+    corrections: result.corrections || [],
+    raw_words: result.rawWords || [],
+  };
+
   const insertResult = await db.query(
-    `INSERT INTO transcript (record_id, version, correlation_id, provider, duration_s, raw_text, corrected_text, entities, word_timings)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `INSERT INTO transcript (record_id, version, correlation_id, provider, duration_s, raw_text, corrected_text, entities, word_timings, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING id`,
     [
       recordId,
@@ -454,6 +470,7 @@ async function completeTranscription(jobId, recordId, result, db, cache) {
       result.correctedText,
       JSON.stringify(result.entities || []),
       JSON.stringify(result.wordTimings || []),
+      JSON.stringify(metadata),
     ]
   );
 

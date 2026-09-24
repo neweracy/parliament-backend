@@ -22,6 +22,7 @@ from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes_datasets import router as datasets_router
+from app.api.routes_evidence import router as evidence_router
 from app.api.routes_health import router as health_router
 from app.api.routes_postprocess import router as postprocess_router
 from app.config import get_settings
@@ -351,5 +352,6 @@ app.add_middleware(RequestLoggingMiddleware)
 app.include_router(postprocess_router)
 app.include_router(health_router)
 app.include_router(datasets_router)
+app.include_router(evidence_router)
 app.include_router(rag_router)
 app.include_router(rag_diagnostics_router)
