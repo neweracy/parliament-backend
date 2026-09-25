@@ -20,7 +20,7 @@ Properties tested:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -29,7 +29,6 @@ from app.correction.engine import correct_text, correct_words
 from app.datasets.cache import DatasetSnapshot
 from app.datasets.index import MatchIndex, build_index
 from app.models.entities import EntityKind, EntityRecord, EntityType
-
 
 # ---------------------------------------------------------------------------
 # Block_List tokens under test
@@ -267,7 +266,7 @@ def _build_blocklist_test_snapshot() -> tuple[MatchIndex, DatasetSnapshot]:
         version="test-blocklist",
         records=tuple(records),
         record_count=len(records),
-        loaded_at=datetime.now(timezone.utc),
+        loaded_at=datetime.now(UTC),
         index=index,
         block_list=frozenset(BLOCK_LIST_TOKENS),
         stopwords=frozenset({"the", "of", "and", "in", "to", "is", "was", "that", "for", "it"}),

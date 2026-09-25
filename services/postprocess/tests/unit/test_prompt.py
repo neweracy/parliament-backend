@@ -19,6 +19,27 @@ class TestBuildSystemPrompt:
         for i in range(1, 14):
             assert f"{i}." in prompt, f"Rule {i} not found in prompt"
 
+    def test_permits_simple_grammar_fixes(self):
+        """The prompt must allow simple, in-place grammatical corrections."""
+        prompt = build_system_prompt([])
+        # Preamble advertises the grammar responsibility.
+        assert "grammatical error" in prompt
+        # A concrete allowed example is present so the model has an anchor.
+        assert "they was" in prompt and "they were" in prompt
+
+    def test_grammar_fixes_must_preserve_word_count_and_structure(self):
+        """Grammar edits are constrained to 1:1 in-place replacements.
+
+        The refiner aligns LLM output to the original word list by token, so
+        adding, removing, or reordering words would corrupt word timings. The
+        prompt must keep that invariant explicit.
+        """
+        prompt = build_system_prompt([])
+        assert "one-word-for-one-word" in prompt
+        assert "Do NOT add or remove words" in prompt
+        assert "do NOT reorder words" in prompt
+        assert "restructure sentences" in prompt
+
     def test_rule_11_numeric_years(self):
         """Rule 11 must mention leaving numeric years unchanged."""
         prompt = build_system_prompt([])

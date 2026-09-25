@@ -15,6 +15,15 @@ import structlog
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.correction.provider_profiles import (
+    PROFILE_FLOAT_PARAMS,
+    PROFILE_FLOAT_RANGE,
+    SUPPORTED_PROVIDERS,
+    ProviderGateProfile,
+    default_profile,
+    provider_env_var,
+)
+
 logger = structlog.get_logger("config")
 
 
@@ -96,6 +105,76 @@ class Settings(BaseSettings):
     word_accept_threshold: float = 0.90
     fuzzy_score_cutoff: float = 0.70
     min_candidate_length: int = 4
+
+    # --- Correction precision gating tunables (Req 12) ---
+    # Each is read from its own SCREAMING_SNAKE_CASE env var. Fractional values
+    # clamp to [0, 1]; whole-number values clamp to the range noted alongside.
+    # Ranges are enforced once at startup by ``clamp_ranges``.
+    # Span_Confidence at or above which a Span is restricted to deterministic
+    # strategies. Range [0.0, 1.0].
+    high_confidence_threshold: float = 0.90
+    # Span_Confidence below which a lexicon Span is exempt from the Lexicon_Gate.
+    # Range [0.0, 1.0].
+    lexicon_override_threshold: float = 0.60
+    # Maximum Levenshtein distance / Span length accepted for a fuzzy match.
+    # Range [0.0, 1.0].
+    max_relative_distance: float = 0.25
+    # Minimum Phonetic_Key length required to attempt a phonetic match.
+    # Range [1, 12].
+    min_phonetic_key_length: int = 4
+    # Minimum Normalized_Similarity required for a phonetic candidate.
+    # Range [0.0, 1.0].
+    min_phonetic_similarity: float = 0.60
+    # Minimum Span length required to attempt a Component_Match. Range [1, 20].
+    component_match_min_length: int = 6
+    # Maximum number of fuzzy candidates scored for one Span. Range [1, 5000].
+    max_candidates_per_span: int = 200
+    # Number of Words either side of a Span forming the Context_Window when no
+    # speaker attribution is present. Range [1, 500].
+    context_window_words: int = 40
+    # Amount subtracted from the Evidence_Score of an out-of-scope person
+    # candidate. Range [0.0, 1.0].
+    out_of_scope_penalty: float = 0.10
+
+    # --- Correction precision gating feature flags (Req 12) ---
+    # Each flag is resolved independently from its own SCREAMING_SNAKE_CASE env
+    # var and never reads another flag. When every flag is disabled the engine
+    # is baseline-equivalent (Req 12.9).
+    lexicon_gate_enabled: bool = True
+    evidence_confidence_enabled: bool = True
+    context_gate_enabled: bool = True
+    sitting_scope_enabled: bool = False
+    llm_veto_enabled: bool = False
+
+    # --- Per-provider gate profiles (Req 12; spec task 2.12.2) ---
+    # ONE flag gates the whole per-provider mechanism. Defaults DISABLED so an
+    # all-flags-off configuration stays baseline-equivalent (Req 12.9): when
+    # off, ``provider_profiles`` resolves the ``deepgram`` profile — the task
+    # 1.1 defaults — for every provider value, and gate evaluation is unchanged.
+    # Task 2.12.3 wires the resolved profiles into gate evaluation; this task
+    # only defines and resolves them.
+    provider_profiles_enabled: bool = False
+
+    # Per-provider overrides for the four gate parameters that differ by
+    # provider, each read from its own SCREAMING_SNAKE_CASE env var
+    # (PROVIDER_<PROVIDER>_<PARAM>). Absent values fall back to the ``deepgram``
+    # (task 1.1) default for that parameter. Every value is fractional in
+    # [0.0, 1.0]; ``clamp_ranges`` clamps out-of-range values once at startup.
+    # deepgram — MUST equal the task 1.1 defaults (unchanged production path).
+    provider_deepgram_high_confidence_threshold: float = 0.90
+    provider_deepgram_lexicon_override_threshold: float = 0.60
+    provider_deepgram_min_phonetic_similarity: float = 0.60
+    provider_deepgram_max_relative_distance: float = 0.25
+    # khaya
+    provider_khaya_high_confidence_threshold: float = 0.90
+    provider_khaya_lexicon_override_threshold: float = 0.60
+    provider_khaya_min_phonetic_similarity: float = 0.60
+    provider_khaya_max_relative_distance: float = 0.25
+    # hybrid
+    provider_hybrid_high_confidence_threshold: float = 0.90
+    provider_hybrid_lexicon_override_threshold: float = 0.60
+    provider_hybrid_min_phonetic_similarity: float = 0.60
+    provider_hybrid_max_relative_distance: float = 0.25
 
     # --- AWS / Bedrock ---
     aws_region: str = "us-east-1"
@@ -183,26 +262,195 @@ class Settings(BaseSettings):
             "HISTORY_QUEUE_SIZE": 1000,
             "HISTORY_RETENTION_DAYS": 90,
             "HISTORY_RETENTION_INTERVAL_SECONDS": 86400,
+            # Correction precision gating (Req 12)
+            "MIN_PHONETIC_KEY_LENGTH": 4,
+            "COMPONENT_MATCH_MIN_LENGTH": 6,
+            "MAX_CANDIDATES_PER_SPAN": 200,
+            "CONTEXT_WINDOW_WORDS": 40,
         }
         numeric_float_fields: dict[str, float] = {
             "MIN_CONFIDENCE": 0.75,
             "WORD_ACCEPT_THRESHOLD": 0.90,
             "FUZZY_SCORE_CUTOFF": 0.70,
+            # Correction precision gating (Req 12)
+            "HIGH_CONFIDENCE_THRESHOLD": 0.90,
+            "LEXICON_OVERRIDE_THRESHOLD": 0.60,
+            "MAX_RELATIVE_DISTANCE": 0.25,
+            "MIN_PHONETIC_SIMILARITY": 0.60,
+            "OUT_OF_SCOPE_PENALTY": 0.10,
+            # Per-provider gate profiles (spec task 2.12.2). deepgram MUST match
+            # the task 1.1 defaults above; khaya/hybrid share those defaults and
+            # differ only in the (non-env) Unknown-confidence policy.
+            "PROVIDER_DEEPGRAM_HIGH_CONFIDENCE_THRESHOLD": 0.90,
+            "PROVIDER_DEEPGRAM_LEXICON_OVERRIDE_THRESHOLD": 0.60,
+            "PROVIDER_DEEPGRAM_MIN_PHONETIC_SIMILARITY": 0.60,
+            "PROVIDER_DEEPGRAM_MAX_RELATIVE_DISTANCE": 0.25,
+            "PROVIDER_KHAYA_HIGH_CONFIDENCE_THRESHOLD": 0.90,
+            "PROVIDER_KHAYA_LEXICON_OVERRIDE_THRESHOLD": 0.60,
+            "PROVIDER_KHAYA_MIN_PHONETIC_SIMILARITY": 0.60,
+            "PROVIDER_KHAYA_MAX_RELATIVE_DISTANCE": 0.25,
+            "PROVIDER_HYBRID_HIGH_CONFIDENCE_THRESHOLD": 0.90,
+            "PROVIDER_HYBRID_LEXICON_OVERRIDE_THRESHOLD": 0.60,
+            "PROVIDER_HYBRID_MIN_PHONETIC_SIMILARITY": 0.60,
+            "PROVIDER_HYBRID_MAX_RELATIVE_DISTANCE": 0.25,
         }
+
+        # Correction precision gating feature flags (Req 12.2, 12.4, 12.5).
+        # An empty value is treated the same as absent (Req 12.3/12.4/12.5):
+        # pydantic-settings' built-in bool parser rejects "" outright, so an
+        # empty string must be dropped here before validation runs, leaving
+        # the field's default to apply.
+        bool_fields: tuple[str, ...] = (
+            "LEXICON_GATE_ENABLED",
+            "EVIDENCE_CONFIDENCE_ENABLED",
+            "CONTEXT_GATE_ENABLED",
+            "SITTING_SCOPE_ENABLED",
+            "LLM_VETO_ENABLED",
+            "PROVIDER_PROFILES_ENABLED",
+            "LLM_ENABLED",
+            "HISTORY_ENABLED",
+        )
+        for field_name in bool_fields:
+            key = field_name.lower()
+            raw = values.get(key, values.get(field_name))
+            if isinstance(raw, str) and raw.strip() == "":
+                values.pop(key, None)
+                values.pop(field_name, None)
 
         for field_name, default in numeric_int_fields.items():
             key = field_name.lower()
-            raw = values.get(key) or values.get(field_name)
+            # NOTE: use a sentinel-based lookup (not `or`) so an explicit
+            # empty string "" is not mistaken for an absent key — "" is falsy
+            # and would otherwise fall through to `values.get(field_name)`
+            # and then straight to pydantic's own (crashing) parser.
+            raw = values.get(key, values.get(field_name))
             if raw is not None and not isinstance(raw, int):
                 values[key] = _safe_int(raw, default, field_name)
 
         for field_name, default in numeric_float_fields.items():
             key = field_name.lower()
-            raw = values.get(key) or values.get(field_name)
+            raw = values.get(key, values.get(field_name))
             if raw is not None and not isinstance(raw, (int, float)):
                 values[key] = _safe_float(raw, default, field_name)
 
         return values
+
+
+# Valid ranges for correction precision gating tunables (Req 12.11), keyed by
+# the Settings field name and paired with the SCREAMING_SNAKE_CASE variable
+# name used in the warning. Each entry is (env_name, lower_bound, upper_bound).
+_GATING_RANGES: dict[str, tuple[str, float, float]] = {
+    "high_confidence_threshold": ("HIGH_CONFIDENCE_THRESHOLD", 0.0, 1.0),
+    "lexicon_override_threshold": ("LEXICON_OVERRIDE_THRESHOLD", 0.0, 1.0),
+    "max_relative_distance": ("MAX_RELATIVE_DISTANCE", 0.0, 1.0),
+    "min_phonetic_similarity": ("MIN_PHONETIC_SIMILARITY", 0.0, 1.0),
+    "out_of_scope_penalty": ("OUT_OF_SCOPE_PENALTY", 0.0, 1.0),
+    "min_phonetic_key_length": ("MIN_PHONETIC_KEY_LENGTH", 1, 12),
+    "component_match_min_length": ("COMPONENT_MATCH_MIN_LENGTH", 1, 20),
+    "max_candidates_per_span": ("MAX_CANDIDATES_PER_SPAN", 1, 5000),
+    "context_window_words": ("CONTEXT_WINDOW_WORDS", 1, 500),
+}
+
+
+def _build_provider_profile_ranges() -> dict[str, tuple[str, float, float]]:
+    """Ranges for the per-provider gate-profile env vars (spec task 2.12.2).
+
+    Each per-provider fractional value shares the [0.0, 1.0] range already
+    declared for the corresponding task 1.1 parameter (Req 12.11). Built from
+    ``SUPPORTED_PROVIDERS`` × ``PROFILE_FLOAT_PARAMS`` so the set of clamped
+    variables always matches the resolved profile fields, keyed by the Settings
+    field name and paired with its SCREAMING_SNAKE_CASE env var.
+    """
+    lower, upper = PROFILE_FLOAT_RANGE
+    ranges: dict[str, tuple[str, float, float]] = {}
+    for provider in SUPPORTED_PROVIDERS:
+        for param in PROFILE_FLOAT_PARAMS:
+            field_name = f"provider_{provider}_{param}"
+            ranges[field_name] = (provider_env_var(provider, param), lower, upper)
+    return ranges
+
+
+# Per-provider gate-profile ranges, merged into the clamping pass (Req 12.8,
+# 12.11). Declared separately from ``_GATING_RANGES`` for clarity but clamped by
+# the same ``clamp_ranges`` loop.
+_PROVIDER_PROFILE_RANGES: dict[str, tuple[str, float, float]] = _build_provider_profile_ranges()
+
+
+def clamp_ranges(settings: Settings) -> Settings:
+    """Clamp out-of-range gating tunables to the nearest bound.
+
+    Runs once at startup. For every correction precision gating tunable whose
+    resolved value falls outside its documented range (Req 12.11), the value is
+    clamped to the nearest bound and one ``config.invalid_value`` warning is
+    logged naming the offending variable (Req 12.8). In-range values are left
+    untouched and log nothing. Mutates and returns *settings*.
+
+    The pass also covers the per-provider gate-profile values (spec task
+    2.12.2): each is clamped to the nearest bound of the [0.0, 1.0] range
+    declared for its parameter, with exactly one warning per offending
+    variable, whether or not ``provider_profiles_enabled`` is set — resolution
+    happens once at startup regardless of the flag.
+    """
+    all_ranges = {**_GATING_RANGES, **_PROVIDER_PROFILE_RANGES}
+    for field_name, (env_name, lower, upper) in all_ranges.items():
+        value = getattr(settings, field_name)
+        if value < lower:
+            clamped: float | int = lower
+        elif value > upper:
+            clamped = upper
+        else:
+            continue
+        # Preserve int type for whole-number fields.
+        if isinstance(value, int) and not isinstance(value, bool):
+            clamped = int(clamped)
+        logger.warning(
+            "config.invalid_value",
+            variable=env_name,
+            raw=value,
+            clamped=clamped,
+        )
+        setattr(settings, field_name, clamped)
+    return settings
+
+
+def provider_profiles(settings: Settings) -> dict[str, ProviderGateProfile]:
+    """Resolve the per-provider gate profiles from *settings* (spec task 2.12.2).
+
+    Returns a mapping from each supported provider (``deepgram``, ``khaya``,
+    ``hybrid``) to its resolved :class:`ProviderGateProfile`. Called once at
+    startup after :func:`clamp_ranges`, so the values it reads are already
+    parsed and range-clamped and held unchanged for the process lifetime
+    (Req 12.12).
+
+    Baseline equivalence (Req 12.9): when ``provider_profiles_enabled`` is
+    ``False`` (the default), every provider resolves to the ``deepgram``
+    profile — the task 1.1 defaults with the Req 2.6 Unknown-confidence policy —
+    so the flag-off path is byte-for-byte the current production behaviour and
+    task 2.12.3's gate branch sees the same thresholds for every request.
+
+    When the flag is enabled, each provider's four fractional thresholds are
+    read from its own ``PROVIDER_<PROVIDER>_<PARAM>`` value on *settings*, and
+    the Unknown-confidence Lexicon_Gate policy is the calibrated per-provider
+    constant from task 2.12.1 (``deepgram`` rejects, ``khaya``/``hybrid`` do
+    not). The policy value only takes effect once task 2.12.3 wires the gate
+    branch.
+    """
+    deepgram = default_profile("deepgram")
+    if not settings.provider_profiles_enabled:
+        return {provider: deepgram for provider in SUPPORTED_PROVIDERS}
+
+    profiles: dict[str, ProviderGateProfile] = {}
+    for provider in SUPPORTED_PROVIDERS:
+        base = default_profile(provider)
+        overrides = {
+            param: getattr(settings, f"provider_{provider}_{param}")
+            for param in PROFILE_FLOAT_PARAMS
+        }
+        profiles[provider] = ProviderGateProfile(
+            lexicon_gate_reject_unknown=base.lexicon_gate_reject_unknown,
+            **overrides,
+        )
+    return profiles
 
 
 def validate_required(settings: Settings) -> None:
@@ -230,5 +478,6 @@ def get_settings() -> Settings:
     Exits non-zero if required secrets are absent.
     """
     settings = Settings()
+    clamp_ranges(settings)
     validate_required(settings)
     return settings

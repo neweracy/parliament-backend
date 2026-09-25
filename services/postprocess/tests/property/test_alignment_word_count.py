@@ -20,8 +20,7 @@ import copy
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from app.llm.align import apply_aligned, apply_aligned_with_map, lcs_pairs
-
+from app.llm.align import apply_aligned, apply_aligned_with_map
 
 # ---------------------------------------------------------------------------
 # Strategies

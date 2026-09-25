@@ -226,3 +226,125 @@ class TestQueueOverflow:
         worker.enqueue(1)
         worker.enqueue(2)
         assert worker.dropped_count == 0
+
+
+class TestPersistCorrectionEvidence:
+    """Task 4.1 wiring: build + persist Correction_Evidence at ingestion time.
+
+    The worker persists evidence only from a durable ``metadata['corrections']``
+    payload keyed to (transcript_id, version); when that payload is absent it
+    writes nothing (Baseline no-evidence, Req 10.5) rather than fabricating
+    changes from corrected-word flags. Bedrock/AWS mocked; no network call.
+    """
+
+    @pytest.mark.asyncio
+    async def test_persists_evidence_from_metadata_corrections(self, worker, monkeypatch):
+        """A durable corrections payload is grouped by origin and persisted."""
+        import app.rag.ingestion as ingestion_mod
+
+        captured = {}
+
+        async def _fake_persist(session_factory, evidence):
+            captured["evidence"] = evidence
+            return len(evidence.entries)
+
+        monkeypatch.setattr(ingestion_mod, "persist_correction_evidence", _fake_persist)
+
+        raw_words = [
+            {"word": "Akra", "start": 0.0, "end": 0.5},
+            {"word": "in", "start": 0.6, "end": 0.7},
+            {"word": "twenty", "start": 0.8, "end": 1.0},
+        ]
+        transcript_data = {
+            "corrected_text": "Accra in 2020",
+            "word_timings": raw_words,
+            "entities": [],
+            "version": 4,
+            "raw_text": "Akra in twenty",
+            "metadata": {
+                "raw_words": raw_words,
+                "corrections": [
+                    {
+                        "original": "Akra",
+                        "corrected": "Accra",
+                        "strategy": "fuzzy",
+                        "confidence": 0.92,
+                        "entity_kind": "location",
+                        "entity_type": "city",
+                        "stage": "rule",
+                        "outcome": "applied",
+                    },
+                    {
+                        "original": "twenty",
+                        "corrected": "2020",
+                        "confidence": 1.0,
+                        "stage": "year",
+                        "outcome": "applied",
+                    },
+                ],
+                "dataset_version": "ds-1",
+                "correlation_id": "corr-9",
+            },
+        }
+
+        await worker._persist_correction_evidence(101, transcript_data)
+
+        evidence = captured["evidence"]
+        assert evidence.transcript_id == 101
+        assert evidence.version == 4
+        assert len(evidence.entries) == 2
+        stages = {e.correction_stage.value for e in evidence.entries}
+        assert stages == {"rule", "year"}
+
+    @pytest.mark.asyncio
+    async def test_no_corrections_payload_persists_nothing(self, worker, monkeypatch):
+        """Absent a corrections payload, no evidence is fabricated or written."""
+        import app.rag.ingestion as ingestion_mod
+
+        called = {"count": 0}
+
+        async def _fake_persist(session_factory, evidence):
+            called["count"] += 1
+            return 0
+
+        monkeypatch.setattr(ingestion_mod, "persist_correction_evidence", _fake_persist)
+
+        transcript_data = {
+            "corrected_text": "Accra",
+            "word_timings": [{"word": "Accra", "start": 0.0, "end": 0.5}],
+            "entities": [],
+            "version": 1,
+            "raw_text": "Akra",
+            "metadata": {},  # no corrections payload
+        }
+
+        await worker._persist_correction_evidence(202, transcript_data)
+
+        assert called["count"] == 0
+
+    def test_group_correction_records_routes_by_stage_and_outcome(self, worker):
+        """vetoed -> vetoed; year/llm by stage; unknown/missing -> applied."""
+        raw = [
+            {"original": "a", "corrected": "A", "stage": "rule", "outcome": "applied"},
+            {"original": "b", "corrected": "B", "stage": "year", "outcome": "applied"},
+            {"original": "c", "corrected": "C", "stage": "llm", "outcome": "applied"},
+            {"original": "d", "corrected": "D", "stage": "llm", "outcome": "vetoed"},
+            {"original": "e", "corrected": "E"},  # missing stage -> applied
+        ]
+        applied, year, llm, vetoed = worker._group_correction_records(raw)
+        assert [r.original for r in applied] == ["a", "e"]
+        assert [r.original for r in year] == ["b"]
+        assert [r.original for r in llm] == ["c"]
+        assert [r.original for r in vetoed] == ["d"]
+
+    def test_group_correction_records_skips_malformed(self, worker):
+        """A dict lacking original/corrected text is skipped, not persisted."""
+        raw = [
+            {"original": "ok", "corrected": "OK"},
+            {"corrected": "no original"},
+            "not a dict",
+            {"original": 123, "corrected": "bad type"},
+        ]
+        applied, year, llm, vetoed = worker._group_correction_records(raw)
+        assert [r.original for r in applied] == ["ok"]
+        assert year == [] and llm == [] and vetoed == []

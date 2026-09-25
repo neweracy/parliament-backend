@@ -72,6 +72,16 @@ class Metadata(BaseModel):
     location_corrections: int | None = None
     year_corrections: int | None = None
     bedrock_corrections: int | None = None
+    # Single total gate-rejection count across every gate value for the request
+    # (Req 13.6). Additive field (Req 14.11); omitted when None/zero via
+    # exclude_none so a request with no gate rejections is byte-identical to the
+    # Baseline response (Req 14.4).
+    gate_rejections: int | None = Field(default=None, alias="gateRejections")
+    # Count of LLM_Refiner vetoes for the request — the number of corrections
+    # entries removed for restored Spans (Req 9.7). Additive field (Req 14.11);
+    # omitted when None/zero via exclude_none so a request with no vetoes is
+    # byte-identical to the Baseline response (Req 14.4).
+    vetoes: int | None = None
     llm_status: str | None = None
     postprocessing_status: str | None = None
     rule_latency_ms: int | None = None

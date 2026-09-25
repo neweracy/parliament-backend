@@ -8,6 +8,7 @@ Requirements: 1.1, 1.2, 1.3, 1.4, 1.6, 7.13, 7.14, 7.15, 9.8, 16.3
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from contextlib import asynccontextmanager
@@ -21,9 +22,11 @@ from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes_datasets import router as datasets_router
+from app.api.routes_evidence import router as evidence_router
 from app.api.routes_health import router as health_router
 from app.api.routes_postprocess import router as postprocess_router
 from app.config import get_settings
+from app.correction.lexicon import load_lexicon
 from app.datasets.cache import DatasetCache
 from app.datasets.store import make_engine, make_session_factory
 from app.history.writer import CorrectionHistoryWriter
@@ -207,6 +210,21 @@ async def lifespan(app: FastAPI):
 
     await cache.start()
 
+    # Load the English_Lexicon once per process before the first request
+    # (Req 2.1, 2.3). The loader reads a bundled artifact with no network
+    # access (Req 2.2) and, on any failure, returns an inactive lexicon after
+    # logging one `lexicon.load_failed` so the service still starts (Req 2.11).
+    # Held process-global on app.state alongside the dataset cache so the
+    # correction engine can access it (design §3). Read in a worker thread to
+    # keep the event loop free during the file read.
+    english_lexicon = await asyncio.to_thread(load_lexicon)
+    app.state.english_lexicon = english_lexicon
+    logger.info(
+        "lexicon.loaded",
+        loaded=english_lexicon.loaded,
+        form_count=len(english_lexicon),
+    )
+
     # Construct BedrockClient if LLM refinement is enabled (for correction pipeline)
     bedrock_client: BedrockClient | None = None
     if settings.llm_enabled:
@@ -334,5 +352,6 @@ app.add_middleware(RequestLoggingMiddleware)
 app.include_router(postprocess_router)
 app.include_router(health_router)
 app.include_router(datasets_router)
+app.include_router(evidence_router)
 app.include_router(rag_router)
 app.include_router(rag_diagnostics_router)
