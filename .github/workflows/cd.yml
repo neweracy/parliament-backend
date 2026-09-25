@@ -59,6 +59,11 @@ jobs:
           push: false
           load: true
           tags: parliament-gateway:${{ steps.meta.outputs.tag }}
+          # Cache layers across runs (incl. the expensive Caddy Go compile and
+          # pnpm install) via the free GitHub Actions cache backend. Unchanged
+          # layers are reused, cutting emulated-build time dramatically.
+          cache-from: type=gha,scope=gateway
+          cache-to: type=gha,scope=gateway,mode=max
           build-args: |
             VITE_COGNITO_DOMAIN=${{ vars.COGNITO_DOMAIN }}
             VITE_COGNITO_CLIENT_ID=${{ vars.COGNITO_CLIENT_ID }}
@@ -74,11 +79,18 @@ jobs:
           push: false
           load: true
           tags: parliament-postprocess:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=postprocess
+          cache-to: type=gha,scope=postprocess,mode=max
 
       - name: Export images + config
         run: |
           docker save parliament-gateway:${{ steps.meta.outputs.tag }}     -o gateway.tar
           docker save parliament-postprocess:${{ steps.meta.outputs.tag }} -o postprocess.tar
+          # Flatten config next to the tarballs so the artifact has no path
+          # prefix (keeps scp/cp on the deploy side using bare filenames).
+          cp deploy-aws/docker-compose.prod.yml ./docker-compose.prod.yml
+          cp deploy-aws/docker-compose.ship.yml ./docker-compose.ship.yml
+          cp deploy-aws/Caddyfile.prod ./Caddyfile.prod
 
       - uses: actions/upload-artifact@v4
         with:
@@ -87,9 +99,9 @@ jobs:
           path: |
             gateway.tar
             postprocess.tar
-            deploy-aws/docker-compose.prod.yml
-            deploy-aws/docker-compose.ship.yml
-            deploy-aws/Caddyfile.prod
+            docker-compose.prod.yml
+            docker-compose.ship.yml
+            Caddyfile.prod
 
   deploy:
     name: Deploy to EC2
@@ -105,25 +117,48 @@ jobs:
         with:
           name: release-${{ needs.build.outputs.image_tag }}
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Open SSH to runner IP (just-in-time)
+        id: sg
+        run: |
+          RUNNER_IP="$(curl -s https://checkip.amazonaws.com | tr -d '[:space:]')"
+          echo "runner_ip=${RUNNER_IP}" >> "$GITHUB_OUTPUT"
+          aws ec2 authorize-security-group-ingress \
+            --group-id "${{ vars.DEPLOY_SG_ID }}" \
+            --ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=${RUNNER_IP}/32,Description=gha-ci-deploy}]" \
+            --region "${{ vars.AWS_REGION }}" 2>/dev/null || echo "ingress rule may already exist"
+
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          # StrictHostKeyChecking=no avoids keyscan failures under `bash -e`.
+          cat > ~/.ssh/config <<EOF
+          Host deploy-target
+            HostName ${{ secrets.EC2_HOST }}
+            User ${{ secrets.EC2_USER }}
+            IdentityFile ~/.ssh/id_ed25519
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          EOF
 
       - name: Copy release to host
         run: |
-          HOST="${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}"
-          ssh -i ~/.ssh/id_ed25519 "$HOST" "mkdir -p ${REMOTE_DIR}/releases/${IMAGE_TAG}"
-          scp -i ~/.ssh/id_ed25519 gateway.tar postprocess.tar \
+          ssh deploy-target "mkdir -p ${REMOTE_DIR}/releases/${IMAGE_TAG}"
+          scp gateway.tar postprocess.tar \
             docker-compose.prod.yml docker-compose.ship.yml Caddyfile.prod \
-            "$HOST:${REMOTE_DIR}/releases/${IMAGE_TAG}/"
+            "deploy-target:${REMOTE_DIR}/releases/${IMAGE_TAG}/"
 
       - name: Deploy with health gate + auto-rollback
         run: |
-          HOST="${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}"
-          ssh -i ~/.ssh/id_ed25519 "$HOST" IMAGE_TAG="${IMAGE_TAG}" REMOTE_DIR="${REMOTE_DIR}" bash -s <<'REMOTE'
+          ssh deploy-target "IMAGE_TAG='${IMAGE_TAG}' REMOTE_DIR='${REMOTE_DIR}' PUBLIC_HOST='${{ vars.PUBLIC_HOST }}' bash -s" <<'REMOTE'
           set -euo pipefail
           cd "${REMOTE_DIR}"
 
@@ -142,9 +177,12 @@ jobs:
 
           docker compose -f docker-compose.prod.yml -f docker-compose.ship.yml up -d
 
+          # Health via the published edge (port 80 -> caddy -> gateway). Port
+          # 8080 is internal to the docker network and NOT published to the
+          # host, so checking :8080 always failed and forced a false rollback.
           ok=0
-          for i in $(seq 1 24); do
-            if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then ok=1; break; fi
+          for i in $(seq 1 30); do
+            if curl -fsS -H "Host: ${PUBLIC_HOST:-localhost}" http://localhost/health >/dev/null 2>&1; then ok=1; break; fi
             sleep 5
           done
 
@@ -169,3 +207,11 @@ jobs:
             sleep 5
           done
           echo "::error::public health check failed"; exit 1
+
+      - name: Close SSH access (always, even on failure)
+        if: always() && steps.sg.outputs.runner_ip != ''
+        run: |
+          aws ec2 revoke-security-group-ingress \
+            --group-id "${{ vars.DEPLOY_SG_ID }}" \
+            --ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=${{ steps.sg.outputs.runner_ip }}/32}]" \
+            --region "${{ vars.AWS_REGION }}" 2>/dev/null || echo "ingress rule already removed"
