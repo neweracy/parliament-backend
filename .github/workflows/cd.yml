@@ -45,7 +45,7 @@ jobs:
           repository: bigdataghana/Hansard
           ref: ${{ vars.HANSARD_REF || 'main' }}
           path: frontend
-          token: ${{ secrets.HANSARD_PAT }}
+          token: ${{ secrets.HANSARD_PAT || github.token }}
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
