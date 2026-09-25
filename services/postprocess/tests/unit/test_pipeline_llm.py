@@ -208,6 +208,7 @@ class TestLLMCorrectionCount:
                 [{"word": "hello"}, {"word": "world"}, {"word": "Kumasi"}],
                 "ok",
                 1,
+                [],
             )
 
             response = await run_pipeline(
@@ -235,6 +236,7 @@ class TestLLMCorrectionCount:
                 [{"word": "hello"}, {"word": "world"}],
                 "partial",
                 0,
+                [],
             )
 
             response = await run_pipeline(
@@ -295,6 +297,7 @@ class TestLLMRefinerRaises:
                 [{"word": "hello"}, {"word": "world"}],
                 "failed",
                 0,
+                [],
             )
 
             response = await run_pipeline(
@@ -334,6 +337,7 @@ class TestLLMRefinerRaises:
                 ],
                 "partial",
                 1,
+                [],
             )
 
             response = await run_pipeline(

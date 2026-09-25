@@ -21,7 +21,13 @@ from app.config import Settings
 from app.datasets.cache import DatasetSnapshot
 from app.llm.align import apply_aligned, apply_aligned_with_map
 from app.llm.bedrock import BedrockClient
-from app.llm.prompt import build_system_prompt, build_user_content, estimate_prompt_tokens
+from app.llm.prompt import (
+    VETO_OUTPUT_MARKER,
+    build_system_prompt,
+    build_user_content,
+    estimate_prompt_tokens,
+    parse_veto_decisions,
+)
 from app.llm.retrieval import retrieve_candidates
 from app.obs.metrics import emit_llm_prompt_tokens
 
@@ -41,6 +47,22 @@ class Chunk:
     start_index: int
     text: str
     token_map: list[int] = field(default_factory=list)
+
+
+@dataclass
+class VetoResult:
+    """The parsed veto decisions for one chunk (Req 9.1).
+
+    ``chunk_index`` is the chunk's position in the ``chunk_words`` output, and
+    ``decisions`` is the list of ``(original, corrected)`` pairs the model
+    marked WRONG for that chunk (empty when it vetoed nothing). The pipeline
+    resolves these against the rule corrections it assigned to the same chunk
+    (``app.llm.veto.resolve_vetoes``) so a decision must map to exactly one
+    supplied correction (Req 9.11).
+    """
+
+    chunk_index: int
+    decisions: list[tuple[str, str]]
 
 
 # ---------------------------------------------------------------------------
@@ -163,11 +185,23 @@ async def _process_chunk(
     session: AsyncSession | None,
     settings: Settings,
     semaphore: asyncio.Semaphore,
-) -> int:
+    veto_corrections: list[tuple[str, str]] | None = None,
+) -> tuple[int, list[tuple[str, str]] | None]:
     """Process a single chunk: retrieve, prompt, invoke, align, guard.
 
-    Returns the number of bedrock corrections applied (after guards).
-    Raises on failure (caught by the caller).
+    Returns ``(applied_corrections, veto_decisions)``:
+
+    * ``applied_corrections`` — the number of bedrock proposal corrections
+      applied (after guards), unchanged from the pre-veto behaviour (Req 9.9).
+    * ``veto_decisions`` — the ``(original, corrected)`` pairs the model marked
+      WRONG for this chunk, parsed from the response veto line (Req 9.1); an
+      empty list when the model vetoed nothing; and ``None`` when the veto flag
+      is off, no corrections cover this chunk, or the veto section could not be
+      parsed — in which case the caller retains this chunk's rule corrections
+      unchanged (Req 9.8).
+
+    Raises on failure (caught by the caller), which the caller treats as
+    retaining every rule correction covering this chunk (Req 9.8).
     """
     async with semaphore:
         # 1. Retrieve relevant entities for this chunk
@@ -178,8 +212,14 @@ async def _process_chunk(
             max_records=settings.llm_max_prompt_records,
         )
 
-        # 2. Build system prompt with those entities
-        system_prompt = build_system_prompt(entities)
+        # 2. Build system prompt with those entities. When the LLM Veto flag is
+        # on and this chunk carries rule corrections, the prompt gains the
+        # review block + veto-output instruction (Req 9.1); otherwise the prompt
+        # is the Baseline prompt unchanged (Req 12.9).
+        veto_enabled = bool(settings.llm_veto_enabled) and bool(veto_corrections)
+        system_prompt = build_system_prompt(
+            entities, veto_corrections if veto_enabled else None
+        )
 
         # 3. Build user content with the chunk text
         user_content = build_user_content(chunk.text, chunk_index + 1)
@@ -206,8 +246,23 @@ async def _process_chunk(
             timeout=timeout_seconds,
         )
 
-        # 6. Strip the [Segment N]: prefix
-        corrected_text = re.sub(r"^\[Segment \d+\]:\s*", "", raw_response).strip()
+        # 6a. Parse veto decisions from the response (Req 9.1) before the
+        # segment text is isolated. ``None`` when the flag is off / no
+        # corrections were supplied (skip veto) or the veto section is
+        # unparseable (retain rule corrections, Req 9.8).
+        veto_decisions: list[tuple[str, str]] | None = None
+        if veto_enabled:
+            veto_decisions = parse_veto_decisions(raw_response)
+
+        # 6b. Strip the [Segment N]: prefix and drop any trailing veto line so
+        # the alignment path only sees the corrected segment text (Req 9.9).
+        segment_source = raw_response
+        veto_idx = segment_source.find(VETO_OUTPUT_MARKER)
+        if veto_idx != -1:
+            segment_source = segment_source[:veto_idx]
+        corrected_text = re.sub(
+            r"^\[Segment \d+\]:\s*", "", segment_source
+        ).strip()
 
         # 7. Tokenize the response
         corrected_tokens = corrected_text.split()
@@ -264,7 +319,7 @@ async def _process_chunk(
             if words[idx].get("bedrockCorrected"):
                 corrections += 1
 
-        return corrections
+        return corrections, veto_decisions
 
 
 # ---------------------------------------------------------------------------
@@ -278,11 +333,29 @@ async def refine_chunks(
     bedrock_client: BedrockClient,
     session: AsyncSession | None,
     settings: Settings,
-) -> tuple[list[dict], str, int]:
+    veto_corrections_by_chunk: list[list[tuple[str, str]]] | None = None,
+) -> tuple[list[dict], str, int, list[VetoResult]]:
     """Orchestrate LLM refinement of corrected words.
 
+    Parameters
+    ----------
+    veto_corrections_by_chunk : list[list[tuple[str, str]]] | None
+        When the LLM Veto flag is on (Req 9.1), one list per chunk of the
+        ``(original, corrected)`` rule corrections whose Span falls in that
+        chunk. Passed into each chunk's prompt so the model can veto them. The
+        list is aligned to the chunks produced by ``chunk_words`` — the caller
+        (``app/pipeline.py``) builds it by assigning each rule correction to a
+        chunk via ``app.llm.veto.assign_corrections_to_chunks`` over the same
+        chunk texts. ``None`` (flag off) keeps the Baseline prompt and returns
+        no veto results (Req 12.9).
+
     Returns:
-        (refined_words, llm_status, bedrock_correction_count)
+        (refined_words, llm_status, bedrock_correction_count, veto_results)
+
+    ``veto_results`` holds one :class:`VetoResult` per chunk that carried rule
+    corrections and returned parseable veto decisions; a chunk that failed,
+    timed out, or returned an unparseable veto section contributes no result,
+    so the caller retains that chunk's rule corrections unchanged (Req 9.8).
 
     llm_status values:
         - "ok": all chunks succeeded
@@ -292,13 +365,13 @@ async def refine_chunks(
         - "unconfigured": no Bedrock credentials available (caller checks this)
     """
     if not words:
-        return words, "ok", 0
+        return words, "ok", 0, []
 
     # Chunk the words
     chunks = chunk_words(words, settings.llm_chunk_size)
 
     if not chunks:
-        return words, "ok", 0
+        return words, "ok", 0, []
 
     # Process chunks in waves using Semaphore for concurrency control
     semaphore = asyncio.Semaphore(settings.llm_max_parallel)
@@ -306,6 +379,12 @@ async def refine_chunks(
     total_corrections = 0
     chunks_succeeded = 0
     chunks_failed = 0
+    veto_results: list[VetoResult] = []
+
+    def _chunk_vetoes(idx: int) -> list[tuple[str, str]] | None:
+        if veto_corrections_by_chunk is None or idx >= len(veto_corrections_by_chunk):
+            return None
+        return veto_corrections_by_chunk[idx]
 
     # Launch all chunks concurrently (semaphore limits parallelism)
     tasks = [
@@ -318,6 +397,7 @@ async def refine_chunks(
             session=session,
             settings=settings,
             semaphore=semaphore,
+            veto_corrections=_chunk_vetoes(idx),
         )
         for idx, chunk in enumerate(chunks)
     ]
@@ -345,9 +425,20 @@ async def refine_chunks(
                 chunk = chunks[idx]
                 end_index = chunk.start_index + len(chunk.words)
                 _cleanup_snapshots(words, chunk.start_index, end_index)
+            # A failed/timed-out chunk contributes no veto result, so its rule
+            # corrections are retained unchanged (Req 9.8).
         else:
             chunks_succeeded += 1
-            total_corrections += result
+            count, veto_decisions = result
+            total_corrections += count
+            # Only record a veto result when the model returned parseable veto
+            # decisions for this chunk (``None`` == unparseable/skip → retain,
+            # Req 9.8). Even an empty list is recorded so a chunk that vetoed
+            # nothing is distinguishable from one that could not be parsed.
+            if veto_decisions is not None:
+                veto_results.append(
+                    VetoResult(chunk_index=idx, decisions=veto_decisions)
+                )
 
     # Determine llm_status
     if chunks_failed == 0:
@@ -357,4 +448,4 @@ async def refine_chunks(
     else:
         llm_status = "failed"
 
-    return words, llm_status, total_corrections
+    return words, llm_status, total_corrections, veto_results

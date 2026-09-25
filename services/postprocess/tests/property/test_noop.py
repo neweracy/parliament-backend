@@ -18,7 +18,7 @@ Properties tested:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -27,7 +27,6 @@ from app.correction.engine import correct_text, correct_words
 from app.datasets.cache import DatasetSnapshot
 from app.datasets.index import MatchIndex, build_index
 from app.models.entities import EntityKind, EntityRecord, EntityType
-
 
 # ---------------------------------------------------------------------------
 # Safe word pool — common English words that will NOT trigger any corrections
@@ -198,7 +197,7 @@ def _build_noop_snapshot() -> tuple[MatchIndex, DatasetSnapshot]:
         version="test-noop",
         records=tuple(records),
         record_count=len(records),
-        loaded_at=datetime.now(timezone.utc),
+        loaded_at=datetime.now(UTC),
         index=index,
         block_list=frozenset(),
         stopwords=frozenset({"the", "of", "and", "in", "to", "for", "with"}),

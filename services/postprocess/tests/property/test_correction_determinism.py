@@ -17,6 +17,8 @@ Properties tested:
 
 from __future__ import annotations
 
+from datetime import UTC
+
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -25,7 +27,6 @@ from app.correction.strategies import MatchResult
 from app.datasets.cache import DatasetSnapshot
 from app.datasets.index import MatchIndex, build_index
 from app.models.entities import EntityKind, EntityRecord, EntityType
-
 
 # ---------------------------------------------------------------------------
 # Strategies
@@ -108,13 +109,13 @@ def entity_records_with_index(draw: st.DrawFn) -> tuple[list[EntityRecord], Matc
     index = build_index(all_records)
 
     # Build a minimal DatasetSnapshot (only block_list and stopwords matter for correct_single)
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     snapshot = DatasetSnapshot(
         version="test",
         records=tuple(all_records),
         record_count=len(all_records),
-        loaded_at=datetime.now(timezone.utc),
+        loaded_at=datetime.now(UTC),
         index=index,
         block_list=frozenset(),
         stopwords=frozenset(),

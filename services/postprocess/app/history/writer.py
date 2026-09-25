@@ -38,7 +38,16 @@ def _emit_history_dropped() -> None:
 
 @dataclass(frozen=True)
 class HistoryRecord:
-    """One applied correction destined for the correction_history table."""
+    """One correction destined for the correction_history table.
+
+    ``outcome`` records the disposition of the correction: ``applied`` for a
+    correction the pipeline kept, or ``vetoed`` for a rule correction the
+    LLM_Refiner rejected and restored. It defaults to ``applied`` so existing
+    call sites need no change; the veto path sets it to ``vetoed`` (Req 9.5).
+    ``confidence`` holds the value compared against the acceptance threshold —
+    the Evidence_Score for an applied Approximate_Strategy correction, or the
+    strategy constant for a Deterministic_Strategy correction (Req 13.8).
+    """
 
     correlation_id: str
     text_hash: str
@@ -50,6 +59,7 @@ class HistoryRecord:
     entity_type: str
     model_version: str
     created_at: datetime
+    outcome: str = "applied"
 
 
 class CorrectionHistoryWriter:
@@ -240,11 +250,11 @@ class CorrectionHistoryWriter:
                             "INSERT INTO correction_history "
                             "(correlation_id, text_hash, original, corrected, "
                             "strategy, confidence, entity_kind, entity_type, "
-                            "model_version, created_at) "
+                            "model_version, created_at, outcome) "
                             "VALUES "
                             "(:correlation_id, :text_hash, :original, :corrected, "
                             ":strategy, :confidence, :entity_kind, :entity_type, "
-                            ":model_version, :created_at)"
+                            ":model_version, :created_at, :outcome)"
                         ),
                         [
                             {
@@ -258,6 +268,7 @@ class CorrectionHistoryWriter:
                                 "entity_type": r.entity_type,
                                 "model_version": r.model_version,
                                 "created_at": r.created_at,
+                                "outcome": r.outcome,
                             }
                             for r in batch
                         ],

@@ -67,3 +67,13 @@ class CorrectionRequest(BaseModel):
     words: list[Word] = Field(default_factory=list)
     options: CorrectionOptions = Field(default_factory=CorrectionOptions)
     correlation_id: str | None = Field(default=None, alias="correlationId")
+    # Optional Sitting_Scope identifier (Req 8.1). Exposed as ``sittingId`` in
+    # JSON and ``sitting_id`` in Python, a string of 1 to 128 characters,
+    # defaulting to absent when the field is omitted or null. Additive and
+    # backward-compatible: a request body that omits it behaves exactly as
+    # before (Req 14.10). When present it selects the parliamentary sitting
+    # whose expected member set scopes person-candidate preference (Req 8.2-8.10);
+    # a whitespace-only value is treated as absent by the pipeline (Req 8.2).
+    sitting_id: str | None = Field(
+        default=None, alias="sittingId", min_length=1, max_length=128
+    )

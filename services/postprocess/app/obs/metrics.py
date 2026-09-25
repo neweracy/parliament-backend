@@ -11,10 +11,15 @@ Dimensions are CLOSED SET only:
 - ``llm_status`` for LLM latency (bounded: ok/partial/failed/skipped/unconfigured)
 - ``reason`` for LLM chunks dropped (bounded: timeout/error)
 - ``path`` for handler latency (bounded: /v1/postprocess, /v1/datasets/reload)
+- ``gate`` for gate rejections (bounded: the thirteen enumerated gate values —
+  asr_confidence/lexicon/phonetic_key/phonetic_similarity/key_fanout/
+  absolute_distance/relative_distance/candidate_bound/component_ambiguity/
+  context/sitting_scope/llm_veto/block_list — plus dimension names already
+  emitted by existing metrics; Req 13.2, 13.3)
 
 NO transcript text, correlation id, or entity name in any dimension.
 
-Requirements: 13.3, 13.4, 13.5, 13.7, 10.8, 12.10
+Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 13.7, 13.10, 13.11, 10.8, 12.10
 """
 
 from __future__ import annotations
@@ -22,6 +27,28 @@ from __future__ import annotations
 import structlog
 
 logger = structlog.get_logger("metrics")
+
+# The thirteen enumerated gate values (Req 13.2). ``emit_gate_rejections``
+# emits a datum only for a value in this frozenset, so the ``gate`` dimension is
+# bounded to exactly these thirteen strings and never carries any Span,
+# transcript, entity, or alias text (Req 13.3).
+_GATE_VALUES: frozenset[str] = frozenset(
+    {
+        "asr_confidence",
+        "lexicon",
+        "phonetic_key",
+        "phonetic_similarity",
+        "key_fanout",
+        "absolute_distance",
+        "relative_distance",
+        "candidate_bound",
+        "component_ambiguity",
+        "context",
+        "sitting_scope",
+        "llm_veto",
+        "block_list",
+    }
+)
 
 _NAMESPACE = "Postprocessing"
 _SERVICE_DIMENSION = "postprocess"
@@ -200,3 +227,80 @@ def emit_llm_chunks_dropped(reason: str, count: int = 1) -> None:
         "Count",
         {"reason": reason},
     )
+
+
+def emit_gate_rejections(counts: dict[str, int]) -> None:
+    """Emit one rejection-count datum per gate value with count > 0 (Req 13.1).
+
+    Parameters
+    ----------
+    counts:
+        A mapping of ``gate`` value to the number of Spans that gate rejected
+        this request. One metric datum is emitted for each entry whose count is
+        greater than zero (Req 13.1). Entries with a count of zero, and any key
+        that is not one of the thirteen enumerated gate values (Req 13.2), are
+        skipped — so the ``gate`` dimension is bounded to exactly those thirteen
+        strings and never carries Span/transcript/entity/alias text (Req 13.3).
+
+    The only dimension is ``gate``; ``_emit`` adds the ``service`` dimension
+    already emitted by every existing metric (Req 13.3). Never raises — a
+    per-datum emission failure is swallowed by ``_emit`` and does not surface to
+    the caller (Req 13.11).
+    """
+    for gate, count in counts.items():
+        if gate not in _GATE_VALUES:
+            continue
+        if count <= 0:
+            continue
+        _emit(
+            "postprocess.gate_rejections",
+            count,
+            "Count",
+            {"gate": gate},
+        )
+
+
+def emit_approx_spans_evaluated(count: int) -> None:
+    """Emit the count of Spans that had an Approximate_Strategy evaluated (Req 13.4).
+
+    Emitted on every request, including when the count is zero (Req 13.4), so
+    the metric is present even for a request in which no approximate matching
+    ran. Carries no dimension beyond the ``service`` dimension ``_emit`` adds,
+    so it holds no Span/transcript/entity text (Req 13.3). Never raises
+    (Req 13.11).
+    """
+    _emit("postprocess.approx_spans_evaluated", count, "Count")
+
+
+def emit_gate_rejection_log(
+    gate: str,
+    span_text: str,
+    span_confidence: float | None,
+    provider: str | None = None,
+) -> None:
+    """Emit ONE debug-level per-Span gate-rejection log event (Req 13.5, 13.10).
+
+    Logged at ``debug`` level only, carrying the rejected Span text, the
+    attributed ``gate`` value, and the Span_Confidence rendered as ``"unknown"``
+    when no covered Word carried a confidence (Req 13.5). The resolved
+    ``provider`` (a bounded enum-like value — deepgram/khaya/hybrid, not PII) is
+    added as a log field when supplied, giving operators provider visibility in
+    the debug logs without widening the closed ``gate`` metric dimension set
+    (Req 13.3); it appears ONLY here, never on the gate-rejection metric. Because
+    the event is emitted through ``logger.debug``, it is suppressed entirely at
+    any level above debug, so Span text never appears in a non-debug log
+    (Req 13.10). Any logging failure is swallowed so emission never surfaces to
+    the caller (Req 13.11).
+    """
+    try:
+        logger.debug(
+            "gate.rejection",
+            gate=gate,
+            span=span_text,
+            span_confidence=(
+                "unknown" if span_confidence is None else span_confidence
+            ),
+            provider=provider,
+        )
+    except Exception:  # noqa: BLE001 - emission failure must never surface (Req 13.11)
+        return
