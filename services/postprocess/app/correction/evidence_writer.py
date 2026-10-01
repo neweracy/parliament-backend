@@ -64,6 +64,23 @@ _INSERT_ENTRY_SQL = (
     ":correlation_id, :dataset_version, :model_id)"
 )
 
+# A version's evidence is written at most once. Ingestion re-runs for the same
+# transcript version (a worker retry, the reconciliation sweep, POST
+# /rag/reindex), and a plain INSERT on each re-run would duplicate every entry
+# in the official record. The per-version advisory lock serialises concurrent
+# writers (two worker processes); the existence check, taken under that lock,
+# makes the write idempotent. Evidence is built deterministically from the
+# version's own persisted data, so an existing batch is already the right one.
+_LOCK_VERSION_SQL = (
+    "SELECT pg_advisory_xact_lock(hashtextextended("
+    "'correction_evidence:' || CAST(:transcript_id AS text) || ':' "
+    "|| CAST(:version AS text), 0))"
+)
+_VERSION_HAS_EVIDENCE_SQL = (
+    "SELECT 1 FROM correction_evidence "
+    "WHERE transcript_id = :transcript_id AND version = :version LIMIT 1"
+)
+
 
 async def persist_correction_evidence(
     session_factory: async_sessionmaker[AsyncSession],
@@ -94,7 +111,9 @@ async def persist_correction_evidence(
     -------
     int
         The number of rows written. ``0`` when *evidence* carries no entries
-        (Baseline no-evidence, Req 10.5) or when the write failed and was
+        (Baseline no-evidence, Req 10.5), when this version's evidence was
+        already persisted by an earlier run (idempotent re-ingest), or when the
+        write failed and was
         swallowed — the caller treats a not-yet-persisted state as no-evidence,
         never an error (design Decision 2).
     """
@@ -130,8 +149,18 @@ async def persist_correction_evidence(
         for entry in entries
     ]
 
+    version_key = {"transcript_id": evidence.transcript_id, "version": evidence.version}
     try:
         async with session_factory() as session, session.begin():
+            await session.execute(text(_LOCK_VERSION_SQL), version_key)
+            existing = await session.execute(text(_VERSION_HAS_EVIDENCE_SQL), version_key)
+            if existing.first() is not None:
+                logger.debug(
+                    "correction_evidence.already_persisted",
+                    transcript_id=evidence.transcript_id,
+                    version=evidence.version,
+                )
+                return 0
             await session.execute(text(_INSERT_ENTRY_SQL), params)
         logger.debug(
             "correction_evidence.persisted",

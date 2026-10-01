@@ -30,15 +30,17 @@ from app.models.evidence import (
 )
 
 
-def _mock_session_factory() -> tuple[MagicMock, AsyncMock]:
+def _mock_session_factory(*, already_persisted: bool = False) -> tuple[MagicMock, AsyncMock]:
     """Build a mocked async session factory and return (factory, session).
 
     The session supports ``async with factory() as session:`` and
     ``async with session.begin():`` and records ``execute`` calls, matching the
-    context-manager shape the history writer / ingestion worker use.
+    context-manager shape the history writer / ingestion worker use. The
+    existence check reports *already_persisted*; the INSERT is the last call.
     """
     session = AsyncMock()
-    session.execute = AsyncMock()
+    existing_row = (1,) if already_persisted else None
+    session.execute = AsyncMock(return_value=MagicMock(first=lambda: existing_row))
 
     begin_ctx = AsyncMock()
     begin_ctx.__aenter__ = AsyncMock(return_value=None)
@@ -95,7 +97,8 @@ class TestPersistCorrectionEvidence:
         written = await persist_correction_evidence(factory, evidence)
 
         assert written == 2
-        session.execute.assert_awaited_once()
+        inserts = [c for c in session.execute.await_args_list if "INSERT" in c.args[0].text]
+        assert len(inserts) == 1
         stmt, params = session.execute.await_args.args
         # A single executemany with one param mapping per entry.
         assert isinstance(params, list)
@@ -231,6 +234,43 @@ class TestPersistCorrectionEvidence:
         written = await persist_correction_evidence(factory, evidence)
 
         assert written == 0
+
+    @pytest.mark.asyncio
+    async def test_reingest_of_a_version_does_not_duplicate_its_evidence(self):
+        """Regression: a retry, sweep, or /rag/reindex re-runs ingestion for the
+        same version. A plain INSERT duplicated every entry in the record."""
+        factory, session = _mock_session_factory(already_persisted=True)
+        evidence = CorrectionEvidence(
+            transcript_id=42,
+            version=3,
+            entries=[_entry("s:w0-w0", "Akra", "Accra")],
+        )
+
+        written = await persist_correction_evidence(factory, evidence)
+
+        assert written == 0
+        executed = [c.args[0].text for c in session.execute.await_args_list]
+        assert not any("INSERT" in sql for sql in executed)
+
+    @pytest.mark.asyncio
+    async def test_existence_check_runs_under_the_version_lock(self):
+        """Lock, then check, then insert — all inside the one transaction."""
+        factory, session = _mock_session_factory()
+        evidence = CorrectionEvidence(
+            transcript_id=42,
+            version=3,
+            entries=[_entry("s:w0-w0", "Akra", "Accra")],
+        )
+
+        await persist_correction_evidence(factory, evidence)
+
+        calls = session.execute.await_args_list
+        assert "pg_advisory_xact_lock" in calls[0].args[0].text
+        assert "SELECT 1 FROM correction_evidence" in calls[1].args[0].text
+        assert "INSERT INTO correction_evidence" in calls[2].args[0].text
+        assert calls[0].args[1] == {"transcript_id": 42, "version": 3}
+        assert calls[1].args[1] == {"transcript_id": 42, "version": 3}
+        session.begin.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_no_network_or_aws_call(self, monkeypatch):
