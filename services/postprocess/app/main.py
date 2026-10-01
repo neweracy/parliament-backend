@@ -35,6 +35,7 @@ from app.middleware import RequestLoggingMiddleware
 from app.obs.metrics import emit_error
 from app.rag.clients import create_chat_model, create_embeddings, probe_credentials
 from app.rag.diagnostics import router as rag_diagnostics_router
+from app.rag.ingestion import TranscriptIngestionWorker
 from app.rag.router import router as rag_router
 
 logger = structlog.get_logger("main")
@@ -247,6 +248,15 @@ async def lifespan(app: FastAPI):
     app.state.chat_model = chat_model
     app.state.embeddings = embeddings
 
+    # Start the RAG ingestion worker now rather than on the first /rag/ingest,
+    # so its reconciliation sweep runs at startup: anything queued in memory
+    # when the previous process stopped, or never triggered at all, is found
+    # in the database and re-queued. Without embeddings it still indexes text
+    # for keyword search; the sweep then skips chunks that only lack vectors.
+    ingestion_worker = TranscriptIngestionWorker(session_factory, settings, embeddings=embeddings)
+    ingestion_worker.start()
+    app.state.ingestion_worker = ingestion_worker
+
     # Construct CorrectionHistoryWriter if history is enabled (Req 13.9, 17.3)
     history_writer: CorrectionHistoryWriter | None = None
     if settings.history_enabled:
@@ -295,8 +305,9 @@ async def lifespan(app: FastAPI):
                         total_chunks=total,
                         unindexed_chunks=unindexed,
                         coverage_pct=round(100 - pct, 1),
-                        action="POST /rag/reindex to fix. "
-                        "Vector search is blind to these chunks.",
+                        action="The reconciliation sweep re-queues these "
+                        "(POST /rag/reindex to force). "
+                        "Vector search is blind to them until re-embedded.",
                     )
                 else:
                     logger.info(
