@@ -119,7 +119,7 @@ class TestChunkFailure:
         )
 
         with patch("app.llm.refiner.retrieve_candidates", new_callable=AsyncMock, return_value=[]):
-            result_words, llm_status, corrections = await refine_chunks(
+            result_words, llm_status, corrections, _vetoes = await refine_chunks(
                 words, snapshot, client, None, settings
             )
 
@@ -150,7 +150,7 @@ class TestChunkFailure:
         client = _make_bedrock_client(invoke_side_effect=invoke_side_effect)
 
         with patch("app.llm.refiner.retrieve_candidates", new_callable=AsyncMock, return_value=[]):
-            result_words, llm_status, corrections = await refine_chunks(
+            result_words, llm_status, corrections, _vetoes = await refine_chunks(
                 words, snapshot, client, None, settings
             )
 
@@ -188,7 +188,7 @@ class TestChunkTimeout:
         client.invoke.side_effect = lambda s, u: __import__("time").sleep(1.0) or "[Segment 1]: the member spoke"
 
         with patch("app.llm.refiner.retrieve_candidates", new_callable=AsyncMock, return_value=[]):
-            result_words, llm_status, corrections = await refine_chunks(
+            result_words, llm_status, corrections, _vetoes = await refine_chunks(
                 words, snapshot, client, None, settings
             )
 
@@ -215,7 +215,7 @@ class TestDisabledOption:
         snapshot = _make_snapshot()
         client = _make_bedrock_client()
 
-        result_words, llm_status, corrections = await refine_chunks(
+        result_words, llm_status, corrections, _vetoes = await refine_chunks(
             [], snapshot, client, None, settings
         )
 
@@ -303,7 +303,7 @@ class TestMergedEntryTokenMap:
         )
 
         with patch("app.llm.refiner.retrieve_candidates", new_callable=AsyncMock, return_value=[]):
-            result_words, llm_status, corrections = await refine_chunks(
+            result_words, llm_status, corrections, _vetoes = await refine_chunks(
                 words, snapshot, client, None, settings
             )
 
@@ -367,7 +367,7 @@ class TestYearGuard:
         )
 
         with patch("app.llm.refiner.retrieve_candidates", new_callable=AsyncMock, return_value=[]):
-            result_words, llm_status, corrections = await refine_chunks(
+            result_words, llm_status, corrections, _vetoes = await refine_chunks(
                 words, snapshot, client, None, settings
             )
 
@@ -432,7 +432,7 @@ class TestPersonGuard:
         )
 
         with patch("app.llm.refiner.retrieve_candidates", new_callable=AsyncMock, return_value=[]):
-            result_words, llm_status, corrections = await refine_chunks(
+            result_words, llm_status, corrections, _vetoes = await refine_chunks(
                 words, snapshot, client, None, settings
             )
 
@@ -466,7 +466,7 @@ class TestSuccessPath:
         )
 
         with patch("app.llm.refiner.retrieve_candidates", new_callable=AsyncMock, return_value=[]):
-            result_words, llm_status, corrections = await refine_chunks(
+            result_words, llm_status, corrections, _vetoes = await refine_chunks(
                 words, snapshot, client, None, settings
             )
 
@@ -489,7 +489,7 @@ class TestSuccessPath:
         )
 
         with patch("app.llm.refiner.retrieve_candidates", new_callable=AsyncMock, return_value=[]):
-            result_words, llm_status, corrections = await refine_chunks(
+            result_words, llm_status, corrections, _vetoes = await refine_chunks(
                 words, snapshot, client, None, settings
             )
 
@@ -513,7 +513,7 @@ class TestSuccessPath:
         )
 
         with patch("app.llm.refiner.retrieve_candidates", new_callable=AsyncMock, return_value=[]):
-            result_words, llm_status, corrections = await refine_chunks(
+            result_words, llm_status, corrections, _vetoes = await refine_chunks(
                 words, snapshot, client, None, settings
             )
 
@@ -552,7 +552,7 @@ class TestPartialFailure:
         client = _make_bedrock_client(invoke_side_effect=invoke_side_effect)
 
         with patch("app.llm.refiner.retrieve_candidates", new_callable=AsyncMock, return_value=[]):
-            result_words, llm_status, corrections = await refine_chunks(
+            result_words, llm_status, corrections, _vetoes = await refine_chunks(
                 words, snapshot, client, None, settings
             )
 

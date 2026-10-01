@@ -4,7 +4,7 @@
 # Use corepack to ensure correct pnpm version
 PNPM := corepack pnpm
 
-.PHONY: help check check-prereqs install init install-backend install-frontend start-backend start-frontend start test test-unit test-contracts test-python lint bench update clean status postprocess-db postprocess-migrate postprocess-seed postprocess-setup start-postprocess datasets-generate datasets-validate
+.PHONY: help check check-prereqs install init install-backend install-frontend start-backend start-frontend start test test-unit test-contracts test-python lint bench update clean status postprocess-db postprocess-migrate postprocess-seed postprocess-blocklist postprocess-setup start-postprocess datasets-generate datasets-validate
 
 # Default target: show help
 help:
@@ -208,10 +208,21 @@ postprocess-migrate:
 	@echo "==> Applying database migrations..."
 	@cd $(PP_DIR) && set -a && . ./.env && set +a && $(PP_PYTHON) -m alembic upgrade head
 
-# Seed the Ghana entity datasets from the JS source of truth
+# Seed the Ghana entity datasets from the JS source of truth, then expand the
+# block_list with common English words that would otherwise be mis-corrected
+# into similar-sounding entity names (e.g. "among" -> "Agona").
 postprocess-seed:
 	@echo "==> Seeding entity datasets..."
 	@cd $(PP_DIR) && set -a && . ./.env && set +a && $(PP_PYTHON) scripts/migrate_js_datasets.py
+	@$(MAKE) postprocess-blocklist
+
+# Apply the block_list expansion (idempotent; ON CONFLICT DO NOTHING). These are
+# ordinary English words that are phonetic/edit-distance neighbours of Ghanaian
+# entity names and must never be treated as entity candidates by the corrector.
+postprocess-blocklist:
+	@echo "==> Expanding block_list (false-positive guard words)..."
+	@docker exec -i postprocess-postgres-1 psql -U postprocess -d postprocess \
+		< $(PP_DIR)/scripts/expand_blocklist.sql
 
 # One-shot local provisioning: database + schema + datasets
 postprocess-setup: postprocess-db postprocess-migrate postprocess-seed

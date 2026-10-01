@@ -1,0 +1,73 @@
+{
+  "_comment": "Committed golden snapshot of the Correction_Response contract (task 6.3.3; Req 16.14, 14.2, 14.3). It records, per response model, the stable/Baseline set of fields the CorrectionResponse emits: each field's Python declaration name, the JSON key emitted under model_dump(by_alias=True) (its camelCase alias where one is declared, else the field name), and the JSON value type the field serializes to. The drift test tests/unit/test_contract_snapshot.py compares the live models against this file and FAILS on any rename, removal, retype, or alias change of a baseline key. Keys listed under additive_allowlist are new in the correction-precision-gating spec and are permitted (they must NOT fail the drift test). To regenerate intentionally, see the module docstring of test_contract_snapshot.py (it documents the representative request and how the baseline set was chosen).",
+  "match_strategies": [
+    "exact",
+    "fused",
+    "joined",
+    "initials",
+    "title_person",
+    "phonetic",
+    "fuzzy",
+    "substring"
+  ],
+  "models": {
+    "CorrectionResponse": {
+      "baseline": {
+        "transcript": { "json_key": "transcript", "type": "string" },
+        "words": { "json_key": "words", "type": "array" },
+        "entities": { "json_key": "entities", "type": "array" },
+        "metadata": { "json_key": "metadata", "type": "object" },
+        "corrections": { "json_key": "corrections", "type": "array" }
+      },
+      "additive_allowlist": []
+    },
+    "CorrectedWord": {
+      "baseline": {
+        "word": { "json_key": "word", "type": "string" },
+        "start": { "json_key": "start", "type": "number" },
+        "end": { "json_key": "end", "type": "number" },
+        "confidence": { "json_key": "confidence", "type": "number" },
+        "location_corrected": { "json_key": "locationCorrected", "type": "boolean" },
+        "bedrock_corrected": { "json_key": "bedrockCorrected", "type": "boolean" },
+        "year_corrected": { "json_key": "yearCorrected", "type": "boolean" },
+        "entity_kind": { "json_key": "entityKind", "type": "string" },
+        "entity_type": { "json_key": "entityType", "type": "string" }
+      },
+      "additive_allowlist": []
+    },
+    "EntitySummary": {
+      "baseline": {
+        "name": { "json_key": "name", "type": "string" },
+        "kind": { "json_key": "kind", "type": "string" },
+        "type": { "json_key": "type", "type": "string" },
+        "mentions": { "json_key": "mentions", "type": "integer" }
+      },
+      "additive_allowlist": []
+    },
+    "Metadata": {
+      "baseline": {
+        "location_corrections": { "json_key": "location_corrections", "type": "integer" },
+        "year_corrections": { "json_key": "year_corrections", "type": "integer" },
+        "bedrock_corrections": { "json_key": "bedrock_corrections", "type": "integer" },
+        "llm_status": { "json_key": "llm_status", "type": "string" },
+        "postprocessing_status": { "json_key": "postprocessing_status", "type": "string" },
+        "rule_latency_ms": { "json_key": "rule_latency_ms", "type": "integer" },
+        "llm_latency_ms": { "json_key": "llm_latency_ms", "type": "integer" },
+        "dataset_version": { "json_key": "dataset_version", "type": "string" },
+        "correlation_id": { "json_key": "correlationId", "type": "string" }
+      },
+      "additive_allowlist": ["gateRejections", "vetoes"]
+    },
+    "CorrectionRecord": {
+      "baseline": {
+        "original": { "json_key": "original", "type": "string" },
+        "corrected": { "json_key": "corrected", "type": "string" },
+        "strategy": { "json_key": "strategy", "type": "string" },
+        "confidence": { "json_key": "confidence", "type": "number" },
+        "entity_kind": { "json_key": "entity_kind", "type": "string" },
+        "entity_type": { "json_key": "entity_type", "type": "string" }
+      },
+      "additive_allowlist": []
+    }
+  }
+}

@@ -91,6 +91,28 @@ class TestHistoryRecord:
         assert record.model_version == "rule-based"
         assert record.created_at == datetime(2026, 7, 9, 12, 0, 0, tzinfo=timezone.utc)
 
+    def test_outcome_defaults_to_applied(self):
+        """A record built without an explicit outcome defaults to 'applied' (Req 9.6)."""
+        record = _make_record("x")
+        assert record.outcome == "applied"
+
+    def test_outcome_accepts_vetoed(self):
+        """The vetoed disposition is representable on the record (Req 9.5)."""
+        record = HistoryRecord(
+            correlation_id="corr-v",
+            text_hash="hash-v",
+            original="original-v",
+            corrected="corrected-v",
+            strategy="phonetic",
+            confidence=0.72,
+            entity_kind="person",
+            entity_type="mp",
+            model_version="rule-based",
+            created_at=datetime(2026, 7, 9, 12, 0, 0, tzinfo=timezone.utc),
+            outcome="vetoed",
+        )
+        assert record.outcome == "vetoed"
+
 
 class TestEnqueueOverflow:
     """enqueue drops on overflow without blocking (Requirement 13.9)."""
@@ -154,6 +176,40 @@ class TestBackgroundWriter:
         # First arg is the text SQL statement
         sql = str(call_args[0][0])
         assert "INSERT INTO correction_history" in sql
+        # The outcome column is part of the INSERT (Req 9.6)
+        assert "outcome" in sql
+        # Each bound parameter row carries the record's outcome value
+        params = call_args[0][1]
+        assert all(row["outcome"] == "applied" for row in params)
+
+    @pytest.mark.asyncio
+    async def test_writer_persists_vetoed_outcome(self):
+        """A vetoed record binds outcome='vetoed' in the INSERT (Req 9.5)."""
+        factory, session = _mock_session_factory()
+        writer = CorrectionHistoryWriter(factory, max_queue_size=100)
+        writer.start()
+
+        vetoed = HistoryRecord(
+            correlation_id="corr-v",
+            text_hash="hash-v",
+            original="thank",
+            corrected="Ghana",
+            strategy="phonetic",
+            confidence=0.72,
+            entity_kind="location",
+            entity_type="country",
+            model_version="rule-based",
+            created_at=datetime(2026, 7, 9, 12, 0, 0, tzinfo=timezone.utc),
+            outcome="vetoed",
+        )
+        writer.enqueue(vetoed)
+
+        await asyncio.sleep(0.1)
+        await writer.stop()
+
+        assert session.execute.called
+        params = session.execute.call_args[0][1]
+        assert any(row["outcome"] == "vetoed" for row in params)
 
     @pytest.mark.asyncio
     async def test_writer_handles_db_error_gracefully(self):

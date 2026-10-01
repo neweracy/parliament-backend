@@ -238,7 +238,8 @@ class TestRRFRetriever:
     @pytest.mark.asyncio
     async def test_retrieve_respects_limit(self):
         """retrieve() caps returned results at the given limit."""
-        docs = [self._make_doc(i) for i in range(20)]
+        # Distinct text per doc: identical passages are now collapsed to one.
+        docs = [self._make_doc(i, f"passage {i}") for i in range(20)]
         fulltext = AsyncMock()
         fulltext.ainvoke = AsyncMock(return_value=docs)
         vector = AsyncMock()
@@ -248,6 +249,41 @@ class TestRRFRetriever:
         result = await rrf.retrieve("test query", limit=5)
 
         assert len(result) == 5
+
+    def test_duplicate_passages_keep_only_the_best_ranked_copy(self):
+        """Same text under different chunk_ids is returned once, at its best rank."""
+        docs = [
+            self._make_doc(1, "The House adjourned."),
+            self._make_doc(2, "Order! Order!"),
+            self._make_doc(3, "the  house ADJOURNED"),  # case/space/punct variant of 1
+            self._make_doc(4, "Order, order."),  # variant of 2
+            self._make_doc(5, "The motion carried."),
+        ]
+
+        unique = RRFRetriever._drop_duplicate_passages(docs)
+
+        assert [d.metadata["chunk_id"] for d in unique] == [1, 2, 5]
+
+    def test_distinct_passages_are_untouched(self):
+        docs = [self._make_doc(i, f"passage number {i}") for i in range(5)]
+        assert RRFRetriever._drop_duplicate_passages(docs) == docs
+
+    @pytest.mark.asyncio
+    async def test_limit_counts_distinct_passages(self):
+        """Duplicates are dropped before the limit, so the caller still gets `limit` results."""
+        docs = [self._make_doc(i, "same passage") for i in range(5)] + [
+            self._make_doc(10 + i, f"distinct passage {i}") for i in range(5)
+        ]
+        fulltext = AsyncMock()
+        fulltext.ainvoke = AsyncMock(return_value=docs)
+        vector = AsyncMock()
+        vector.ainvoke = AsyncMock(return_value=[])
+
+        result = await RRFRetriever(fulltext, vector).retrieve("q", limit=4)
+
+        texts = [d.page_content for d in result]
+        assert len(result) == 4
+        assert texts.count("same passage") == 1
 
 
 class TestHybridRetrieverDocsToChunks:

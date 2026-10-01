@@ -8,6 +8,7 @@ Requirements: 1.1, 1.2, 1.3, 1.4, 1.6, 7.13, 7.14, 7.15, 9.8, 16.3
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from contextlib import asynccontextmanager
@@ -21,9 +22,11 @@ from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes_datasets import router as datasets_router
+from app.api.routes_evidence import router as evidence_router
 from app.api.routes_health import router as health_router
 from app.api.routes_postprocess import router as postprocess_router
 from app.config import get_settings
+from app.correction.lexicon import load_lexicon
 from app.datasets.cache import DatasetCache
 from app.datasets.store import make_engine, make_session_factory
 from app.history.writer import CorrectionHistoryWriter
@@ -32,6 +35,7 @@ from app.middleware import RequestLoggingMiddleware
 from app.obs.metrics import emit_error
 from app.rag.clients import create_chat_model, create_embeddings, probe_credentials
 from app.rag.diagnostics import router as rag_diagnostics_router
+from app.rag.ingestion import TranscriptIngestionWorker
 from app.rag.router import router as rag_router
 
 logger = structlog.get_logger("main")
@@ -207,6 +211,21 @@ async def lifespan(app: FastAPI):
 
     await cache.start()
 
+    # Load the English_Lexicon once per process before the first request
+    # (Req 2.1, 2.3). The loader reads a bundled artifact with no network
+    # access (Req 2.2) and, on any failure, returns an inactive lexicon after
+    # logging one `lexicon.load_failed` so the service still starts (Req 2.11).
+    # Held process-global on app.state alongside the dataset cache so the
+    # correction engine can access it (design §3). Read in a worker thread to
+    # keep the event loop free during the file read.
+    english_lexicon = await asyncio.to_thread(load_lexicon)
+    app.state.english_lexicon = english_lexicon
+    logger.info(
+        "lexicon.loaded",
+        loaded=english_lexicon.loaded,
+        form_count=len(english_lexicon),
+    )
+
     # Construct BedrockClient if LLM refinement is enabled (for correction pipeline)
     bedrock_client: BedrockClient | None = None
     if settings.llm_enabled:
@@ -228,6 +247,15 @@ async def lifespan(app: FastAPI):
             logger.error("rag.clients.init_failed", exc_info=True)
     app.state.chat_model = chat_model
     app.state.embeddings = embeddings
+
+    # Start the RAG ingestion worker now rather than on the first /rag/ingest,
+    # so its reconciliation sweep runs at startup: anything queued in memory
+    # when the previous process stopped, or never triggered at all, is found
+    # in the database and re-queued. Without embeddings it still indexes text
+    # for keyword search; the sweep then skips chunks that only lack vectors.
+    ingestion_worker = TranscriptIngestionWorker(session_factory, settings, embeddings=embeddings)
+    ingestion_worker.start()
+    app.state.ingestion_worker = ingestion_worker
 
     # Construct CorrectionHistoryWriter if history is enabled (Req 13.9, 17.3)
     history_writer: CorrectionHistoryWriter | None = None
@@ -277,8 +305,9 @@ async def lifespan(app: FastAPI):
                         total_chunks=total,
                         unindexed_chunks=unindexed,
                         coverage_pct=round(100 - pct, 1),
-                        action="POST /rag/reindex to fix. "
-                        "Vector search is blind to these chunks.",
+                        action="The reconciliation sweep re-queues these "
+                        "(POST /rag/reindex to force). "
+                        "Vector search is blind to them until re-embedded.",
                     )
                 else:
                     logger.info(
@@ -334,5 +363,6 @@ app.add_middleware(RequestLoggingMiddleware)
 app.include_router(postprocess_router)
 app.include_router(health_router)
 app.include_router(datasets_router)
+app.include_router(evidence_router)
 app.include_router(rag_router)
 app.include_router(rag_diagnostics_router)

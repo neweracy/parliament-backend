@@ -427,3 +427,116 @@ describe('Transcription cache — backward compat (no cache)', () => {
     assert.equal(res.body.progress, 55);
   });
 });
+
+describe('completeTranscription — writes only the transcript row (evidence via metadata)', () => {
+  afterEach(() => {
+    const { jobs, jobRedisRefs } = require('../../routes/transcription');
+    jobs.clear();
+    jobRedisRefs.clear();
+  });
+
+  // transcript-evidence-navigation task 6.2 / Req 8.5, 8.6:
+  // completeTranscription persists only the `transcript` row and fires
+  // ingestion — it must NOT write any correction table. The corrections array
+  // and raw ASR words ride on the transcript row's own `metadata` column so the
+  // Python service (sole writer of correction_evidence) can build evidence.
+  it('inserts corrections + raw_words into the transcript row metadata column and writes no correction table', async () => {
+    const { completeTranscription, jobs } = require('../../routes/transcription');
+
+    jobs.set('evidence-job', {
+      status: 'processing',
+      progress: 80,
+      recordId: '20',
+      sittingId: '2',
+      error: null,
+    });
+
+    const db = createMockDb([
+      { rows: [{ next_version: 3 }] }, // SELECT max version
+      { rows: [{ id: 77 }] },          // INSERT transcript RETURNING id
+      { rows: [] },                     // UPDATE record
+    ]);
+
+    const corrections = [
+      { original: 'accra', corrected: 'Accra', strategy: 'exact', confidence: 0.9, stage: 'rule', outcome: 'applied' },
+    ];
+    const rawWords = [
+      { word: 'accra', start: 0.0, end: 0.5, speaker: '0' },
+    ];
+
+    await completeTranscription('evidence-job', '20', {
+      rawText: 'accra',
+      correctedText: 'Accra',
+      entities: [],
+      wordTimings: [{ word: 'Accra', start: 0.0, end: 0.5 }],
+      corrections,
+      rawWords,
+      durationS: null,
+    }, db, null);
+
+    const calls = db.getCalls();
+
+    // Exactly one INSERT, and it targets the `transcript` table only.
+    const insertCalls = calls.filter(c => /INSERT INTO/i.test(c.text));
+    assert.equal(insertCalls.length, 1, 'exactly one INSERT should be issued');
+    assert.match(insertCalls[0].text, /INSERT INTO transcript\b/i, 'INSERT targets the transcript table');
+
+    // No write touches any correction table (Req 8.5/8.6 — Python-only).
+    for (const c of calls) {
+      assert.doesNotMatch(
+        c.text,
+        /correction_evidence|correction_history/i,
+        'completeTranscription must not write any correction table',
+      );
+    }
+
+    // The transcript INSERT carries a `metadata` column, and its value is the
+    // JSON-encoded corrections + raw_words the Python side reads back.
+    assert.match(insertCalls[0].text, /\bmetadata\b/, 'transcript INSERT includes the metadata column');
+    const metadataParam = insertCalls[0].params.find(
+      p => typeof p === 'string' && p.includes('"corrections"') && p.includes('"raw_words"'),
+    );
+    assert.ok(metadataParam, 'a metadata parameter with corrections + raw_words is passed');
+    const parsed = JSON.parse(metadataParam);
+    assert.deepEqual(parsed.corrections, corrections, 'corrections round-trip into metadata');
+    assert.deepEqual(parsed.raw_words, rawWords, 'raw ASR words round-trip into metadata');
+  });
+
+  // Backward compatibility: a result without corrections/rawWords still inserts
+  // the row, with empty (Baseline "no evidence") metadata arrays.
+  it('defaults metadata corrections/raw_words to empty arrays when result omits them', async () => {
+    const { completeTranscription, jobs } = require('../../routes/transcription');
+
+    jobs.set('baseline-job', {
+      status: 'processing',
+      progress: 80,
+      recordId: '21',
+      sittingId: '2',
+      error: null,
+    });
+
+    const db = createMockDb([
+      { rows: [{ next_version: 1 }] }, // SELECT max version
+      { rows: [{ id: 78 }] },          // INSERT transcript RETURNING id
+      { rows: [] },                     // UPDATE record
+    ]);
+
+    await completeTranscription('baseline-job', '21', {
+      rawText: 'Raw',
+      correctedText: 'Corrected',
+      entities: [],
+      wordTimings: [],
+      durationS: null,
+    }, db, null);
+
+    const insertCall = db.getCalls().find(c => /INSERT INTO transcript\b/i.test(c.text));
+    assert.ok(insertCall, 'transcript INSERT issued');
+    const metadataParam = insertCall.params.find(
+      p => typeof p === 'string' && p.includes('"corrections"'),
+    );
+    assert.ok(metadataParam, 'metadata parameter present');
+    const parsed = JSON.parse(metadataParam);
+    assert.deepEqual(parsed.corrections, [], 'corrections default to empty array');
+    assert.deepEqual(parsed.raw_words, [], 'raw_words default to empty array');
+  });
+});

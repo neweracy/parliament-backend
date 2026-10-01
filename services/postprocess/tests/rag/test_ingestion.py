@@ -226,3 +226,394 @@ class TestQueueOverflow:
         worker.enqueue(1)
         worker.enqueue(2)
         assert worker.dropped_count == 0
+
+    def test_same_transcript_is_queued_once(self, worker):
+        """A save trigger and a reindex for the same id must not ingest it twice."""
+        worker.enqueue(7)
+        worker.enqueue(7)
+        worker.enqueue(8)
+
+        assert worker._queue.qsize() == 2
+        assert worker.dropped_count == 0
+
+    @pytest.mark.asyncio
+    async def test_transcript_can_be_requeued_once_picked_up(self, worker, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        ingest = AsyncMock()
+        monkeypatch.setattr(worker, "ingest", ingest)
+        worker.enqueue(7)
+        await worker._drain_remaining()
+
+        worker.enqueue(7)
+
+        ingest.assert_awaited_once_with(7)
+        assert worker._queue.qsize() == 1
+
+
+class TestPersistCorrectionEvidence:
+    """Task 4.1 wiring: build + persist Correction_Evidence at ingestion time.
+
+    The worker persists evidence only from a durable ``metadata['corrections']``
+    payload keyed to (transcript_id, version); when that payload is absent it
+    writes nothing (Baseline no-evidence, Req 10.5) rather than fabricating
+    changes from corrected-word flags. Bedrock/AWS mocked; no network call.
+    """
+
+    @pytest.mark.asyncio
+    async def test_persists_evidence_from_metadata_corrections(self, worker, monkeypatch):
+        """A durable corrections payload is grouped by origin and persisted."""
+        import app.rag.ingestion as ingestion_mod
+
+        captured = {}
+
+        async def _fake_persist(session_factory, evidence):
+            captured["evidence"] = evidence
+            return len(evidence.entries)
+
+        monkeypatch.setattr(ingestion_mod, "persist_correction_evidence", _fake_persist)
+
+        raw_words = [
+            {"word": "Akra", "start": 0.0, "end": 0.5},
+            {"word": "in", "start": 0.6, "end": 0.7},
+            {"word": "twenty", "start": 0.8, "end": 1.0},
+        ]
+        transcript_data = {
+            "corrected_text": "Accra in 2020",
+            "word_timings": raw_words,
+            "entities": [],
+            "version": 4,
+            "raw_text": "Akra in twenty",
+            "metadata": {
+                "raw_words": raw_words,
+                "corrections": [
+                    {
+                        "original": "Akra",
+                        "corrected": "Accra",
+                        "strategy": "fuzzy",
+                        "confidence": 0.92,
+                        "entity_kind": "location",
+                        "entity_type": "city",
+                        "stage": "rule",
+                        "outcome": "applied",
+                    },
+                    {
+                        "original": "twenty",
+                        "corrected": "2020",
+                        "confidence": 1.0,
+                        "stage": "year",
+                        "outcome": "applied",
+                    },
+                ],
+                "dataset_version": "ds-1",
+                "correlation_id": "corr-9",
+            },
+        }
+
+        await worker._persist_correction_evidence(101, transcript_data)
+
+        evidence = captured["evidence"]
+        assert evidence.transcript_id == 101
+        assert evidence.version == 4
+        assert len(evidence.entries) == 2
+        stages = {e.correction_stage.value for e in evidence.entries}
+        assert stages == {"rule", "year"}
+
+    @pytest.mark.asyncio
+    async def test_no_corrections_payload_persists_nothing(self, worker, monkeypatch):
+        """Absent a corrections payload, no evidence is fabricated or written."""
+        import app.rag.ingestion as ingestion_mod
+
+        called = {"count": 0}
+
+        async def _fake_persist(session_factory, evidence):
+            called["count"] += 1
+            return 0
+
+        monkeypatch.setattr(ingestion_mod, "persist_correction_evidence", _fake_persist)
+
+        transcript_data = {
+            "corrected_text": "Accra",
+            "word_timings": [{"word": "Accra", "start": 0.0, "end": 0.5}],
+            "entities": [],
+            "version": 1,
+            "raw_text": "Akra",
+            "metadata": {},  # no corrections payload
+        }
+
+        await worker._persist_correction_evidence(202, transcript_data)
+
+        assert called["count"] == 0
+
+    def test_group_correction_records_routes_by_stage_and_outcome(self, worker):
+        """vetoed -> vetoed; year/llm by stage; unknown/missing -> applied."""
+        raw = [
+            {"original": "a", "corrected": "A", "stage": "rule", "outcome": "applied"},
+            {"original": "b", "corrected": "B", "stage": "year", "outcome": "applied"},
+            {"original": "c", "corrected": "C", "stage": "llm", "outcome": "applied"},
+            {"original": "d", "corrected": "D", "stage": "llm", "outcome": "vetoed"},
+            {"original": "e", "corrected": "E"},  # missing stage -> applied
+        ]
+        applied, year, llm, vetoed = worker._group_correction_records(raw)
+        assert [r.original for r in applied] == ["a", "e"]
+        assert [r.original for r in year] == ["b"]
+        assert [r.original for r in llm] == ["c"]
+        assert [r.original for r in vetoed] == ["d"]
+
+    def test_group_correction_records_skips_malformed(self, worker):
+        """A dict lacking original/corrected text is skipped, not persisted."""
+        raw = [
+            {"original": "ok", "corrected": "OK"},
+            {"corrected": "no original"},
+            "not a dict",
+            {"original": 123, "corrected": "bad type"},
+        ]
+        applied, year, llm, vetoed = worker._group_correction_records(raw)
+        assert [r.original for r in applied] == ["ok"]
+        assert year == [] and llm == [] and vetoed == []
+
+
+# ---------------------------------------------------------------------------
+# Indexed text comes from the saved transcript, including editor saves
+# ---------------------------------------------------------------------------
+
+
+def _timed(words: list[str], speaker: str = "A", start: float = 0.0) -> list[dict]:
+    """Word timings 0.5s apart, all one speaker."""
+    return [
+        {"word": w, "start": start + i * 0.5, "end": start + i * 0.5 + 0.4, "speaker": speaker}
+        for i, w in enumerate(words)
+    ]
+
+
+class TestAlignTextToWords:
+    """The saved text is what gets indexed; timings only supply speaker/time."""
+
+    def test_matching_text_keeps_each_words_timing(self, worker):
+        words = _timed(["the", "house", "adjourned"])
+        aligned = worker._align_text_to_words("The house adjourned.", words)
+
+        assert [w["word"] for w in aligned] == ["The", "house", "adjourned."]
+        assert [w["start"] for w in aligned] == [0.0, 0.5, 1.0]
+        assert all(w["speaker"] == "A" for w in aligned)
+
+    def test_edited_word_is_indexed_with_the_replaced_words_timing(self, worker):
+        words = _timed(["the", "minister", "of", "finanse", "spoke"])
+        aligned = worker._align_text_to_words("the minister of finance spoke", words)
+
+        assert [w["word"] for w in aligned] == ["the", "minister", "of", "finance", "spoke"]
+        assert aligned[3]["start"] == words[3]["start"]
+
+    def test_text_added_in_the_editor_is_indexed(self, worker):
+        words = _timed(["motion", "carried"])
+        aligned = worker._align_text_to_words("motion carried unanimously", words)
+
+        assert [w["word"] for w in aligned] == ["motion", "carried", "unanimously"]
+        # Anchored to the previous word's end: in the same turn, never back in time.
+        assert aligned[2]["start"] == aligned[2]["end"] == words[1]["end"]
+        assert aligned[2]["speaker"] == "A"
+
+    def test_text_added_before_the_first_word_anchors_to_its_start(self, worker):
+        words = _timed(["order", "order"], start=3.0)
+        aligned = worker._align_text_to_words("Speaker: order order", words)
+
+        assert aligned[0]["word"] == "Speaker:"
+        assert aligned[0]["start"] == aligned[0]["end"] == 3.0
+
+    def test_text_removed_in_the_editor_is_not_indexed(self, worker):
+        words = _timed(["um", "the", "bill", "uh", "passed"])
+        aligned = worker._align_text_to_words("the bill passed", words)
+
+        assert [w["word"] for w in aligned] == ["the", "bill", "passed"]
+
+    def test_speaker_turns_survive_an_edit(self, worker):
+        words = _timed(["question", "time"], speaker="SPEAKER") + _timed(
+            ["thank", "you"], speaker="MP", start=5.0
+        )
+        aligned = worker._align_text_to_words("Question time begins. Thank you", words)
+
+        assert [w["speaker"] for w in aligned] == ["SPEAKER", "SPEAKER", "SPEAKER", "MP", "MP"]
+
+
+class TestChunkTranscriptUsesSavedText:
+    def test_editor_save_with_stale_timings_indexes_the_edited_text(self, worker):
+        """Regression: an editor save keeps the previous version's word timings.
+
+        Chunks used to be built from those timed words, so the index kept the
+        pre-edit text and the editor's correction never reached search.
+        """
+        stale_words = _timed(["the", "honourable", "member", "for", "akra", "central"])
+        edited_text = "The Honourable Member for Accra Central"
+
+        chunks = worker.chunk_transcript(edited_text, stale_words, [])
+
+        indexed = " ".join(chunk.text for chunk in chunks)
+        assert "Accra" in indexed
+        assert "akra" not in indexed
+        assert chunks[0].start_s == 0.0
+        assert chunks[0].speaker == "A"
+
+    def test_postprocessed_text_punctuation_is_indexed(self, worker):
+        words = _timed(["mr", "speaker", "i", "rise"])
+        chunks = worker.chunk_transcript("Mr. Speaker, I rise.", words, [])
+
+        assert chunks[0].text == "Mr. Speaker, I rise."
+
+
+def _transcript_data(*, is_latest: bool, version: int = 2) -> dict:
+    return {
+        "corrected_text": "The House adjourned",
+        "word_timings": _timed(["the", "house", "adjourned"]),
+        "entities": [],
+        "version": version,
+        "raw_text": "the house adjourned",
+        "metadata": {},
+        "is_latest": is_latest,
+    }
+
+
+class TestIngestOnlyIndexesTheLatestVersion:
+    @pytest.mark.asyncio
+    async def test_stale_version_is_not_embedded_or_indexed(self, worker, monkeypatch):
+        """A late ingest of an older save must not replace the newer version's chunks."""
+        from unittest.mock import AsyncMock
+
+        monkeypatch.setattr(
+            worker, "_load_transcript", AsyncMock(return_value=_transcript_data(is_latest=False))
+        )
+        embed = AsyncMock()
+        replace = AsyncMock()
+        evidence = AsyncMock()
+        monkeypatch.setattr(worker, "embed_chunks", embed)
+        monkeypatch.setattr(worker, "_replace_chunks", replace)
+        monkeypatch.setattr(worker, "_persist_correction_evidence", evidence)
+
+        await worker.ingest(41)
+
+        embed.assert_not_awaited()
+        replace.assert_not_awaited()
+        # Evidence for that version is still recorded.
+        evidence.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_latest_version_replaces_the_records_chunks(self, worker, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        monkeypatch.setattr(
+            worker, "_load_transcript", AsyncMock(return_value=_transcript_data(is_latest=True))
+        )
+        monkeypatch.setattr(worker, "embed_chunks", AsyncMock(return_value=[[0.1] * 1024]))
+        replace = AsyncMock(return_value=True)
+        monkeypatch.setattr(worker, "_replace_chunks", replace)
+        monkeypatch.setattr(worker, "_persist_correction_evidence", AsyncMock())
+
+        await worker.ingest(42)
+
+        replace.assert_awaited_once()
+        transcript_id, chunks, _embeddings = replace.await_args.args
+        assert transcript_id == 42
+        assert chunks[0].text == "The House adjourned"
+
+
+def _scripted_session_factory(results: list):
+    """Session factory whose execute() returns `results` in order, recording SQL."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=results)
+    begin_cm = AsyncMock()
+    begin_cm.__aenter__ = AsyncMock(return_value=None)
+    begin_cm.__aexit__ = AsyncMock(return_value=None)
+    session.begin = MagicMock(return_value=begin_cm)
+
+    context_manager = AsyncMock()
+    context_manager.__aenter__ = AsyncMock(return_value=session)
+    context_manager.__aexit__ = AsyncMock(return_value=None)
+    factory = MagicMock(return_value=context_manager)
+    factory.session = session
+    return factory
+
+
+def _executed_sql(factory) -> list[str]:
+    return [str(call.args[0]) for call in factory.session.execute.call_args_list]
+
+
+class TestReplaceChunks:
+    def _chunks(self):
+        from app.rag.ingestion import Chunk
+
+        return [Chunk(text="The House adjourned", start_s=0.0, end_s=1.4, speaker="A")]
+
+    @pytest.mark.asyncio
+    async def test_newer_version_wins_under_the_record_lock(self, mock_settings, mock_embeddings):
+        """Re-checked inside the locked transaction: nothing is deleted or written."""
+        from unittest.mock import MagicMock
+
+        factory = _scripted_session_factory(
+            [
+                MagicMock(fetchone=lambda: (7, 2)),  # this transcript: record 7, v2
+                MagicMock(),  # pg_advisory_xact_lock
+                MagicMock(scalar=lambda: 3),  # latest version is v3
+            ]
+        )
+        worker = TranscriptIngestionWorker(factory, mock_settings, embeddings=mock_embeddings)
+
+        replaced = await worker._replace_chunks(41, self._chunks(), [[0.1] * 1024])
+
+        assert replaced is False
+        sql = _executed_sql(factory)
+        assert "pg_advisory_xact_lock" in sql[1]
+        assert not any("DELETE FROM transcript_chunk" in s for s in sql)
+        assert not any("INSERT INTO transcript_chunk" in s for s in sql)
+
+    @pytest.mark.asyncio
+    async def test_latest_version_deletes_then_inserts_in_one_transaction(
+        self, mock_settings, mock_embeddings
+    ):
+        from unittest.mock import MagicMock
+
+        factory = _scripted_session_factory(
+            [
+                MagicMock(fetchone=lambda: (7, 3)),
+                MagicMock(),
+                MagicMock(scalar=lambda: 3),
+                MagicMock(),  # DELETE
+                MagicMock(),  # INSERT
+            ]
+        )
+        worker = TranscriptIngestionWorker(factory, mock_settings, embeddings=mock_embeddings)
+
+        replaced = await worker._replace_chunks(42, self._chunks(), [[0.1] * 1024])
+
+        assert replaced is True
+        sql = _executed_sql(factory)
+        assert "DELETE FROM transcript_chunk" in sql[3]
+        assert "INSERT INTO transcript_chunk" in sql[4]
+        # Lock, delete, and insert share the single session.begin() transaction.
+        factory.session.begin.assert_called_once()
+        delete_params = factory.session.execute.call_args_list[3].args[1]
+        assert delete_params == {"record_id": 7}
+
+    @pytest.mark.asyncio
+    async def test_failure_raises_transient_so_the_write_is_retried(
+        self, mock_settings, mock_embeddings
+    ):
+        """A rolled-back write keeps the previous chunks, and must not be confused
+        with "superseded" (False), which is never retried."""
+        from unittest.mock import MagicMock
+
+        from app.rag.ingestion import IngestTransientError
+
+        factory = _scripted_session_factory(
+            [
+                MagicMock(fetchone=lambda: (7, 3)),
+                MagicMock(),
+                MagicMock(scalar=lambda: 3),
+                MagicMock(),
+                RuntimeError("insert failed"),
+            ]
+        )
+        worker = TranscriptIngestionWorker(factory, mock_settings, embeddings=mock_embeddings)
+
+        with pytest.raises(IngestTransientError):
+            await worker._replace_chunks(42, self._chunks(), [[0.1] * 1024])

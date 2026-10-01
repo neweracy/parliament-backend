@@ -202,6 +202,50 @@ class TestBuildIndexWriteOrder:
 # ---------------------------------------------------------------------------
 
 
+class TestPhoneticFanout:
+    """phonetic_fanout is the distinct-canonical count per Phonetic_Key (Req 3)."""
+
+    def test_singleton_key_has_fanout_one(self):
+        records = [
+            _make_record("Kumasi", entity_type=EntityType.city, source="regions"),
+        ]
+        index = build_index(records)
+        key = _phonetic_key("Kumasi")
+        assert index.phonetic_fanout[key] == 1
+
+    def test_fanout_counts_distinct_canonicals_sharing_a_key(self):
+        # Two distinct canonicals whose phonetic keys collide should produce a
+        # fanout of 2 for that shared key.
+        records = [
+            _make_record("Sege", entity_type=EntityType.city, source="regions"),
+            _make_record("Segge", entity_type=EntityType.city, source="regions"),
+        ]
+        index = build_index(records)
+        key = _phonetic_key("Sege")
+        assert _phonetic_key("Segge") == key  # keys collide by construction
+        assert index.phonetic_fanout[key] == 2
+
+    def test_fanout_matches_phonetic_map_length_for_every_key(self):
+        records = [
+            _make_record("Kumasi", entity_type=EntityType.city, source="regions"),
+            _make_record("Accra", entity_type=EntityType.city, source="regions"),
+            _make_record(
+                "Ningo-Prampram",
+                entity_type=EntityType.supplementary,
+                source="supplementary_locations",
+                aliases=["Ningoprampram"],
+            ),
+        ]
+        index = build_index(records)
+        assert set(index.phonetic_fanout) == set(index.phonetic_map)
+        for key, canonicals in index.phonetic_map.items():
+            assert index.phonetic_fanout[key] == len(canonicals)
+
+    def test_empty_records_produce_empty_fanout(self):
+        index = build_index([])
+        assert index.phonetic_fanout == {}
+
+
 class TestPhoneticMapScope:
     """phonetic_map indexes canonicals + supplementary aliases only."""
 

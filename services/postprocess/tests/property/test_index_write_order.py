@@ -36,7 +36,6 @@ from hypothesis import strategies as st
 from app.datasets.index import build_index
 from app.models.entities import EntityKind, EntityRecord, EntityType
 
-
 # ---------------------------------------------------------------------------
 # Strategies
 # ---------------------------------------------------------------------------

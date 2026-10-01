@@ -33,6 +33,10 @@ def test_create_chat_model(mock_settings):
     # llm_chunk_timeout_ms (15s), which was too short for cited RAG answers.
     assert model.config.read_timeout == mock_settings.rag_model_timeout_s
     assert model.config.connect_timeout == 10
+    # Deterministic sampling: identical questions must get identical answers
+    # and the agent must make the same tool choice (regression for
+    # inconsistent "recent sittings" answers).
+    assert model.temperature == 0
 
 
 def test_create_embeddings(mock_settings):

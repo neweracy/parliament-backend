@@ -14,6 +14,7 @@ Requirements: 8.1, 9.1, 7.7
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import date
 
@@ -21,12 +22,11 @@ import structlog
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import text
 
 from app.deps import verify_service_token
 from app.rag.agent import HansardChatAgent
 from app.rag.answerer import GroundedAnsweringChain
-from app.rag.ingestion import TranscriptIngestionWorker
+from app.rag.ingestion import TranscriptIngestionWorker, find_index_gaps
 from app.rag.recommendations import (
     MAX_SEARCH_RECOMMENDATION_COUNT,
     TARGET_SEARCH_RECOMMENDATION_COUNT,
@@ -153,6 +153,40 @@ def _has_summary_intent(question: str) -> bool:
                 return True
 
     return False
+
+
+# A registry noun: the question is about sittings/records as items, not about
+# what was said. Word-bounded so "recorded" or "sessional" do not count.
+_REGISTRY_NOUN_RE = re.compile(r"\b(sittings?|records?|sessions?|uploads?|uploaded)\b")
+
+# A listing / recency / counting signal. Paired with a registry noun it marks a
+# question that only the registry can answer completely.
+_REGISTRY_SIGNAL_RE = re.compile(
+    r"\b(recent|recently|latest|newest|new|last|list|all|every|how many|which|"
+    r"what are the|show me|added|uploaded)\b"
+)
+
+
+def _has_registry_intent(question: str) -> bool:
+    """Heuristic: is this question asking to list, count, or find recent registry items?
+
+    "What are the recent records or sittings?" passes `_is_simple_search_question`,
+    so without this check it took the toolless fast path: a vector/full-text
+    search over transcript chunks. That search cannot list the registry — it
+    never sees sittings or records without a transcript, it ranks passages by
+    wording rather than by date, and the fast-path prompt carried no dates. The
+    same question asked as a follow-up turn took the agent path and its
+    `find_recent_activity` SQL tool instead, so the answer changed with turn
+    position. Routing these questions to the agent makes the registry tool
+    reachable on every turn.
+
+    Criteria (case-insensitive): a registry noun (sitting, record, session,
+    upload) AND a listing/recency/counting signal (recent, latest, new, last,
+    list, all, every, how many, which, "what are the", "show me", added,
+    uploaded).
+    """
+    lower = question.lower()
+    return bool(_REGISTRY_NOUN_RE.search(lower) and _REGISTRY_SIGNAL_RE.search(lower))
 
 
 router = APIRouter(prefix="/rag", dependencies=[Depends(verify_service_token)])
@@ -560,7 +594,14 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
     # summarization tool only exists there.
     # Decided once so the branch, both path logs, and the metrics log agree.
     summary_intent = _has_summary_intent(body.question)
-    use_fast_path = _is_simple_search_question(body.question, has_history) and not summary_intent
+    # Listing/recency questions about sittings and records need the registry
+    # tool, which also lives only on the agent.
+    registry_intent = _has_registry_intent(body.question)
+    use_fast_path = (
+        _is_simple_search_question(body.question, has_history)
+        and not summary_intent
+        and not registry_intent
+    )
 
     if use_fast_path:
         logger.info(
@@ -584,6 +625,7 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
             question_preview=body.question[:80],
             has_history=has_history,
             summary_intent=summary_intent,
+            registry_intent=registry_intent,
         )
         agent = HansardChatAgent(
             chat_model, retriever, settings, session_factory=session_factory
@@ -742,34 +784,26 @@ class ReindexResponse(BaseModel):
 
 @router.post("/reindex", status_code=202, response_model=ReindexResponse)
 async def rag_reindex(body: ReindexRequest, request: Request) -> ReindexResponse:
-    """Find transcripts with unindexed chunks and re-queue them for ingestion.
+    """Find transcripts missing from the search index and re-queue them.
 
-    Identifies transcript_chunk rows where embedding IS NULL (meaning the
-    embedding failed during initial ingestion — typically because AWS
-    credentials were unavailable) and enqueues the owning transcripts for
-    re-ingestion.
+    Covers two gaps: transcript_chunk rows where embedding IS NULL (the embedding
+    failed during ingestion — typically AWS credentials were unavailable), and a
+    record's latest saved transcript version that has no chunks at all (its
+    ingest never ran or was dropped). Both are enqueued for re-ingestion, so
+    every saved transcript — postprocessed or edited — ends up searchable.
 
-    This is idempotent: re-ingestion deletes existing chunks for a transcript
-    before storing new ones, so it is safe to call repeatedly.
+    This is idempotent: re-ingestion replaces the record's chunks atomically and
+    skips versions that are no longer the latest, so it is safe to call repeatedly.
     """
     session_factory = request.app.state.session_factory
     settings = request.app.state.settings
 
-    # Find transcripts that have chunks without embeddings
+    # Same gap query as the worker's periodic reconciliation sweep: the
+    # latest version of each record that has no chunks, or whose chunks lack
+    # an embedding. This endpoint runs it on demand with a caller-set limit.
     try:
         async with session_factory() as session:
-            result = await session.execute(
-                text(
-                    "SELECT DISTINCT tc.transcript_id, COUNT(*) AS unindexed_count "
-                    "FROM transcript_chunk tc "
-                    "WHERE tc.embedding IS NULL "
-                    "GROUP BY tc.transcript_id "
-                    "ORDER BY unindexed_count DESC "
-                    "LIMIT :limit"
-                ),
-                {"limit": body.limit},
-            )
-            rows = result.fetchall()
+            rows = await find_index_gaps(session, body.limit)
     except Exception:
         logger.error("rag.reindex.query_failed", exc_info=True)
         return ReindexResponse(
@@ -780,7 +814,10 @@ async def rag_reindex(body: ReindexRequest, request: Request) -> ReindexResponse
     if not rows:
         return ReindexResponse(
             status="complete",
-            message="No transcripts with unindexed chunks found — all embeddings are present",
+            message=(
+                "No gaps found — every latest transcript version is indexed "
+                "and all embeddings are present"
+            ),
         )
 
     transcript_ids = [row[0] for row in rows]

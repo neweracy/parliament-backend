@@ -15,6 +15,7 @@ from app.rag.parsing import (
     split_recommendations,
     strip_citation_markers,
 )
+from app.rag.retriever import RetrievedChunk
 
 
 class TestParseCitations:
@@ -80,6 +81,47 @@ class TestBuildMessages:
     def test_ungrounded_messages(self):
         messages = GroundedAnsweringChain._build_messages("Hello!", [], grounded=False)
         assert "NO SOURCE CHUNKS AVAILABLE" in messages[1].content
+
+    def test_grounded_messages_carry_sitting_record_and_date(self):
+        """Regression: the fast path dropped provenance the agent path showed.
+
+        Without sitting/record/date in the prompt, the fast path could not say
+        which sitting or when a passage came from, so date/recency questions
+        answered differently depending on which path they took.
+        """
+        chunk = RetrievedChunk(
+            chunk_id=7,
+            text="The House adopted the motion.",
+            relevance_score=0.5,
+            transcript_id=3,
+            speaker="Hon. Mensah",
+            start_s=1.0,
+            end_s=4.0,
+            sitting_title="Second Sitting",
+            record_title="Question Time",
+            date="2026-08-17",
+        )
+        content = GroundedAnsweringChain._build_messages("q", [chunk], grounded=True)[1].content
+
+        assert "- Sitting: Second Sitting" in content
+        assert "- Record: Question Time" in content
+        assert "- Date: 2026-08-17" in content
+
+    def test_missing_provenance_is_omitted_not_placeholdered(self):
+        chunk = RetrievedChunk(
+            chunk_id=8,
+            text="Text.",
+            relevance_score=0.5,
+            transcript_id=3,
+            speaker=None,
+            start_s=None,
+            end_s=None,
+        )
+        content = GroundedAnsweringChain._build_messages("q", [chunk], grounded=True)[1].content
+
+        assert "- Sitting:" not in content
+        assert "- Record:" not in content
+        assert "- Date:" not in content
 
 
 class TestAnswer:

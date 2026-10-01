@@ -66,6 +66,7 @@ async def postprocess(
         settings=getattr(request.app.state, "settings", None),
         history_writer=getattr(request.app.state, "history_writer", None),
         session_factory=getattr(request.app.state, "session_factory", None),
+        lexicon=getattr(request.app.state, "english_lexicon", None),
     )
 
     # Serialize with by_alias=True, exclude_none=True

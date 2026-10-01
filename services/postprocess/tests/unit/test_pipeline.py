@@ -18,6 +18,7 @@ import pytest
 from app.datasets.cache import DatasetCache, DatasetSnapshot
 from app.datasets.index import MatchIndex
 from app.models.request import CorrectionOptions, CorrectionRequest, Word
+from app.models.response import Metadata
 from app.pipeline import _build_entity_summary, _run_rule_stages, run_pipeline
 
 
@@ -327,3 +328,251 @@ class TestMetadataCounterOmission:
 
         response_dict = response.model_dump(by_alias=True, exclude_none=True)
         assert response_dict["metadata"]["correlationId"] == "abc-123-def"
+
+
+# ---------------------------------------------------------------------------
+# 6. Gate-rejection total metadata counter (task 6.1, Req 13.6, 14.4, 14.11)
+# ---------------------------------------------------------------------------
+
+
+class TestGateRejectionMetadata:
+    """The single gate-rejection total is reported when > 0 and omitted at 0.
+
+    Req 13.6: report the total as a single counter across every gate value when
+    the count is greater than zero. Req 14.4: omit the counter when zero. Req
+    14.11: the field is additive under the ``gateRejections`` camelCase alias.
+    """
+
+    def test_metadata_field_serializes_under_alias_when_positive(self):
+        """A positive total serializes under the gateRejections alias."""
+        meta = Metadata(gate_rejections=3)
+        dumped = meta.model_dump(by_alias=True, exclude_none=True)
+        assert dumped["gateRejections"] == 3
+
+    def test_metadata_field_omitted_when_none(self):
+        """None (the default, used for a zero total) is omitted from output."""
+        meta = Metadata(gate_rejections=None)
+        dumped = meta.model_dump(by_alias=True, exclude_none=True)
+        assert "gateRejections" not in dumped
+        # No snake_case leakage either.
+        assert "gate_rejections" not in dumped
+
+    @pytest.mark.asyncio
+    async def test_pipeline_reports_total_when_rejections_occur(self):
+        """When gate observability reports a positive total the metadata carries it."""
+        request = CorrectionRequest(
+            transcript="hello world",
+            words=[Word(word="hello"), Word(word="world")],
+            correlation_id="corr-gate",
+        )
+        snapshot = _make_snapshot()
+        cache = _make_cache(snapshot=snapshot)
+
+        # Force a positive gate-rejection total without changing correction output.
+        with patch("app.pipeline._emit_gate_observability", return_value=4):
+            response = await run_pipeline(request, cache)
+
+        assert response.metadata.gate_rejections == 4
+        response_dict = response.model_dump(by_alias=True, exclude_none=True)
+        assert response_dict["metadata"]["gateRejections"] == 4
+
+    @pytest.mark.asyncio
+    async def test_pipeline_omits_total_when_zero_rejections(self):
+        """Baseline path (zero rejections) omits the field entirely (Req 14.4)."""
+        request = CorrectionRequest(
+            transcript="nothing to correct here",
+            words=[],
+            correlation_id="corr-baseline",
+        )
+        snapshot = _make_snapshot()
+        cache = _make_cache(snapshot=snapshot)
+
+        # Default flag-off path yields a total of zero; assert it is omitted.
+        response = await run_pipeline(request, cache)
+
+        assert response.metadata.gate_rejections is None
+        response_dict = response.model_dump(by_alias=True, exclude_none=True)
+        assert "gateRejections" not in response_dict["metadata"]
+        assert "gate_rejections" not in response_dict["metadata"]
+
+
+# ---------------------------------------------------------------------------
+# Provider profile threading at the pipeline boundary (task 2.12.3;
+# Req 1.5, 2.6, 2.7, 12.9, 14.1, 14.10)
+# ---------------------------------------------------------------------------
+
+from app.config import Settings  # noqa: E402
+from app.correction.provider_profiles import default_profile  # noqa: E402
+
+
+def _capture_gate_context(request: CorrectionRequest, settings: Settings):
+    """Run _run_rule_stages capturing the GateContext handed to the engine.
+
+    Patches correct_text (the first engine call) to record its gate_context
+    kwarg, so tests can assert what provider/profile the boundary resolved.
+    """
+    captured = {}
+
+    real_snapshot = _make_snapshot()
+
+    def _fake_correct_text(*args, **kwargs):
+        captured["gate_context"] = kwargs.get("gate_context")
+        from app.correction.engine import TextCorrectionResult
+
+        return TextCorrectionResult(text=request.transcript, corrections=[], entities_found=[])
+
+    def _fake_correct_words(*args, **kwargs):
+        from app.correction.engine import WordCorrectionResult
+
+        return WordCorrectionResult(words=[], corrections=[], entities_found=[])
+
+    with (
+        patch("app.pipeline.correct_text", _fake_correct_text),
+        patch("app.pipeline.correct_words", _fake_correct_words),
+    ):
+        _run_rule_stages(request, real_snapshot, settings, None)
+
+    return captured["gate_context"]
+
+
+class TestPipelineProviderProfileThreading:
+    """The pipeline boundary threads request.options.provider and its resolved
+    profile onto the GateContext (task 2.12.3)."""
+
+    def test_flag_off_resolves_deepgram_for_khaya(self):
+        # Req 12.9: with provider_profiles_enabled off (default), a khaya request
+        # still resolves the deepgram profile — baseline-equivalent.
+        settings = Settings(service_token="x", database_url="x")
+        assert settings.provider_profiles_enabled is False
+        request = CorrectionRequest(
+            transcript="hello",
+            words=[Word(word="hello")],
+            options=CorrectionOptions(provider="khaya"),
+        )
+        ctx = _capture_gate_context(request, settings)
+        assert ctx.provider == "khaya"
+        # Flag off → deepgram profile for every provider (reject_unknown=True).
+        assert ctx.profile == default_profile("deepgram")
+        assert ctx.profile.lexicon_gate_reject_unknown is True
+
+    def test_flag_off_default_provider_is_deepgram(self):
+        # Req 14.1: an omitted provider defaults to "deepgram".
+        settings = Settings(service_token="x", database_url="x")
+        request = CorrectionRequest(transcript="hello", words=[Word(word="hello")])
+        ctx = _capture_gate_context(request, settings)
+        assert ctx.provider == "deepgram"
+        assert ctx.profile == default_profile("deepgram")
+
+    def test_flag_on_resolves_khaya_policy(self):
+        # Task 2.12.1: with the flag on, a khaya request resolves the khaya
+        # profile whose Unknown-confidence policy opts out of rejection.
+        settings = Settings(
+            service_token="x",
+            database_url="x",
+            provider_profiles_enabled=True,
+        )
+        request = CorrectionRequest(
+            transcript="hello",
+            words=[Word(word="hello")],
+            options=CorrectionOptions(provider="khaya"),
+        )
+        ctx = _capture_gate_context(request, settings)
+        assert ctx.provider == "khaya"
+        assert ctx.profile.lexicon_gate_reject_unknown is False
+
+    def test_flag_on_deepgram_keeps_reject_policy(self):
+        # Task 2.12.1: deepgram keeps the Req 2.6 rejection even with the flag on.
+        settings = Settings(
+            service_token="x",
+            database_url="x",
+            provider_profiles_enabled=True,
+        )
+        request = CorrectionRequest(
+            transcript="hello",
+            words=[Word(word="hello")],
+            options=CorrectionOptions(provider="deepgram"),
+        )
+        ctx = _capture_gate_context(request, settings)
+        assert ctx.provider == "deepgram"
+        assert ctx.profile.lexicon_gate_reject_unknown is True
+
+
+# ---------------------------------------------------------------------------
+# Provider on gate-rejection debug logs, NOT on the metric (task 2.12.4;
+# Req 13.3, 13.5)
+# ---------------------------------------------------------------------------
+
+from app.correction.gates import GateTally  # noqa: E402
+from app.pipeline import _emit_gate_observability  # noqa: E402
+
+
+class TestGateRejectionDebugLogProvider:
+    """The resolved provider rides on the debug gate-rejection log events only,
+    never widening the closed gate-rejection metric dimension set (task 2.12.4).
+    """
+
+    def test_provider_appears_on_debug_log_event(self):
+        """_emit_gate_observability forwards provider onto each debug log event."""
+        tally = GateTally()
+        tally.record_rejection("asr_confidence", "Kwame", 0.42)
+
+        with patch("app.pipeline.emit_gate_rejection_log") as log_mock:
+            total = _emit_gate_observability(tally, "khaya")
+
+        assert total == 1
+        log_mock.assert_called_once_with("asr_confidence", "Kwame", 0.42, "khaya")
+
+    def test_metric_call_unchanged_no_provider_dimension(self):
+        """The gate-rejection metric keeps its closed dims (gate only) — no provider."""
+        tally = GateTally()
+        tally.record_rejection("lexicon", "Accra", None)
+
+        with (
+            patch("app.pipeline.emit_gate_rejections") as rejections_mock,
+            patch("app.pipeline.emit_gate_rejection_log"),
+        ):
+            _emit_gate_observability(tally, "hybrid")
+
+        # emit_gate_rejections is called with only the per-gate counts mapping —
+        # provider is never passed into the metric emission (Req 13.3).
+        rejections_mock.assert_called_once_with({"lexicon": 1})
+        _, kwargs = rejections_mock.call_args
+        assert "provider" not in kwargs
+
+    @pytest.mark.asyncio
+    async def test_run_pipeline_threads_request_provider_into_observability(self):
+        """run_pipeline passes request.options.provider into the observability helper."""
+        request = CorrectionRequest(
+            transcript="hello world",
+            words=[Word(word="hello"), Word(word="world")],
+            options=CorrectionOptions(provider="khaya"),
+            correlation_id="corr-provider",
+        )
+        snapshot = _make_snapshot()
+        cache = _make_cache(snapshot=snapshot)
+
+        with patch(
+            "app.pipeline._emit_gate_observability", return_value=0
+        ) as obs_mock:
+            await run_pipeline(request, cache)
+
+        assert obs_mock.call_count == 1
+        args, _ = obs_mock.call_args
+        # Second positional arg is the resolved provider from the request options.
+        assert args[1] == "khaya"
+
+    def test_debug_log_actually_carries_provider_field(self):
+        """The emitted debug event includes the provider field (structlog capture)."""
+        from structlog.testing import capture_logs
+
+        from app.obs.metrics import emit_gate_rejection_log
+
+        with capture_logs() as logs:
+            emit_gate_rejection_log("asr_confidence", "Kwame", 0.42, "khaya")
+
+        rejection_events = [e for e in logs if e.get("event") == "gate.rejection"]
+        assert len(rejection_events) == 1
+        event = rejection_events[0]
+        assert event["provider"] == "khaya"
+        assert event["gate"] == "asr_confidence"
+        assert event["span"] == "Kwame"
