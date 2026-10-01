@@ -14,6 +14,7 @@ Requirements: 8.1, 9.1, 7.7
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import date
 
@@ -153,6 +154,40 @@ def _has_summary_intent(question: str) -> bool:
                 return True
 
     return False
+
+
+# A registry noun: the question is about sittings/records as items, not about
+# what was said. Word-bounded so "recorded" or "sessional" do not count.
+_REGISTRY_NOUN_RE = re.compile(r"\b(sittings?|records?|sessions?|uploads?|uploaded)\b")
+
+# A listing / recency / counting signal. Paired with a registry noun it marks a
+# question that only the registry can answer completely.
+_REGISTRY_SIGNAL_RE = re.compile(
+    r"\b(recent|recently|latest|newest|new|last|list|all|every|how many|which|"
+    r"what are the|show me|added|uploaded)\b"
+)
+
+
+def _has_registry_intent(question: str) -> bool:
+    """Heuristic: is this question asking to list, count, or find recent registry items?
+
+    "What are the recent records or sittings?" passes `_is_simple_search_question`,
+    so without this check it took the toolless fast path: a vector/full-text
+    search over transcript chunks. That search cannot list the registry — it
+    never sees sittings or records without a transcript, it ranks passages by
+    wording rather than by date, and the fast-path prompt carried no dates. The
+    same question asked as a follow-up turn took the agent path and its
+    `find_recent_activity` SQL tool instead, so the answer changed with turn
+    position. Routing these questions to the agent makes the registry tool
+    reachable on every turn.
+
+    Criteria (case-insensitive): a registry noun (sitting, record, session,
+    upload) AND a listing/recency/counting signal (recent, latest, new, last,
+    list, all, every, how many, which, "what are the", "show me", added,
+    uploaded).
+    """
+    lower = question.lower()
+    return bool(_REGISTRY_NOUN_RE.search(lower) and _REGISTRY_SIGNAL_RE.search(lower))
 
 
 router = APIRouter(prefix="/rag", dependencies=[Depends(verify_service_token)])
@@ -560,7 +595,14 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
     # summarization tool only exists there.
     # Decided once so the branch, both path logs, and the metrics log agree.
     summary_intent = _has_summary_intent(body.question)
-    use_fast_path = _is_simple_search_question(body.question, has_history) and not summary_intent
+    # Listing/recency questions about sittings and records need the registry
+    # tool, which also lives only on the agent.
+    registry_intent = _has_registry_intent(body.question)
+    use_fast_path = (
+        _is_simple_search_question(body.question, has_history)
+        and not summary_intent
+        and not registry_intent
+    )
 
     if use_fast_path:
         logger.info(
@@ -584,6 +626,7 @@ async def rag_ask(body: AskRequest, request: Request) -> AskResponse:
             question_preview=body.question[:80],
             has_history=has_history,
             summary_intent=summary_intent,
+            registry_intent=registry_intent,
         )
         agent = HansardChatAgent(
             chat_model, retriever, settings, session_factory=session_factory

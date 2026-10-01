@@ -365,6 +365,9 @@ class TestChat:
                         "audio.mp3",
                         1,
                         5,
+                        "2026-08-17",  # held_on
+                        "Draft",  # status
+                        1,  # scope_total
                     )
                 ]
             )

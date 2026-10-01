@@ -32,6 +32,7 @@ from app.rag.router import (
     RelatedRecord,
     SearchRecommendationRequest,
     SearchRecommendationResponse,
+    _has_registry_intent,
     _has_summary_intent,
     _is_simple_search_question,
 )
@@ -556,3 +557,77 @@ class TestSummaryIntentDetection:
             _has_summary_intent(question)
         )
         assert use_fast_path is False
+
+
+# ---------------------------------------------------------------------------
+# Registry-intent routing
+# ---------------------------------------------------------------------------
+
+
+def _routes_to_fast_path(question: str, has_history: bool = False) -> bool:
+    """Mirror of the router's routing decision in rag_ask."""
+    return (
+        _is_simple_search_question(question, has_history)
+        and not _has_summary_intent(question)
+        and not _has_registry_intent(question)
+    )
+
+
+class TestRegistryIntentDetection:
+    """Listing/recency questions must reach the agent's find_recent_activity tool.
+
+    The fast path searches transcript chunks only: it cannot see sittings or
+    records without a transcript, ranks by wording rather than date, and has no
+    registry tool. Before this check, "what are the recent records or sittings?"
+    took the fast path on turn 1 and the agent path on turn 2+, so the same
+    question got different answers depending on turn position.
+    """
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "what are the recent records or sittings?",
+            "What are the recent sittings?",
+            "What are the latest records?",
+            "List all sittings",
+            "Show me every record",
+            "How many sittings are there?",
+            "Which records were uploaded this week?",
+            "What new sessions were added?",
+            "What was uploaded recently?",
+            "list the records",
+        ],
+    )
+    def test_listing_and_recency_questions_are_detected(self, question: str) -> None:
+        assert _has_registry_intent(question) is True
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "What did the Finance Minister say about inflation?",
+            "What was discussed about the budget?",
+            "Hello",
+            "tell me what the minister said about taxes",
+            # A registry noun alone is not a listing request.
+            "tell me about the budget session",
+            # "recorded" is not the noun "record".
+            "What was recorded about education funding?",
+            # A recency word alone is not a listing request.
+            "What did members say recently about roads?",
+        ],
+    )
+    def test_topic_searches_are_not_registry_intent(self, question: str) -> None:
+        assert _has_registry_intent(question) is False
+
+    def test_reported_question_takes_the_agent_path_on_first_turn(self) -> None:
+        """The exact user-reported question must route like its follow-up-turn twin."""
+        question = "what are the recent records or sittings?"
+
+        # It qualifies as a simple first-turn search on its own...
+        assert _is_simple_search_question(question, has_history=False) is True
+        # ...but registry intent pulls it onto the agent path, same as turn 2+.
+        assert _routes_to_fast_path(question, has_history=False) is False
+        assert _routes_to_fast_path(question, has_history=True) is False
+
+    def test_plain_topic_search_still_takes_the_fast_path(self) -> None:
+        assert _routes_to_fast_path("What did the Finance Minister say about inflation?") is True

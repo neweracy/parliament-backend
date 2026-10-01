@@ -86,7 +86,17 @@ _bedrock_breaker = CircuitBreaker(
 _NO_MATCH_TEXT = "No passages in the transcribed parliamentary record match that query."
 
 # Items listed per find_recent_activity call, per scope (sittings, records).
-_MAX_RECENT_ITEMS = 15
+# Each scope carries its own LIMIT in the SQL, so records can no longer crowd
+# sittings out of the result (or vice versa). The full per-scope total is
+# reported alongside, so the model can say "showing 25 of 40" instead of
+# presenting a truncated list as the whole registry.
+_MAX_RECENT_ITEMS = 25
+
+# Period strings that mean "no time window" — the whole registry.
+_ALL_TIME_PERIODS = ("all", "all time", "everything", "any", "ever")
+
+# Lower bound used for an unbounded window. Earlier than any registry row.
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 # Passages handed to the model per summarize_record call. A full sitting can run
 # to hundreds of chunks, and the whole record will not fit in one prompt. The cap
@@ -120,11 +130,15 @@ questions about the substance of proceedings.
 uploads added to the registry — not what was said, but what was added and when.
 Use it for questions like "what was uploaded recently", "what new sittings or
 records were added", or "what records were added in July" / "in 2026-07".
-`period` accepts "recent" (default, last 7 days), "today", "this month", "last
-month", "last N days", "YYYY-MM", or a month name with an optional year.
+`period` accepts "recent" (default, last 7 days — when nothing was added in that
+window the tool returns the most recent additions overall instead), "all" (the
+whole registry, no time window), "today", "this month", "last month", "last N
+days", "YYYY-MM", or a month name with an optional year.
 `scope` is "sittings", "records", "uploads" (records with an audio file), or
-"all" (default). This tool never needs citation markers — it reports registry
-metadata, not transcript content.
+"all" (default). Each item carries its parliamentary date (when the sitting was
+held / the record's date) and its status, and the result states how many items
+exist in total for each scope. This tool never needs citation markers — it
+reports registry metadata, not transcript content.
 
 `summarize_record(record)` reads one specific record and returns passages drawn
 from across the whole of it, in ordinal order, each headed by a chunk_id. Pass
@@ -144,7 +158,13 @@ conversation before searching.
 
 Use `find_recent_activity` when the user asks what is new in the registry
 itself — recent uploads, newly added sittings or records, or what was added in
-a given month — rather than what was discussed.
+a given month — rather than what was discussed. Always use it, never
+`search_hansard`, for any request to list, count, or enumerate sittings or
+records ("what are the recent sittings", "list all records", "how many sittings
+are there"): transcript search only sees records that have a transcript, so it
+cannot list the registry. Use period "all" when the user asks for all or every
+sitting/record. Report every item the tool returns, with its date, and when the
+tool says a scope was truncated, say how many exist in total.
 
 Use `summarize_record` when the user points at one specific named record and
 asks what it is about, asks for a summary of it, or asks what happened in that
@@ -319,9 +339,10 @@ def _month_bounds(year: int, month: int) -> tuple[datetime, datetime]:
 def _resolve_period(period: str, *, now: datetime) -> tuple[datetime, datetime, str]:
     """Resolve a free-form period string to a `[start, end)` UTC range.
 
-    Accepts, case-insensitively: "recent"/"" (last 7 days), "today", "this
-    month", "last month", "last N days", "YYYY-MM", "YYYY-MM-DD..YYYY-MM-DD",
-    and a month name with an optional year (e.g. "July", "July 2026", "Jul").
+    Accepts, case-insensitively: "recent"/"" (last 7 days), "all" (no window),
+    "today", "this month", "last month", "last N days", "YYYY-MM",
+    "YYYY-MM-DD..YYYY-MM-DD", and a month name with an optional year (e.g.
+    "July", "July 2026", "Jul").
 
     Returns the range plus a human-readable label for the range, so the tool's
     response can tell the model exactly what window it searched.
@@ -334,6 +355,11 @@ def _resolve_period(period: str, *, now: datetime) -> tuple[datetime, datetime, 
     if raw in ("", "recent"):
         start = now - timedelta(days=7)
         return start, now, "the last 7 days"
+
+    if raw in _ALL_TIME_PERIODS:
+        # A day past `now` so a row stamped by a DB clock slightly ahead of this
+        # process is not dropped from an "everything" listing.
+        return _EPOCH, now + timedelta(days=1), "the whole registry"
 
     if raw == "today":
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -388,38 +414,60 @@ def _resolve_period(period: str, *, now: datetime) -> tuple[datetime, datetime, 
     )
 
 
+# Each branch carries its own ORDER BY + LIMIT, so the cap applies per scope:
+# a single LIMIT over the UNION let one scope crowd the other out entirely.
+# `COUNT(*) OVER ()` is evaluated before LIMIT, so `scope_total` is the full
+# number of matching rows in that scope — the tool reports it so a truncated
+# list is never presented as the whole registry. `id DESC` breaks created_at
+# ties so the same registry state always lists in the same order.
 _RECENT_ACTIVITY_SQL = """
-    SELECT
-        'sitting' AS kind,
-        s.id,
-        s.title,
-        NULL::text AS sitting_title,
-        s.created_at,
-        NULL::text AS audio_file_name,
-        s.id AS sitting_id,
-        NULL::bigint AS record_id
-    FROM sitting s
-    WHERE :want_sittings AND s.created_at >= :start AND s.created_at < :end
+    (
+        SELECT
+            'sitting' AS kind,
+            s.id,
+            s.title,
+            NULL::text AS sitting_title,
+            s.created_at,
+            NULL::text AS audio_file_name,
+            s.id AS sitting_id,
+            NULL::bigint AS record_id,
+            CASE
+                WHEN s.date_to IS NULL OR s.date_to = s.date_from THEN s.date_from::text
+                ELSE s.date_from::text || ' to ' || s.date_to::text
+            END AS held_on,
+            s.status,
+            COUNT(*) OVER () AS scope_total
+        FROM sitting s
+        WHERE :want_sittings AND s.created_at >= :start AND s.created_at < :end
+        ORDER BY s.created_at DESC, s.id DESC
+        LIMIT :limit
+    )
 
     UNION ALL
 
-    SELECT
-        'record' AS kind,
-        hr.id,
-        hr.title,
-        s.title AS sitting_title,
-        hr.created_at,
-        hr.audio_file_name,
-        s.id AS sitting_id,
-        hr.id AS record_id
-    FROM hansard_record hr
-    JOIN sitting s ON s.id = hr.sitting_id
-    WHERE :want_records
-      AND hr.created_at >= :start AND hr.created_at < :end
-      AND (NOT :uploads_only OR hr.audio_file_name IS NOT NULL)
+    (
+        SELECT
+            'record' AS kind,
+            hr.id,
+            hr.title,
+            s.title AS sitting_title,
+            hr.created_at,
+            hr.audio_file_name,
+            s.id AS sitting_id,
+            hr.id AS record_id,
+            hr.date::text AS held_on,
+            hr.status,
+            COUNT(*) OVER () AS scope_total
+        FROM hansard_record hr
+        JOIN sitting s ON s.id = hr.sitting_id
+        WHERE :want_records
+          AND hr.created_at >= :start AND hr.created_at < :end
+          AND (NOT :uploads_only OR hr.audio_file_name IS NOT NULL)
+        ORDER BY hr.created_at DESC, hr.id DESC
+        LIMIT :limit
+    )
 
-    ORDER BY created_at DESC
-    LIMIT :limit
+    ORDER BY created_at DESC, kind, id DESC
 """
 
 
@@ -456,8 +504,10 @@ def _make_recent_activity_tool(
         said in proceedings (use `search_hansard` for that).
 
         Args:
-            period: Time window. Accepts "recent" (default, last 7 days),
-                "today", "this month", "last month", "last N days", "YYYY-MM",
+            period: Time window. Accepts "recent" (default, last 7 days; falls
+                back to the most recent additions overall when that window is
+                empty), "all" (the whole registry), "today", "this month",
+                "last month", "last N days", "YYYY-MM",
                 "YYYY-MM-DD..YYYY-MM-DD", or a month name with an optional year
                 (e.g. "July", "July 2026").
             scope: Which registry items to include: "sittings", "records",
@@ -465,8 +515,9 @@ def _make_recent_activity_tool(
                 (default).
 
         Returns:
-            A list of matching sittings/records with their creation dates, or a
-            note that nothing was added in that window.
+            A list of matching sittings/records with their parliamentary date,
+            status, and creation date, plus per-scope totals; or a note that
+            nothing was added in that window.
         """
         now = clock()
         try:
@@ -482,7 +533,7 @@ def _make_recent_activity_tool(
         if not want_sittings and not want_records:
             return f"Unknown scope '{scope}'. Use 'sittings', 'records', 'uploads', or 'all'."
 
-        try:
+        async def _query(window_start: datetime, window_end: datetime) -> list[Any]:
             async with session_factory() as session:
                 result = await session.execute(
                     text(_RECENT_ACTIVITY_SQL),
@@ -490,12 +541,25 @@ def _make_recent_activity_tool(
                         "want_sittings": want_sittings,
                         "want_records": want_records,
                         "uploads_only": uploads_only,
-                        "start": start,
-                        "end": end,
+                        "start": window_start,
+                        "end": window_end,
                         "limit": _MAX_RECENT_ITEMS,
                     },
                 )
-                rows = result.fetchall()
+                return list(result.fetchall())
+
+        fell_back = False
+        try:
+            rows = await _query(start, end)
+            # "Recent" is what users mean by "what are the latest sittings"; a
+            # strict 7-day window answered that with "nothing" whenever the
+            # registry had a quiet week, while the same question on another day
+            # listed items — the inconsistency users saw. When the default
+            # window is empty, list the most recent additions overall instead,
+            # and say so in the header.
+            if not rows and (period or "").strip().lower() in ("", "recent"):
+                rows = await _query(_EPOCH, now + timedelta(days=1))
+                fell_back = True
         except Exception:
             logger.error(
                 "rag.agent.find_recent_activity_failed",
@@ -511,12 +575,38 @@ def _make_recent_activity_tool(
             resolved_label=label,
             scope=scope,
             results=len(rows),
+            fell_back=fell_back,
         )
 
         if not rows:
             return f"Nothing was added to the registry in {label} ({scope_key})."
 
-        lines = [f"Added in {label} ({len(rows)} item(s), most recent first):"]
+        if fell_back:
+            header = (
+                f"Nothing was added in {label}. Most recent additions overall "
+                f"({len(rows)} item(s), most recent first):"
+            )
+        else:
+            header = f"Added in {label} ({len(rows)} item(s), most recent first):"
+        lines = [header]
+
+        # Per-scope totals (pre-LIMIT, from COUNT(*) OVER ()), so a truncated
+        # list is reported as such rather than presented as the whole registry.
+        shown: dict[str, int] = {}
+        totals: dict[str, int] = {}
+        for row in rows:
+            kind, total = row[0], row[10]
+            shown[kind] = shown.get(kind, 0) + 1
+            totals[kind] = int(total)
+        for kind, plural in (("sitting", "sittings"), ("record", "records")):
+            if kind in totals:
+                note = (
+                    f"showing all {totals[kind]}"
+                    if shown[kind] >= totals[kind]
+                    else f"showing the {shown[kind]} most recent of {totals[kind]} — truncated"
+                )
+                lines.append(f"{plural.capitalize()}: {note}.")
+
         for (
             kind,
             item_id,
@@ -526,6 +616,9 @@ def _make_recent_activity_tool(
             audio_file_name,
             sitting_id,
             record_id,
+            held_on,
+            status,
+            _scope_total,
         ) in rows:
             when = created_at.strftime("%Y-%m-%d %H:%M UTC") if created_at else "unknown date"
 
@@ -543,13 +636,17 @@ def _make_recent_activity_tool(
                     )
                 )
 
+            held_note = f", held {held_on}" if held_on else ""
+            status_note = f", status: {status}" if status else ""
             if kind == "sitting":
-                lines.append(f'- Sitting #{item_id} "{title}" — created {when}')
+                lines.append(
+                    f'- Sitting #{item_id} "{title}"{held_note}{status_note} — created {when}'
+                )
             else:
                 upload_note = f", audio: {audio_file_name}" if audio_file_name else ""
                 lines.append(
-                    f'- Record #{item_id} "{title}" (sitting: {sitting_title}) — '
-                    f"created {when}{upload_note}"
+                    f'- Record #{item_id} "{title}" (sitting: {sitting_title}){held_note}'
+                    f"{status_note} — created {when}{upload_note}"
                 )
         return "\n".join(lines)
 
