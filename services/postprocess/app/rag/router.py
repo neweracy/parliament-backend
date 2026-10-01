@@ -22,12 +22,11 @@ import structlog
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import text
 
 from app.deps import verify_service_token
 from app.rag.agent import HansardChatAgent
 from app.rag.answerer import GroundedAnsweringChain
-from app.rag.ingestion import TranscriptIngestionWorker
+from app.rag.ingestion import TranscriptIngestionWorker, find_index_gaps
 from app.rag.recommendations import (
     MAX_SEARCH_RECOMMENDATION_COUNT,
     TARGET_SEARCH_RECOMMENDATION_COUNT,
@@ -799,40 +798,12 @@ async def rag_reindex(body: ReindexRequest, request: Request) -> ReindexResponse
     session_factory = request.app.state.session_factory
     settings = request.app.state.settings
 
-    # Find transcripts with unembedded chunks or no chunks at all
+    # Same gap query as the worker's periodic reconciliation sweep: the
+    # latest version of each record that has no chunks, or whose chunks lack
+    # an embedding. This endpoint runs it on demand with a caller-set limit.
     try:
         async with session_factory() as session:
-            # Two kinds of gap, both re-queued:
-            #   1. chunks stored without an embedding (vector search can't see them);
-            #   2. a record's latest saved version that was never indexed at all —
-            #      its ingest was dropped (queue overflow, restart, a failed
-            #      fire-and-forget trigger), so search either misses the record or
-            #      still serves a superseded version's text.
-            result = await session.execute(
-                text(
-                    "SELECT transcript_id, unindexed_count FROM ("
-                    "  SELECT tc.transcript_id, COUNT(*) AS unindexed_count "
-                    "  FROM transcript_chunk tc "
-                    "  WHERE tc.embedding IS NULL "
-                    "  GROUP BY tc.transcript_id "
-                    "  UNION "
-                    "  SELECT t.id AS transcript_id, 0 AS unindexed_count "
-                    "  FROM transcript t "
-                    "  WHERE t.version = ("
-                    "      SELECT MAX(t2.version) FROM transcript t2 "
-                    "      WHERE t2.record_id = t.record_id"
-                    "  ) "
-                    "    AND COALESCE(TRIM(t.corrected_text), '') <> '' "
-                    "    AND NOT EXISTS ("
-                    "      SELECT 1 FROM transcript_chunk c WHERE c.transcript_id = t.id"
-                    "    )"
-                    ") gaps "
-                    "ORDER BY unindexed_count DESC, transcript_id "
-                    "LIMIT :limit"
-                ),
-                {"limit": body.limit},
-            )
-            rows = result.fetchall()
+            rows = await find_index_gaps(session, body.limit)
     except Exception:
         logger.error("rag.reindex.query_failed", exc_info=True)
         return ReindexResponse(

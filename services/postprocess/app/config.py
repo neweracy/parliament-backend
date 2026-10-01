@@ -202,6 +202,20 @@ class Settings(BaseSettings):
     rag_embedding_batch_size: int = 10
     # Retry attempts for failed embeddings during ingestion
     rag_embedding_max_retries: int = 2
+    # Attempts per transcript when ingestion hits a transient failure (database
+    # unavailable, chunk write rolled back). 1 disables worker-level retries.
+    rag_ingest_max_attempts: int = 3
+    # Base delay before re-queuing a failed ingest; doubles per attempt
+    # (5s, 10s, ...). The item waits off-queue so other saves are not blocked.
+    rag_ingest_retry_base_s: int = 5
+    # Reconciliation sweep: every N seconds (and once at startup) re-queue
+    # saved transcripts missing from the index — latest versions with no
+    # chunks, or chunks without an embedding. Recovers ingests lost to a
+    # restart, queue overflow, exhausted retries, or a failed gateway trigger.
+    # 0 disables the sweep (POST /rag/reindex still works).
+    rag_reconcile_interval_s: int = 300
+    # Max transcripts re-queued per sweep.
+    rag_reconcile_batch_size: int = 50
     # Per-statement timeout for RAG retrieval queries (milliseconds).
     # The default db_statement_timeout_ms (15s) is tuned for simple correction
     # queries. Hybrid retrieval involves multiple JOINs, cosine distance,
@@ -252,6 +266,10 @@ class Settings(BaseSettings):
             "RAG_MODEL_TIMEOUT_S": 45,
             "RAG_EMBEDDING_BATCH_SIZE": 10,
             "RAG_EMBEDDING_MAX_RETRIES": 2,
+            "RAG_INGEST_MAX_ATTEMPTS": 3,
+            "RAG_INGEST_RETRY_BASE_S": 5,
+            "RAG_RECONCILE_INTERVAL_S": 300,
+            "RAG_RECONCILE_BATCH_SIZE": 50,
             "RAG_QUERY_TIMEOUT_MS": 30000,
             "DB_POOL_SIZE": 5,
             "DB_MAX_OVERFLOW": 5,

@@ -20,6 +20,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import StrEnum
 
 import structlog
 from langchain_aws import BedrockEmbeddings
@@ -48,6 +49,79 @@ _EMBEDDING_DIMENSION = 1024
 # Strips punctuation for token comparison when aligning saved text to timings,
 # so "Accra," in the text still matches the timed word "Accra".
 _ALIGN_STRIP_RE = re.compile(r"[^\w']+")
+
+
+class IngestOutcome(StrEnum):
+    """Result of one ingest, which decides whether the worker retries it."""
+
+    indexed = "indexed"  # the record's chunks now hold this version
+    skipped = "skipped"  # nothing to do: not found, superseded, or no text
+    failed = "failed"  # transient failure; retried with backoff, then swept
+
+
+class IngestTransientError(Exception):
+    """A failure worth retrying: the database or a dependency was unavailable."""
+
+
+# Index gaps: saved transcripts that search cannot fully see. Both arms look
+# only at each record's latest version, the only one retrieval reads.
+#   - never indexed: the latest version has text but no chunks (its ingest
+#     was lost to a restart, queue overflow, exhausted retries, or a failed
+#     gateway trigger), so search misses the record or serves superseded text;
+#   - unembedded: chunks stored without a vector (embedding failed), so vector
+#     search is blind to them while keyword search still works.
+# Never-indexed versions sort first: they are absent from search entirely.
+_LATEST_VERSION_PREDICATE = (
+    "t.version = (SELECT MAX(t2.version) FROM transcript t2 WHERE t2.record_id = t.record_id)"
+)
+_NEVER_INDEXED_SQL = (
+    "SELECT t.id AS transcript_id, 0 AS unindexed_count "
+    "FROM transcript t "
+    "WHERE " + _LATEST_VERSION_PREDICATE + " "
+    "AND COALESCE(TRIM(t.corrected_text), '') <> '' "
+    "AND NOT EXISTS (SELECT 1 FROM transcript_chunk c WHERE c.transcript_id = t.id)"
+)
+_UNEMBEDDED_SQL = (
+    "SELECT tc.transcript_id, COUNT(*) AS unindexed_count "
+    "FROM transcript_chunk tc JOIN transcript t ON t.id = tc.transcript_id "
+    "WHERE tc.embedding IS NULL AND " + _LATEST_VERSION_PREDICATE + " "
+    "GROUP BY tc.transcript_id"
+)
+_INDEX_GAPS_SQL = (
+    "SELECT transcript_id, unindexed_count FROM ("
+    + _NEVER_INDEXED_SQL
+    + " UNION ALL "
+    + _UNEMBEDDED_SQL
+    + ") gaps "
+    "ORDER BY (unindexed_count = 0) DESC, unindexed_count DESC, transcript_id "
+    "LIMIT :limit"
+)
+_NEVER_INDEXED_GAPS_SQL = (
+    "SELECT transcript_id, unindexed_count FROM ("
+    + _NEVER_INDEXED_SQL
+    + ") gaps ORDER BY transcript_id LIMIT :limit"
+)
+# One sweep at a time across worker processes: each process runs its own
+# worker, and two sweeps finding the same gaps would embed them twice. A
+# transaction-level try-lock: a process that loses simply skips that round.
+_RECONCILE_LOCK_SQL = "SELECT pg_try_advisory_xact_lock(hashtextextended('rag_reconcile', 0))"
+
+
+async def find_index_gaps(
+    session: AsyncSession,
+    limit: int,
+    *,
+    include_unembedded: bool = True,
+) -> list[tuple[int, int]]:
+    """Return ``(transcript_id, unindexed_chunk_count)`` for each index gap.
+
+    *include_unembedded* is False when no embedding client is configured:
+    re-ingesting would store the same NULL vectors again, so only versions
+    with no chunks at all (which keyword search can still pick up) qualify.
+    """
+    sql = _INDEX_GAPS_SQL if include_unembedded else _NEVER_INDEXED_GAPS_SQL
+    result = await session.execute(text(sql), {"limit": limit})
+    return [(int(row[0]), int(row[1])) for row in result.fetchall()]
 
 
 def _align_key(token: str) -> str:
@@ -149,8 +223,15 @@ class TranscriptIngestionWorker:
         # (or a repeated trigger) for the same id would otherwise ingest it
         # twice — double the embedding cost for an identical result.
         self._pending: set[int] = set()
+        # Transcript ids waiting out a retry delay (off-queue), and how many
+        # attempts each has used. Kept off the queue so a backoff never blocks
+        # the saves queued behind it.
+        self._retrying: set[int] = set()
+        self._attempts: dict[int, int] = {}
+        self._retry_tasks: set[asyncio.Task[None]] = set()
         self._dropped_count: int = 0
         self._task: asyncio.Task[None] | None = None
+        self._reconcile_task: asyncio.Task[None] | None = None
         self._embeddings = embeddings
         self._text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,  # ~200 words * 5 chars/word
@@ -163,43 +244,100 @@ class TranscriptIngestionWorker:
         """Number of ingest requests dropped due to queue overflow."""
         return self._dropped_count
 
+    def _setting(self, name: str, default: int) -> int:
+        """Read an int tunable, falling back to *default* for stub settings."""
+        value = getattr(self._settings, name, default) if self._settings is not None else default
+        return value if isinstance(value, int) and not isinstance(value, bool) else default
+
     def start(self) -> None:
-        """Launch the background ingestion worker task."""
+        """Launch the ingestion worker and, if enabled, the reconciliation sweep."""
         self._task = asyncio.create_task(self._worker_loop(), name="rag-ingestion-worker")
+        interval = self._setting("rag_reconcile_interval_s", 300)
+        if interval > 0:
+            self._reconcile_task = asyncio.create_task(
+                self._reconcile_loop(interval), name="rag-reconcile-sweep"
+            )
 
     async def stop(self) -> None:
-        """Cancel the background task gracefully, draining remaining items."""
+        """Cancel the background tasks gracefully, draining remaining items.
+
+        Items waiting out a retry delay are abandoned; they are still unindexed
+        in the database, so the next process's startup sweep re-queues them.
+        """
         if self._task is None:
             return
-        self._task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await self._task
+        tasks = [self._task, *self._retry_tasks]
+        if self._reconcile_task is not None:
+            tasks.append(self._reconcile_task)
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        self._retry_tasks.clear()
+        self._retrying.clear()
         # Drain any remaining transcript IDs
         await self._drain_remaining()
 
-    def enqueue(self, transcript_id: int) -> None:
+    def enqueue(self, transcript_id: int) -> bool:
         """Queue a transcript for ingestion. Drops if full, never blocks.
 
-        Overflow is logged at WARNING and counted. Ingestion is
-        best-effort — dropping an item means the transcript stays
-        unindexed but is still persisted and queryable via direct DB access.
+        Returns True when the id was newly queued. An id already queued or
+        waiting to retry is not queued twice. Overflow is logged at WARNING
+        and counted; the dropped transcript stays persisted, and the
+        reconciliation sweep re-queues it once there is room.
         """
-        if transcript_id in self._pending:
+        if transcript_id in self._pending or transcript_id in self._retrying:
             logger.debug("rag.ingestion.already_queued", transcript_id=transcript_id)
-            return
+            return False
         try:
             self._queue.put_nowait(transcript_id)
             self._pending.add(transcript_id)
+            return True
         except asyncio.QueueFull:
             self._dropped_count += 1
+            self._attempts.pop(transcript_id, None)
             logger.warning(
                 "rag.ingestion.queue_overflow",
                 transcript_id=transcript_id,
                 dropped_total=self._dropped_count,
                 queue_maxsize=self._queue.maxsize,
             )
+            return False
 
-    async def ingest(self, transcript_id: int) -> None:
+    async def reconcile(self) -> int:
+        """Re-queue saved transcripts missing from the index; return how many.
+
+        The database is the source of truth for what should be searchable, so
+        this recovers every lost ingest regardless of why it was lost. Safe to
+        run repeatedly: re-ingestion replaces chunks atomically, skips
+        superseded versions, and writes a version's evidence at most once.
+        """
+        limit = self._setting("rag_reconcile_batch_size", 50)
+        try:
+            async with self._session_factory() as session, session.begin():
+                locked = await session.execute(text(_RECONCILE_LOCK_SQL))
+                if not locked.scalar():
+                    logger.debug("rag.reconcile.skipped_other_process_sweeping")
+                    return 0
+                gaps = await find_index_gaps(
+                    session, limit, include_unembedded=self._embeddings is not None
+                )
+        except Exception:
+            logger.warning("rag.reconcile.query_failed", exc_info=True)
+            return 0
+
+        queued = sum(1 for transcript_id, _ in gaps if self.enqueue(transcript_id))
+        if gaps:
+            logger.info(
+                "rag.reconcile.gaps_found",
+                gaps=len(gaps),
+                queued=queued,
+                unembedded_chunks=sum(count for _, count in gaps),
+            )
+        return queued
+
+    async def ingest(self, transcript_id: int) -> IngestOutcome:
         """Chunk, embed, and index a single transcript.
 
         Loads transcript data from the DB, chunks it with speaker-turn
@@ -208,18 +346,26 @@ class TranscriptIngestionWorker:
 
         On embedding failure per chunk: logs the error, stores the chunk
         without an embedding (marked as unindexed), and continues with
-        remaining chunks.
+        remaining chunks. Keyword search sees the stored text at once; the
+        outcome is ``failed`` so the worker retries for the missing vectors.
+
+        Returns ``failed`` for transient failures (database unavailable,
+        chunk write rolled back, embeddings missing) so the worker retries;
+        ``skipped`` when there is nothing to index; ``indexed`` otherwise.
         """
         logger.info("rag.ingestion.start", transcript_id=transcript_id)
 
         # Load transcript data from DB
-        transcript_data = await self._load_transcript(transcript_id)
+        try:
+            transcript_data = await self._load_transcript(transcript_id)
+        except IngestTransientError:
+            return IngestOutcome.failed
         if transcript_data is None:
             logger.error(
                 "rag.ingestion.transcript_not_found",
                 transcript_id=transcript_id,
             )
-            return
+            return IngestOutcome.skipped
 
         # The saved text is the source of truth for what gets indexed: the
         # postprocessed text on first transcription, and the editor's text on
@@ -239,7 +385,7 @@ class TranscriptIngestionWorker:
                 version=transcript_data["version"],
             )
             await self._persist_correction_evidence(transcript_id, transcript_data)
-            return
+            return IngestOutcome.skipped
 
         # Chunk the transcript
         chunks = self.chunk_transcript(corrected_text, word_timings, entities)
@@ -248,17 +394,22 @@ class TranscriptIngestionWorker:
                 "rag.ingestion.no_chunks",
                 transcript_id=transcript_id,
             )
-            return
+            return IngestOutcome.skipped
 
         # Generate embeddings
         embeddings = await self.embed_chunks(chunks)
 
         # Swap the record's indexed chunks for this version's, atomically and
         # only if this is still the latest version (re-checked under a lock).
-        replaced = await self._replace_chunks(transcript_id, chunks, embeddings)
+        # A failed write rolled back, leaving the previous chunks searchable;
+        # evidence is left to the retry (it is written at most once anyway).
+        try:
+            replaced = await self._replace_chunks(transcript_id, chunks, embeddings)
+        except IngestTransientError:
+            return IngestOutcome.failed
         if not replaced:
             await self._persist_correction_evidence(transcript_id, transcript_data)
-            return
+            return IngestOutcome.skipped
 
         # Persist Correction_Evidence keyed to (transcript_id, version)
         # (transcript-evidence-navigation task 4.1, Req 1.6, 8.5). Python is the
@@ -268,11 +419,25 @@ class TranscriptIngestionWorker:
         # the chunks just stored or the transcript row.
         await self._persist_correction_evidence(transcript_id, transcript_data)
 
+        missing_vectors = sum(1 for embedding in embeddings if embedding is None)
+        if missing_vectors and self._embeddings is not None:
+            # Bedrock failed past its own retries. The text is already stored
+            # and keyword-searchable; retry later for the vectors. (With no
+            # embedding client configured a retry cannot help, so it isn't one.)
+            logger.warning(
+                "rag.ingestion.embeddings_missing",
+                transcript_id=transcript_id,
+                chunk_count=len(chunks),
+                missing=missing_vectors,
+            )
+            return IngestOutcome.failed
+
         logger.info(
             "rag.ingestion.complete",
             transcript_id=transcript_id,
             chunk_count=len(chunks),
         )
+        return IngestOutcome.indexed
 
     def chunk_transcript(
         self,
@@ -750,13 +915,15 @@ class TranscriptIngestionWorker:
                     "metadata": metadata,
                     "is_latest": is_latest,
                 }
-        except Exception:
+        except Exception as exc:
+            # Distinct from "not found" (None): the row may well exist, so the
+            # worker must retry rather than treat the transcript as gone.
             logger.error(
                 "rag.ingestion.load_transcript_failed",
                 transcript_id=transcript_id,
                 exc_info=True,
             )
-            return None
+            raise IngestTransientError(f"load failed for transcript {transcript_id}") from exc
 
     async def _replace_chunks(
         self,
@@ -767,7 +934,8 @@ class TranscriptIngestionWorker:
         """Swap the record's indexed chunks for this version's, in one transaction.
 
         Returns False (writing nothing) when this version is no longer the
-        record's latest — a newer save already owns the index.
+        record's latest — a newer save already owns the index. Raises
+        :class:`IngestTransientError` when the transaction fails and rolls back.
 
         - Record-wide delete: an edit inserts a new `transcript` row rather than
           updating the old one, so deleting only this `transcript_id` left every
@@ -864,15 +1032,16 @@ class TranscriptIngestionWorker:
                 unindexed=sum(1 for e in embeddings if e is None),
             )
             return True
-        except Exception:
+        except Exception as exc:
             # The transaction rolled back: the previous chunks are still in place,
-            # so search keeps working on the last good version.
+            # so search keeps working on the last good version. Raised (not
+            # False, which means "superseded") so the worker retries the write.
             logger.error(
                 "rag.ingestion.store_chunks_failed",
                 transcript_id=transcript_id,
                 exc_info=True,
             )
-            return False
+            raise IngestTransientError(f"chunk write failed: transcript {transcript_id}") from exc
 
     async def _persist_correction_evidence(
         self,
@@ -1011,13 +1180,84 @@ class TranscriptIngestionWorker:
             try:
                 transcript_id = await self._queue.get()
                 self._pending.discard(transcript_id)
-                await self.ingest(transcript_id)
+                try:
+                    outcome = await self.ingest(transcript_id)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # Unexpected: treat as transient so it is retried, not lost.
+                    logger.error(
+                        "rag.ingestion.worker_error",
+                        transcript_id=transcript_id,
+                        exc_info=True,
+                    )
+                    outcome = IngestOutcome.failed
+                self._record_outcome(transcript_id, outcome)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.error("rag.ingestion.worker_error", exc_info=True)
                 # Brief backoff on unexpected errors to avoid tight loop
                 await asyncio.sleep(1.0)
+
+    def _record_outcome(self, transcript_id: int, outcome: IngestOutcome) -> None:
+        """Schedule a retry for a failed ingest, or forget its attempt count.
+
+        Retries back off exponentially off-queue. After the last attempt the
+        transcript is left for the reconciliation sweep, which re-queues it
+        while it is still missing from the index.
+        """
+        if outcome is not IngestOutcome.failed:
+            self._attempts.pop(transcript_id, None)
+            return
+
+        attempt = self._attempts.get(transcript_id, 0) + 1
+        max_attempts = max(1, self._setting("rag_ingest_max_attempts", 3))
+        if attempt >= max_attempts:
+            self._attempts.pop(transcript_id, None)
+            logger.error(
+                "rag.ingestion.retries_exhausted",
+                transcript_id=transcript_id,
+                attempts=attempt,
+                recovery="reconciliation sweep or POST /rag/reindex",
+            )
+            return
+
+        self._attempts[transcript_id] = attempt
+        delay = max(0, self._setting("rag_ingest_retry_base_s", 5)) * 2 ** (attempt - 1)
+        self._retrying.add(transcript_id)
+        task = asyncio.create_task(
+            self._requeue_after(transcript_id, delay),
+            name=f"rag-ingestion-retry-{transcript_id}",
+        )
+        self._retry_tasks.add(task)
+        task.add_done_callback(self._retry_tasks.discard)
+        logger.warning(
+            "rag.ingestion.retry_scheduled",
+            transcript_id=transcript_id,
+            attempt=attempt,
+            max_attempts=max_attempts,
+            delay_s=delay,
+        )
+
+    async def _requeue_after(self, transcript_id: int, delay: float) -> None:
+        """Wait out a retry delay, then put the transcript back on the queue."""
+        try:
+            await asyncio.sleep(delay)
+        finally:
+            self._retrying.discard(transcript_id)
+        self.enqueue(transcript_id)
+
+    async def _reconcile_loop(self, interval: int) -> None:
+        """Sweep for index gaps once at startup, then every *interval* seconds."""
+        while True:
+            try:
+                await self.reconcile()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.error("rag.reconcile.sweep_error", exc_info=True)
+            await asyncio.sleep(interval)
 
     async def _drain_remaining(self) -> None:
         """Drain and process any transcript IDs left in the queue."""

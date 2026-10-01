@@ -595,10 +595,14 @@ class TestReplaceChunks:
         assert delete_params == {"record_id": 7}
 
     @pytest.mark.asyncio
-    async def test_failure_reports_false_so_previous_chunks_remain(
+    async def test_failure_raises_transient_so_the_write_is_retried(
         self, mock_settings, mock_embeddings
     ):
+        """A rolled-back write keeps the previous chunks, and must not be confused
+        with "superseded" (False), which is never retried."""
         from unittest.mock import MagicMock
+
+        from app.rag.ingestion import IngestTransientError
 
         factory = _scripted_session_factory(
             [
@@ -611,4 +615,5 @@ class TestReplaceChunks:
         )
         worker = TranscriptIngestionWorker(factory, mock_settings, embeddings=mock_embeddings)
 
-        assert await worker._replace_chunks(42, self._chunks(), [[0.1] * 1024]) is False
+        with pytest.raises(IngestTransientError):
+            await worker._replace_chunks(42, self._chunks(), [[0.1] * 1024])

@@ -539,3 +539,39 @@ class TestProviderProfileConfigLoggingAndDefaults:
         ]
         assert len(invalid_events) == 1, f"expected exactly one warning; got {logs}"
         assert invalid_events[0]["log_level"] == "warning"
+
+
+_INGEST_RETRY_DEFAULTS = {
+    "RAG_INGEST_MAX_ATTEMPTS": ("rag_ingest_max_attempts", 3),
+    "RAG_INGEST_RETRY_BASE_S": ("rag_ingest_retry_base_s", 5),
+    "RAG_RECONCILE_INTERVAL_S": ("rag_reconcile_interval_s", 300),
+    "RAG_RECONCILE_BATCH_SIZE": ("rag_reconcile_batch_size", 50),
+}
+
+
+class TestIngestRetryAndReconcileSettings:
+    """RAG ingestion retry / reconciliation tunables parse like other numerics."""
+
+    @pytest.fixture(autouse=True)
+    def _required(self, monkeypatch):
+        for var in _INGEST_RETRY_DEFAULTS:
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("SERVICE_TOKEN", "tok")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://x")
+
+    @pytest.mark.parametrize("env_name", list(_INGEST_RETRY_DEFAULTS))
+    def test_absent_uses_default(self, env_name):
+        field_name, default = _INGEST_RETRY_DEFAULTS[env_name]
+        assert getattr(Settings(), field_name) == default
+
+    @pytest.mark.parametrize("raw", ["", "  ", "soon"])
+    @pytest.mark.parametrize("env_name", list(_INGEST_RETRY_DEFAULTS))
+    def test_empty_or_invalid_falls_back_to_default(self, monkeypatch, env_name, raw):
+        monkeypatch.setenv(env_name, raw)
+        field_name, default = _INGEST_RETRY_DEFAULTS[env_name]
+        assert getattr(Settings(), field_name) == default
+
+    def test_reconcile_interval_zero_is_kept(self, monkeypatch):
+        """0 is the documented "sweep disabled" value, not a parse failure."""
+        monkeypatch.setenv("RAG_RECONCILE_INTERVAL_S", "0")
+        assert Settings().rag_reconcile_interval_s == 0
