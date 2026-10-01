@@ -394,6 +394,16 @@ class GroundedAnsweringChain:
                 end_s = f"{chunk.end_s:.1f}s" if chunk.end_s is not None else "N/A"
 
                 lines.append(f"### [Chunk ID: {chunk.chunk_id}]")
+                # Provenance the retriever already enriched onto the chunk. The
+                # agent path shows it (agent._format_passages); without it here
+                # the fast path could not say which sitting or date a passage
+                # came from, so the same question answered differently by path.
+                if chunk.sitting_title:
+                    lines.append(f"- Sitting: {chunk.sitting_title}")
+                if chunk.record_title:
+                    lines.append(f"- Record: {chunk.record_title}")
+                if chunk.date:
+                    lines.append(f"- Date: {chunk.date}")
                 lines.append(f"- Speaker: {speaker_label}")
                 lines.append(f"- Timestamps: {start_s} – {end_s}")
                 lines.append(f"- Text: {chunk.text}")
