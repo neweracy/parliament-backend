@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import difflib
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -42,6 +44,15 @@ _PAUSE_THRESHOLD_S = 2.0
 _EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"
 # Titan Text Embeddings V2 produces 1024-dimensional vectors
 _EMBEDDING_DIMENSION = 1024
+
+# Strips punctuation for token comparison when aligning saved text to timings,
+# so "Accra," in the text still matches the timed word "Accra".
+_ALIGN_STRIP_RE = re.compile(r"[^\w']+")
+
+
+def _align_key(token: str) -> str:
+    """Normalize a token for alignment: case- and punctuation-insensitive."""
+    return _ALIGN_STRIP_RE.sub("", token.lower())
 
 
 def _correction_record_from_dict(raw: dict) -> CorrectionRecord | None:
@@ -134,6 +145,10 @@ class TranscriptIngestionWorker:
         self._session_factory = session_factory
         self._settings = settings
         self._queue: asyncio.Queue[int] = asyncio.Queue(maxsize=max_queue_size)
+        # Transcript ids queued but not yet ingested. A save and a /rag/reindex
+        # (or a repeated trigger) for the same id would otherwise ingest it
+        # twice — double the embedding cost for an identical result.
+        self._pending: set[int] = set()
         self._dropped_count: int = 0
         self._task: asyncio.Task[None] | None = None
         self._embeddings = embeddings
@@ -169,8 +184,12 @@ class TranscriptIngestionWorker:
         best-effort — dropping an item means the transcript stays
         unindexed but is still persisted and queryable via direct DB access.
         """
+        if transcript_id in self._pending:
+            logger.debug("rag.ingestion.already_queued", transcript_id=transcript_id)
+            return
         try:
             self._queue.put_nowait(transcript_id)
+            self._pending.add(transcript_id)
         except asyncio.QueueFull:
             self._dropped_count += 1
             logger.warning(
@@ -202,9 +221,25 @@ class TranscriptIngestionWorker:
             )
             return
 
+        # The saved text is the source of truth for what gets indexed: the
+        # postprocessed text on first transcription, and the editor's text on
+        # every save (each save is a new transcript version).
         corrected_text = transcript_data["corrected_text"]
         word_timings = transcript_data["word_timings"]
         entities = transcript_data["entities"]
+
+        # Only the record's latest version belongs in the index (retrieval reads
+        # only the latest, and the delete below is record-wide). A late ingest of
+        # an older version must not replace the newer one, so bail out before
+        # paying for embeddings. Evidence for this version is still persisted.
+        if not transcript_data["is_latest"]:
+            logger.info(
+                "rag.ingestion.skipped_stale_version",
+                transcript_id=transcript_id,
+                version=transcript_data["version"],
+            )
+            await self._persist_correction_evidence(transcript_id, transcript_data)
+            return
 
         # Chunk the transcript
         chunks = self.chunk_transcript(corrected_text, word_timings, entities)
@@ -218,11 +253,12 @@ class TranscriptIngestionWorker:
         # Generate embeddings
         embeddings = await self.embed_chunks(chunks)
 
-        # Delete any existing chunks for this transcript (re-ingestion on edit)
-        await self._delete_existing_chunks(transcript_id)
-
-        # Store chunks in DB
-        await self._store_chunks(transcript_id, chunks, embeddings)
+        # Swap the record's indexed chunks for this version's, atomically and
+        # only if this is still the latest version (re-checked under a lock).
+        replaced = await self._replace_chunks(transcript_id, chunks, embeddings)
+        if not replaced:
+            await self._persist_correction_evidence(transcript_id, transcript_data)
+            return
 
         # Persist Correction_Evidence keyed to (transcript_id, version)
         # (transcript-evidence-navigation task 4.1, Req 1.6, 8.5). Python is the
@@ -269,6 +305,14 @@ class TranscriptIngestionWorker:
         # If no word timings, fall back to simple text splitting
         if not words:
             return self._chunk_text_only(text_content, entities)
+
+        # Chunk text always comes from `text_content` (the saved transcript),
+        # never from the timed words. An editor save stores new text but carries
+        # the previous version's word timings forward, so chunking the timed
+        # words indexed the pre-edit text and editor changes never reached RAG.
+        # Aligning the saved text onto the timings keeps speaker turns and
+        # timestamps for citations while indexing exactly what was saved.
+        words = self._align_text_to_words(text_content, words)
 
         # Group words by speaker turn
         turns = self._group_speaker_turns(words)
@@ -420,6 +464,64 @@ class TranscriptIngestionWorker:
                         exc_info=True,
                     )
         return None
+
+    def _align_text_to_words(self, text_content: str, words: list[dict]) -> list[dict]:
+        """Re-time the saved text's tokens using the stored word timings.
+
+        Returns one word dict per whitespace token of `text_content`, in text
+        order, whose `word` is that saved token and whose start/end/speaker come
+        from the timed word it lines up with. Alignment is a diff of the two
+        token sequences (case- and punctuation-insensitive):
+
+        - equal:   a token keeps its own word's timing and speaker;
+        - replace: an edited span spreads across the words it replaced;
+        - delete:  text an editor added, with no timed word, borrows the
+                   neighbouring word's timing so it stays in the right turn;
+        - insert:  timed words an editor removed are dropped — they are no
+                   longer in the transcript, so they must not be indexed.
+
+        When the text and timings agree (the usual postprocessed first version)
+        this is a token-for-token copy, so speaker-turn chunking is unchanged.
+        """
+        tokens = text_content.split()
+        if not tokens or not words:
+            return []
+
+        text_keys = [_align_key(token) for token in tokens]
+        word_keys = [_align_key(str(word.get("word", ""))) for word in words]
+
+        def timed(token: str, source: dict, *, at: str | None = None) -> dict:
+            if at == "end":
+                start = end = source.get("end", source.get("start"))
+            elif at == "start":
+                start = end = source.get("start", source.get("end"))
+            else:
+                start, end = source.get("start"), source.get("end")
+            return {"word": token, "start": start, "end": end, "speaker": source.get("speaker")}
+
+        aligned: list[dict] = []
+        matcher = difflib.SequenceMatcher(None, text_keys, word_keys, autojunk=False)
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == "equal":
+                aligned.extend(timed(tokens[i1 + k], words[j1 + k]) for k in range(i2 - i1))
+            elif tag == "replace":
+                span = words[j1:j2]
+                count = i2 - i1
+                aligned.extend(
+                    timed(tokens[i1 + k], span[min(k * len(span) // count, len(span) - 1)])
+                    for k in range(count)
+                )
+            elif tag == "delete":
+                # Added text: anchor to the previous timed word (or the next one
+                # at the very start), zero-length so it never reorders time.
+                if j1 > 0:
+                    anchor, at = words[j1 - 1], "end"
+                else:
+                    anchor, at = words[min(j1, len(words) - 1)], "start"
+                aligned.extend(timed(tokens[k], anchor, at=at) for k in range(i1, i2))
+            # "insert": words removed from the text — intentionally not indexed.
+
+        return aligned
 
     def _group_speaker_turns(self, words: list[dict]) -> list[list[dict]]:
         """Group consecutive words by speaker into turns.
@@ -607,9 +709,12 @@ class TranscriptIngestionWorker:
             async with self._session_factory() as session:
                 result = await session.execute(
                     text(
-                        "SELECT corrected_text, word_timings, entities, "
-                        "version, raw_text, metadata "
-                        "FROM transcript WHERE id = :id"
+                        "SELECT t.corrected_text, t.word_timings, t.entities, "
+                        "t.version, t.raw_text, t.metadata, "
+                        "t.version = ("
+                        "    SELECT MAX(version) FROM transcript WHERE record_id = t.record_id"
+                        ") AS is_latest "
+                        "FROM transcript t WHERE t.id = :id"
                     ),
                     {"id": transcript_id},
                 )
@@ -623,6 +728,9 @@ class TranscriptIngestionWorker:
                 version = row[3] if row[3] is not None else 1
                 raw_text = row[4] if row[4] else ""
                 metadata = row[5] if row[5] else {}
+                # The locked re-check in _replace_chunks is the authoritative
+                # guard; this early check only avoids embedding a stale version.
+                is_latest = bool(row[6]) if row[6] is not None else True
 
                 # word_timings, entities and metadata are JSONB columns; they may
                 # already be parsed or may be strings depending on driver
@@ -640,6 +748,7 @@ class TranscriptIngestionWorker:
                     "version": version,
                     "raw_text": raw_text,
                     "metadata": metadata,
+                    "is_latest": is_latest,
                 }
         except Exception:
             logger.error(
@@ -649,52 +758,77 @@ class TranscriptIngestionWorker:
             )
             return None
 
-    async def _delete_existing_chunks(self, transcript_id: int) -> None:
-        """Clear indexed chunks for this transcript's record, not just this version.
-
-        A transcript edit inserts a new `transcript` row rather than updating the
-        existing one, so scoping the delete to `transcript_id` alone left every
-        earlier version's chunks in the index. Retrieval has no notion of which
-        version supersedes which, so those rows kept competing with the text that
-        replaced them and kept accumulating on every save.
-
-        Deleting by record means the index holds exactly one generation of chunks
-        per record: the one being written now.
-        """
-        try:
-            async with self._session_factory() as session, session.begin():
-                await session.execute(
-                    text(
-                        "DELETE FROM transcript_chunk "
-                        "WHERE transcript_id IN ("
-                        "    SELECT id FROM transcript"
-                        "    WHERE record_id = ("
-                        "        SELECT record_id FROM transcript WHERE id = :transcript_id"
-                        "    )"
-                        ")"
-                    ),
-                    {"transcript_id": transcript_id},
-                )
-        except Exception:
-            logger.error(
-                "rag.ingestion.delete_chunks_failed",
-                transcript_id=transcript_id,
-                exc_info=True,
-            )
-
-    async def _store_chunks(
+    async def _replace_chunks(
         self,
         transcript_id: int,
         chunks: list[Chunk],
         embeddings: list[list[float] | None],
-    ) -> None:
-        """Persist chunks to the transcript_chunk table.
+    ) -> bool:
+        """Swap the record's indexed chunks for this version's, in one transaction.
 
-        Chunks with a None embedding are stored without the embedding
-        vector and without an indexed_at timestamp (marked as unindexed).
+        Returns False (writing nothing) when this version is no longer the
+        record's latest — a newer save already owns the index.
+
+        - Record-wide delete: an edit inserts a new `transcript` row rather than
+          updating the old one, so deleting only this `transcript_id` left every
+          earlier version's chunks in the index, competing with the text that
+          replaced them. The index holds exactly one generation per record.
+        - One transaction: delete and insert used to commit separately, so a
+          failed insert left the record with no chunks at all — invisible to
+          search until something re-ingested it.
+        - Per-record advisory lock + latest-version re-check: ingests for two
+          saves of the same record can run concurrently (one queue per worker
+          process). Without serialising them, an older version finishing last
+          deleted the newer version's chunks and wrote its own, which retrieval
+          then ignored (it reads the latest version only) — the record vanished
+          from search. The lock is namespaced and released at commit.
+
+        Chunks with a None embedding are stored without the embedding vector and
+        without an indexed_at timestamp (marked as unindexed for /rag/reindex).
         """
         try:
             async with self._session_factory() as session, session.begin():
+                result = await session.execute(
+                    text("SELECT record_id, version FROM transcript WHERE id = :transcript_id"),
+                    {"transcript_id": transcript_id},
+                )
+                row = result.fetchone()
+                if row is None:
+                    return False
+                record_id, version = row[0], row[1]
+
+                await session.execute(
+                    text(
+                        "SELECT pg_advisory_xact_lock("
+                        "hashtextextended('rag_ingest:' || CAST(:record_id AS text), 0))"
+                    ),
+                    {"record_id": record_id},
+                )
+
+                latest = await session.execute(
+                    text("SELECT MAX(version) FROM transcript WHERE record_id = :record_id"),
+                    {"record_id": record_id},
+                )
+                latest_version = latest.scalar()
+                if latest_version is not None and version < latest_version:
+                    logger.info(
+                        "rag.ingestion.skipped_stale_version",
+                        transcript_id=transcript_id,
+                        version=version,
+                        latest_version=latest_version,
+                    )
+                    return False
+
+                await session.execute(
+                    text(
+                        "DELETE FROM transcript_chunk "
+                        "WHERE transcript_id IN ("
+                        "    SELECT id FROM transcript WHERE record_id = :record_id"
+                        ")"
+                    ),
+                    {"record_id": record_id},
+                )
+
                 for chunk, embedding in zip(chunks, embeddings, strict=True):
                     indexed_at = datetime.now(UTC) if embedding else None
                     # Format embedding as pgvector literal or NULL
@@ -729,12 +863,16 @@ class TranscriptIngestionWorker:
                 count=len(chunks),
                 unindexed=sum(1 for e in embeddings if e is None),
             )
+            return True
         except Exception:
+            # The transaction rolled back: the previous chunks are still in place,
+            # so search keeps working on the last good version.
             logger.error(
                 "rag.ingestion.store_chunks_failed",
                 transcript_id=transcript_id,
                 exc_info=True,
             )
+            return False
 
     async def _persist_correction_evidence(
         self,
@@ -872,6 +1010,7 @@ class TranscriptIngestionWorker:
         while True:
             try:
                 transcript_id = await self._queue.get()
+                self._pending.discard(transcript_id)
                 await self.ingest(transcript_id)
             except asyncio.CancelledError:
                 raise
@@ -885,6 +1024,7 @@ class TranscriptIngestionWorker:
         while not self._queue.empty():
             try:
                 transcript_id = self._queue.get_nowait()
+                self._pending.discard(transcript_id)
                 await self.ingest(transcript_id)
             except asyncio.QueueEmpty:
                 break

@@ -14,6 +14,7 @@ Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -38,6 +39,9 @@ _MAX_LIMIT = 50
 
 # Number of candidates to fetch from each search arm before fusion
 _CANDIDATE_POOL_SIZE = 100
+
+# Punctuation stripped when comparing passages for duplicates.
+_PASSAGE_NORMALIZE_RE = re.compile(r"[^\w']+")
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +466,9 @@ class RRFRetriever:
 
         # Fuse results using Reciprocal Rank Fusion
         fused = self._reciprocal_rank_fusion(fulltext_results, vector_results)
+        # Collapse repeated passages before applying the limit, so `limit`
+        # counts distinct passages rather than copies of the same one.
+        unique = self._drop_duplicate_passages(fused)
 
         logger.debug(
             "rag.retriever.rrf_complete",
@@ -469,10 +476,33 @@ class RRFRetriever:
             fulltext_count=len(fulltext_results),
             vector_count=len(vector_results),
             fused_count=len(fused),
-            returned=min(len(fused), limit),
+            duplicates_dropped=len(fused) - len(unique),
+            returned=min(len(unique), limit),
         )
 
-        return fused[:limit]
+        return unique[:limit]
+
+    @staticmethod
+    def _drop_duplicate_passages(documents: list[Document]) -> list[Document]:
+        """Keep the highest-ranked copy of each passage; drop the rest.
+
+        RRF de-duplicates by chunk_id only, so the same text stored under
+        different chunk_ids came back once per copy and was shown, cited, and
+        fed to the model repeatedly. Copies arise from chunk rows left behind by
+        concurrent ingests of one record, the same audio uploaded into two
+        records, or recurring boilerplate ("Order! Order!"). Passages are
+        compared case-, punctuation-, and whitespace-insensitively. `documents`
+        must already be sorted best-first; order is preserved.
+        """
+        seen: set[str] = set()
+        unique: list[Document] = []
+        for doc in documents:
+            key = " ".join(_PASSAGE_NORMALIZE_RE.sub(" ", doc.page_content.lower()).split())
+            if key and key in seen:
+                continue
+            seen.add(key)
+            unique.append(doc)
+        return unique
 
     @staticmethod
     def _reciprocal_rank_fusion(

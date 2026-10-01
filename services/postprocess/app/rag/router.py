@@ -785,29 +785,49 @@ class ReindexResponse(BaseModel):
 
 @router.post("/reindex", status_code=202, response_model=ReindexResponse)
 async def rag_reindex(body: ReindexRequest, request: Request) -> ReindexResponse:
-    """Find transcripts with unindexed chunks and re-queue them for ingestion.
+    """Find transcripts missing from the search index and re-queue them.
 
-    Identifies transcript_chunk rows where embedding IS NULL (meaning the
-    embedding failed during initial ingestion — typically because AWS
-    credentials were unavailable) and enqueues the owning transcripts for
-    re-ingestion.
+    Covers two gaps: transcript_chunk rows where embedding IS NULL (the embedding
+    failed during ingestion — typically AWS credentials were unavailable), and a
+    record's latest saved transcript version that has no chunks at all (its
+    ingest never ran or was dropped). Both are enqueued for re-ingestion, so
+    every saved transcript — postprocessed or edited — ends up searchable.
 
-    This is idempotent: re-ingestion deletes existing chunks for a transcript
-    before storing new ones, so it is safe to call repeatedly.
+    This is idempotent: re-ingestion replaces the record's chunks atomically and
+    skips versions that are no longer the latest, so it is safe to call repeatedly.
     """
     session_factory = request.app.state.session_factory
     settings = request.app.state.settings
 
-    # Find transcripts that have chunks without embeddings
+    # Find transcripts with unembedded chunks or no chunks at all
     try:
         async with session_factory() as session:
+            # Two kinds of gap, both re-queued:
+            #   1. chunks stored without an embedding (vector search can't see them);
+            #   2. a record's latest saved version that was never indexed at all —
+            #      its ingest was dropped (queue overflow, restart, a failed
+            #      fire-and-forget trigger), so search either misses the record or
+            #      still serves a superseded version's text.
             result = await session.execute(
                 text(
-                    "SELECT DISTINCT tc.transcript_id, COUNT(*) AS unindexed_count "
-                    "FROM transcript_chunk tc "
-                    "WHERE tc.embedding IS NULL "
-                    "GROUP BY tc.transcript_id "
-                    "ORDER BY unindexed_count DESC "
+                    "SELECT transcript_id, unindexed_count FROM ("
+                    "  SELECT tc.transcript_id, COUNT(*) AS unindexed_count "
+                    "  FROM transcript_chunk tc "
+                    "  WHERE tc.embedding IS NULL "
+                    "  GROUP BY tc.transcript_id "
+                    "  UNION "
+                    "  SELECT t.id AS transcript_id, 0 AS unindexed_count "
+                    "  FROM transcript t "
+                    "  WHERE t.version = ("
+                    "      SELECT MAX(t2.version) FROM transcript t2 "
+                    "      WHERE t2.record_id = t.record_id"
+                    "  ) "
+                    "    AND COALESCE(TRIM(t.corrected_text), '') <> '' "
+                    "    AND NOT EXISTS ("
+                    "      SELECT 1 FROM transcript_chunk c WHERE c.transcript_id = t.id"
+                    "    )"
+                    ") gaps "
+                    "ORDER BY unindexed_count DESC, transcript_id "
                     "LIMIT :limit"
                 ),
                 {"limit": body.limit},
@@ -823,7 +843,10 @@ async def rag_reindex(body: ReindexRequest, request: Request) -> ReindexResponse
     if not rows:
         return ReindexResponse(
             status="complete",
-            message="No transcripts with unindexed chunks found — all embeddings are present",
+            message=(
+                "No gaps found — every latest transcript version is indexed "
+                "and all embeddings are present"
+            ),
         )
 
     transcript_ids = [row[0] for row in rows]
