@@ -57,6 +57,10 @@ def create_chat_model(settings: Settings) -> ChatBedrock:
     return ChatBedrock(
         model_id=model_id,
         region_name=settings.aws_region,
+        # Q&A over the official record must answer the same question the same
+        # way. Unset, the provider's default sampling (temperature > 0) varied
+        # both the wording and the agent's tool choice between identical asks.
+        temperature=0,
         config=BotoConfig(
             retries={"max_attempts": 0, "mode": "standard"},
             read_timeout=read_timeout_s,
