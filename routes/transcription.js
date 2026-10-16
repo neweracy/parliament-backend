@@ -380,7 +380,30 @@ async function runTranscription(jobId, recordId, sittingId, audioPath, db, cache
   try {
     await reportProgress(10);
 
+    // Resolve the configured ASR engine + language from the singleton settings
+    // row so the pipeline uses the provider the admin selected (deepgram /
+    // khaya / hybrid). Falls back to Deepgram/English if the row is missing or
+    // the read fails, so a settings hiccup never blocks transcription.
+    let engine = "deepgram";
+    let language = "en";
+    try {
+      const settings = await db.query(
+        "SELECT transcription_engine, default_language FROM app_settings WHERE id = 1"
+      );
+      if (settings.rows.length > 0) {
+        engine = settings.rows[0].transcription_engine || engine;
+        language = settings.rows[0].default_language || language;
+      }
+    } catch (err) {
+      console.warn(
+        "Could not read transcription settings, defaulting to deepgram:",
+        err.message
+      );
+    }
+
     const result = await transcribeStoredAudio(audioPath, {
+      engine,
+      language,
       correlationId: jobId,
       onProgress: (percent) => {
         // Fire-and-forget: the pipeline is synchronous from our perspective and

@@ -6,7 +6,8 @@
  * Property 21: Settings validation
  * - accept iff value ∈ allowed set for each field
  * - transcription_engine ∈ {'deepgram', 'khaya', 'hybrid'}
- * - default_language ∈ {'en', 'tw', 'ga', 'ee', 'ha'}
+ * - default_language ∈ the per-engine set the route exports (Khaya uses the
+ *   ASR v3 3-letter codes, e.g. 'twi', 'ewe', 'gaa')
  * - auto_save_interval_s > 0
  *
  * Validates: Requirements 14.4
@@ -25,11 +26,9 @@ const settingsRoutes = require('../../routes/settings');
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const VALID_ENGINES = ['deepgram', 'khaya', 'hybrid'];
-const ALLOWED_LANGUAGES_BY_ENGINE = {
-  deepgram: ['en'],
-  khaya: ['tw', 'ga', 'ee', 'ha'],
-  hybrid: ['en', 'tw', 'ga', 'ee', 'ha'],
-};
+// Source the allowed per-engine languages from the route itself so this test
+// cannot drift from the real validation (e.g. the Khaya v2→v3 code change).
+const ALLOWED_LANGUAGES_BY_ENGINE = settingsRoutes.LANGUAGE_OPTIONS_BY_ENGINE;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
