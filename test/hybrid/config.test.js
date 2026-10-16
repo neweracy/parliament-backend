@@ -21,9 +21,9 @@ describe('lib/hybrid/config - loadHybridConfig', () => {
       assert.equal(config.padding, 0.25);
     });
 
-    it('returns default maxCallsPerModel 3 when HYBRID_MAX_CALLS_PER_MODEL is absent', () => {
+    it('returns default maxCallsPerModel 15 when HYBRID_MAX_CALLS_PER_MODEL is absent', () => {
       const config = loadHybridConfig({});
-      assert.equal(config.maxCallsPerModel, 3);
+      assert.equal(config.maxCallsPerModel, 15);
     });
 
     it('parses a valid maxCallsPerModel override', () => {
@@ -34,9 +34,9 @@ describe('lib/hybrid/config - loadHybridConfig', () => {
     it('warns and defaults maxCallsPerModel on a non-integer or < 1 value', () => {
       const warnings = [];
       const zero = loadHybridConfig({ HYBRID_MAX_CALLS_PER_MODEL: '0' }, (m) => warnings.push(m));
-      assert.equal(zero.maxCallsPerModel, 3);
+      assert.equal(zero.maxCallsPerModel, 15);
       const frac = loadHybridConfig({ HYBRID_MAX_CALLS_PER_MODEL: '2.5' }, (m) => warnings.push(m));
-      assert.equal(frac.maxCallsPerModel, 3);
+      assert.equal(frac.maxCallsPerModel, 15);
       assert.equal(warnings.length, 2);
       assert.ok(warnings.every((w) => w.includes('HYBRID_MAX_CALLS_PER_MODEL')));
     });
