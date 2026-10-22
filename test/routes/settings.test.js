@@ -309,19 +309,20 @@ describe('PATCH /api/settings', () => {
         rows: [{
           ...SAMPLE_SETTINGS_ROW,
           transcription_engine: 'khaya',
-          default_language: 'tw',
+          default_language: 'twi',
         }],
       },
     ]);
     const app = buildApp(db);
 
+    // 'twi' is a Khaya ASR v3 language code (the old 2-letter 'tw' was v2).
     const res = await request(app)
       .patch('/api/settings')
-      .send({ transcriptionEngine: 'khaya', defaultLanguage: 'tw' });
+      .send({ transcriptionEngine: 'khaya', defaultLanguage: 'twi' });
 
     assert.equal(res.status, 200);
     assert.equal(res.body.transcriptionEngine, 'khaya');
-    assert.equal(res.body.defaultLanguage, 'tw');
+    assert.equal(res.body.defaultLanguage, 'twi');
   });
 
   it('accepts English when the engine is hybrid', async () => {

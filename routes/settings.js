@@ -15,10 +15,15 @@ const requirePermission = require("../middleware/require-permission");
 // ─── Allowed Values ──────────────────────────────────────────────────────────
 
 const ALLOWED_TRANSCRIPTION_ENGINES = new Set(["deepgram", "khaya", "hybrid"]);
+// Khaya ASR v3 language codes (3-letter), verified against the live
+// GET /asr/v3/languages response. The earlier 2-letter codes (tw, ga, ee, ha)
+// were v2 codes and are rejected by v3, so a Khaya transcription with them
+// failed. Deepgram stays English-only.
+const KHAYA_LANGUAGES = ["twi", "atw", "fat", "ewe", "gaa", "dag", "nzi", "hau"];
 const LANGUAGE_OPTIONS_BY_ENGINE = {
   deepgram: ["en"],
-  khaya: ["tw", "ga", "ee", "ha"],
-  hybrid: ["en", "tw", "ga", "ee", "ha"],
+  khaya: KHAYA_LANGUAGES,
+  hybrid: ["en", ...KHAYA_LANGUAGES],
 };
 
 function getAllowedLanguagesForEngine(engine) {

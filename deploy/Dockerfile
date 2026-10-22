@@ -1,7 +1,12 @@
 # Stage 1: Build custom Caddy with rate limiting module
-FROM golang:1.25-alpine AS caddy-builder
+# Caddy v2.11+ requires Go >= 1.26 (the arm64 build failed on golang:1.25 with
+# GOTOOLCHAIN=local). xcaddy is pinned so the toolchain requirement can't drift
+# again from an unpinned @latest pull; GOTOOLCHAIN=auto lets Go fetch the exact
+# toolchain a future Caddy asks for instead of hard-failing.
+FROM golang:1.26-alpine AS caddy-builder
 WORKDIR /build
-RUN go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+ENV GOTOOLCHAIN=auto
+RUN go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.7
 RUN xcaddy build --with github.com/mholt/caddy-ratelimit
 # Binary output: /build/caddy
 
